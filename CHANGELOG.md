@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/i-am-logger/rav/compare/rav-v0.2.1...rav-v0.2.2) (2025-02-09)
+
+
+### Bug Fixes
+
+* automate PR management in github actions ([#7](https://github.com/i-am-logger/rav/issues/7)) ([e349335](https://github.com/i-am-logger/rav/commit/e349335a6d0da0a3afb2dc4f0c1c445dab887657))
+
 ## [0.2.1](https://github.com/i-am-logger/rav/compare/rav-v0.2.0...rav-v0.2.1) (2025-02-09)
 
 
