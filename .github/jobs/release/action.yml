@@ -1,6 +1,5 @@
-# .github/actions/jobs/release/action.yml
-name: 'Release'
-description: 'Create release using release-please'
+name: Release
+description: Create release using release-please
 
 runs:
   using: "composite"
@@ -23,10 +22,9 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ github.token }}
-        PR_NUMBER: ${{ steps.release.outputs.pr }}
       run: |
-        gh pr review $PR_NUMBER --approve
-        gh pr merge $PR_NUMBER --auto --merge
+        gh pr review --approve
+        gh pr merge --auto --merge
 
     - name: Upload to Release
       if: ${{ steps.release.outputs.release_created }}

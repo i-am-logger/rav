@@ -1,0 +1,20 @@
+name: Accept PR
+description: Accept PR
+runs:
+  using: "composite"
+  steps:
+    - name: Update PR to ready for review if build succeeds
+      if: ${{ success() }}
+      shell: bash
+      run: gh pr ready ${{ env.BRANCH_NAME }}
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        # GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Comment on PR if build fails
+      if: ${{ failure() }}
+      shell: bash
+      run: gh pr comment ${{ env.BRANCH_NAME }} --body "Build failed. Please review the logs and address the issues."
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+

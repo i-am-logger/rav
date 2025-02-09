@@ -9,10 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      
-      - uses: ./.github/jobs/build
+      - uses: ./.github/jobs/rust/build
 
   release:
     needs: build
@@ -24,7 +21,4 @@ jobs:
     
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      
       - uses: ./.github/jobs/release
