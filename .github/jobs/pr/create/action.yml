@@ -1,0 +1,33 @@
+name: Draft PR
+description: Create Draft PR
+
+runs:
+  using: "composite"
+  steps:
+    - name: Log branch name
+      shell: bash
+      run: |
+        echo "Branch Name: ${{ env.BRANCH_NAME }}"
+    
+    - name: Check if PR exists
+      shell: bash
+      run: |
+        PR_URL=$(gh pr list --head "${{ env.BRANCH_NAME }}" --json url --jq '.[0].url')
+        echo "PR_URL=$PR_URL" >> $GITHUB_ENV
+        if [ -z "$PR_URL" ]; then
+          echo "PR_EXISTS=false" >> $GITHUB_ENV
+        else
+          echo "PR_EXISTS=true" >> $GITHUB_ENV
+          echo "Existing PR: $PR_URL"
+        fi
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Create draft PR
+      shell: bash
+      if: ${{ env.PR_EXISTS == 'false' }}
+      run: |
+        gh pr create --title "Automated PR for ${{ env.BRANCH_NAME }}" --body "This is an automated PR." --base main --head ${{ env.BRANCH_NAME }} --draft
+        gh pr edit ${{ env.BRANCH_NAME }} --add-label "DRAFT"
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
