@@ -27,6 +27,8 @@ impl App {
     pub fn handle_key(&mut self, key: KeyCode) {
         match key {
             KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
+            KeyCode::Up => self.visualizer.increase_sensitivity(),
+            KeyCode::Down => self.visualizer.decrease_sensitivity(),
             _ => {}
         }
     }
