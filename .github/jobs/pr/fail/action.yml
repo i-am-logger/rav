@@ -10,4 +10,4 @@ runs:
         gh pr comment ${{ env.BRANCH_NAME }} --body "Build failed. Please review the logs and address the issues."
         gh pr edit ${{ env.BRANCH_NAME }} --add-label "BUILD FAILED"
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}

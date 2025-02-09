@@ -9,4 +9,4 @@ runs:
         gh pr ready ${{ env.BRANCH_NAME }}
         gh pr edit ${{ env.BRANCH_NAME }} --add-label "READY"
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}

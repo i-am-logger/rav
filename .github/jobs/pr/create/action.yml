@@ -3,7 +3,17 @@ description: Create Draft PR
 
 runs:
   using: "composite"
+  
   steps:
+    - name: Set branch name
+      id: vars
+      shell: bash
+      run: |
+        echo "BRANCH_NAME=${{ github.ref }}" | sed 's/refs\/heads\///' >> $GITHUB_ENV
+    - name: Log branch name
+      shell: bash
+      run: |
+        echo "Branch Name: ${{ env.BRANCH_NAME }}"
     - name: Log branch name
       shell: bash
       run: |
@@ -21,7 +31,7 @@ runs:
           echo "Existing PR: $PR_URL"
         fi
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
 
     - name: Create draft PR
       shell: bash
@@ -30,4 +40,4 @@ runs:
         gh pr create --title "Automated PR for ${{ env.BRANCH_NAME }}" --body "This is an automated PR." --base main --head ${{ env.BRANCH_NAME }} --draft
         gh pr edit ${{ env.BRANCH_NAME }} --add-label "DRAFT"
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}

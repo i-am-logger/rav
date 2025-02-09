@@ -1,6 +1,5 @@
-# .github/actions/jobs/release/action.yml
-name: 'Release'
-description: 'Create release using release-please'
+name: Release
+description: Create release using release-please
 
 runs:
   using: "composite"
