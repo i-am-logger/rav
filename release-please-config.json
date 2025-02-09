@@ -1,7 +1,7 @@
 {
   "bootstrap-sha": "__HEAD__",
   "packages": {
-    "rav": {
+    ".": {
       "release-type": "rust",
       "draft": false,
       "prerelease": false,
