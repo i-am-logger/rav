@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/i-am-logger/rav/compare/rav-v0.2.0...rav-v0.2.1) (2025-02-09)
+
+
+### Maintenance
+
+* Create dependabot.yml ([96fe04f](https://github.com/i-am-logger/rav/commit/96fe04f45de00319c8a4b50053259bd3f8a327ea))
+
 ## [0.2.0](https://github.com/i-am-logger/rav/compare/rav-v0.1.0...rav-v0.2.0) (2025-02-09)
 
 
