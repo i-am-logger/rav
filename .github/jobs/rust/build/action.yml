@@ -1,6 +1,5 @@
-# .github/actions/jobs/build/action.yml
-name: 'Build'
-description: 'Build the project using Nix'
+name: Build
+description: Build the project using Nix
 
 runs:
   using: "composite"

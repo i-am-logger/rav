@@ -7,6 +7,6 @@ runs:
       shell: bash
       run: |
         gh pr ready ${{ env.BRANCH_NAME }}
-        gh pr edit ${{ env.BRANCH_NAME }} --add-label "READY"
+        gh pr edit ${{ env.BRANCH_NAME }} --remove-label "DRAFT" --add-label "READY"
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}

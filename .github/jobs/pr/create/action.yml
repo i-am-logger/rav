@@ -3,12 +3,35 @@ description: Create Draft PR
 
 runs:
   using: "composite"
+  
   steps:
+
+    - name: Fetch main branch
+      shell: bash
+      run: |
+        git fetch origin main:main
+        git fetch origin ${{ github.head_ref }}:${{ github.head_ref }}
+
+    - name: Set branch name
+      id: vars
+      shell: bash
+      run: |
+        echo "BRANCH_NAME=${{ github.ref }}" | sed 's/refs\/heads\///' >> $GITHUB_ENV
+
     - name: Log branch name
       shell: bash
       run: |
         echo "Branch Name: ${{ env.BRANCH_NAME }}"
-    
+
+    - name: Fetch commit messages until main
+      shell: bash
+      run: |
+        COMMITS=$(git log main..${{ env.BRANCH_NAME }} --oneline --pretty=format:"%s")
+        PR_TITLE=$(echo "$COMMITS" | head -n 1)
+        PR_BODY=$(echo "$COMMITS" | tail -n +2 | sed 's/^/- /')
+        echo "PR_TITLE=$PR_TITLE" >> $GITHUB_ENV
+        echo "PR_BODY=$PR_BODY" >> $GITHUB_ENV
+
     - name: Check if PR exists
       shell: bash
       run: |
@@ -19,15 +42,37 @@ runs:
         else
           echo "PR_EXISTS=true" >> $GITHUB_ENV
           echo "Existing PR: $PR_URL"
+
+          LABELS=$(gh pr view --json labels --jq '.labels[].name')
+          echo "$LABELS" | while read -r label; do
+            # echo $label
+            gh pr edit --remove-label "$label"
+          done
+          gh pr edit --add-label "DRAFT"
         fi
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
+
 
     - name: Create draft PR
       shell: bash
       if: ${{ env.PR_EXISTS == 'false' }}
       run: |
-        gh pr create --title "Automated PR for ${{ env.BRANCH_NAME }}" --body "This is an automated PR." --base main --head ${{ env.BRANCH_NAME }} --draft
-        gh pr edit ${{ env.BRANCH_NAME }} --add-label "DRAFT"
+        if [ -n "$PR_BODY" ]; then
+        gh pr create --title "${{ env.PR_TITLE }}" --body "${{ env.PR_BODY }}" --base main --head ${{ env.BRANCH_NAME }} --draft
+        else
+        gh pr create --title "${{ env.PR_TITLE }}" --base main --head ${{ env.BRANCH_NAME }} --draft
+        fi
+        gh pr edit --add-label "DRAFT"
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
+
+    - name: Update draft PR
+      shell: bash
+      if: ${{ env.PR_EXISTS == 'true' }}
+      run: |
+        if [ -n "$PR_BODY" ]; then
+          gh pr edit --title "$PR_TITLE" --body "$PR_BODY"
+        else
+          gh pr edit --title "$PR_TITLE"
+        fi
