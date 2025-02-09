@@ -1,0 +1,41 @@
+# .github/actions/jobs/release/action.yml
+name: 'Release'
+description: 'Create release using release-please'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Download build output
+      uses: actions/download-artifact@v4
+      with:
+        name: build-output
+        path: dist
+    
+    - name: Run Release Please
+      id: release
+      uses: googleapis/release-please-action@v4
+      with:
+        config-file: release-please-config.json
+        token: ${{ github.token }}
+
+    - name: Auto-approve Release PR
+      if: steps.release.outputs.pr
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        PR_NUMBER: ${{ steps.release.outputs.pr }}
+      run: |
+        gh pr review $PR_NUMBER --approve
+        gh pr merge $PR_NUMBER --auto --merge
+
+    - name: Upload to Release
+      if: ${{ steps.release.outputs.release_created }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        TAG_NAME: ${{ steps.release.outputs.tag_name }}
+      run: |
+        chmod +x dist/*
+        for file in dist/*; do
+          gh release upload "$TAG_NAME" "$file"
+        done

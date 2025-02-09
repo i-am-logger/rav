@@ -1,0 +1,40 @@
+# .github/actions/jobs/build/action.yml
+name: 'Build'
+description: 'Build the project using Nix'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install Nix
+      uses: DeterminateSystems/nix-installer-action@main
+
+    - name: Setup Nix cache
+      uses: DeterminateSystems/magic-nix-cache-action@main
+
+    # Enable flake support
+    - name: Setup Nix Configuration
+      shell: bash
+      run: |
+        mkdir -p ~/.config/nix
+        echo "experimental-features = nix-command flakes" >> ~/.config/nix/nix.conf
+        echo "keep-derivations = true" >> ~/.config/nix/nix.conf
+        echo "keep-outputs = true" >> ~/.config/nix/nix.conf
+
+    - name: Build project
+      shell: bash
+      env:
+        CARGO_INCREMENTAL: "0"
+        CARGO_NET_RETRY: "10"
+        RUST_BACKTRACE: "1"
+        RUSTFLAGS: "-C target-cpu=native"
+      run: |
+        # Pre-fetch dependencies
+        nix flake prefetch
+        # Build with max cores and show progress
+        nix build --cores 0 -L --show-trace
+
+    - name: Store build output
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-output
+        path: result/bin/*
