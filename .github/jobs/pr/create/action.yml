@@ -34,6 +34,8 @@ runs:
 
     - name: Check if PR exists
       shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
         PR_URL=$(gh pr list --head "${{ env.BRANCH_NAME }}" --json url --jq '.[0].url')
         echo "PR_URL=$PR_URL" >> $GITHUB_ENV
@@ -50,11 +52,11 @@ runs:
           done
           gh pr edit --add-label "DRAFT"
         fi
-      env:
-        GITHUB_TOKEN: ${{ github.token }}
 
     - name: Create draft PR
       shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
       if: ${{ env.PR_EXISTS == 'false' }}
       run: |
         if [ -n "$PR_BODY" ]; then
@@ -63,11 +65,11 @@ runs:
         gh pr create --title "${{ env.PR_TITLE }}" --body "#-empty-" --base main --head ${{ env.BRANCH_NAME }} --draft
         fi
         gh pr edit --add-label "DRAFT"
-      env:
-        GITHUB_TOKEN: ${{ github.token }}
 
     - name: Update draft PR
       shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
       if: ${{ env.PR_EXISTS == 'true' }}
       run: |
         if [ -n "$PR_BODY" ]; then
