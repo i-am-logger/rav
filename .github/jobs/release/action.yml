@@ -1,15 +1,14 @@
 name: Release
 description: Create release using release-please
 
+outputs:
+  release_created:
+    description: "Whether a release was created"
+    value: ${{ steps.release.outputs.release_created }}
+
 runs:
   using: "composite"
-  steps:
-    - name: Download build output
-      uses: actions/download-artifact@v4
-      with:
-        name: build-output
-        path: dist
-    
+  steps:    
     - name: Run Release Please
       id: release
       uses: googleapis/release-please-action@v4
@@ -25,15 +24,29 @@ runs:
       run: |
         gh pr review --approve
         gh pr merge --squash --auto
+      
+    - name: Build New Version
+      uses: ./.github/jobs/rust/build
 
-    - name: Upload to Release
+    - name: Upload to Github Release
       if: ${{ steps.release.outputs.release_created }}
       shell: bash
       env:
         GITHUB_TOKEN: ${{ github.token }}
         TAG_NAME: ${{ steps.release.outputs.tag_name }}
       run: |
-        chmod +x dist/*
-        for file in dist/*; do
+        for file in result/bin/*; do
           gh release upload "$TAG_NAME" "$file"
         done
+
+    - name: Auto-approve Release PR
+      if: ${{ steps.release.outputs.release_created }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        PR_NUMBER: ${{ steps.release.outputs.pr.number }}
+
+      run: |
+        gh pr $PR_NUMBER review --approve
+        gh pr $PR_NUMBER merge --squash --auto
+
