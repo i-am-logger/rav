@@ -16,18 +16,23 @@ runs:
         config-file: release-please-config.json
         token: ${{ github.token }}
 
-    - name: DEBUG
-      shell: bash
-      run: |
-        echo '${{ toJSON(steps.release.outputs) }}'
-    #     exit 1
+    - name: Build New Version
+      if: steps.release.outputs.prs_created
+      uses: ./.github/jobs/rust/build
 
-    # - name: Build New Version
-    #   if: steps.release.outputs.prs_created
-    #   uses: ./.github/jobs/rust/build
+    - name: Auto-approve Release PR
+      if: steps.release.outputs.release_created != 'true'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        PR_NUMBER: ${{ steps.release.outputs.pr.number }}
+
+      run: |
+        gh pr $PR_NUMBER review --approve
+        gh pr $PR_NUMBER merge --squash --auto
 
     - name: Upload to Github Release
-      # if: success()
+      if: steps.release.outputs.release_created
       shell: bash
       env:
         GITHUB_TOKEN: ${{ github.token }}
@@ -39,13 +44,3 @@ runs:
           gh release upload "$TAG_NAME" "$file"
         done
 
-    - name: Auto-approve Release PR
-      if: success()
-      shell: bash
-      env:
-        GITHUB_TOKEN: ${{ github.token }}
-        PR_NUMBER: ${{ steps.release.outputs.pr.number }}
-
-      run: |
-        gh pr $PR_NUMBER review --approve
-        gh pr $PR_NUMBER merge --squash --auto
