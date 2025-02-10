@@ -21,7 +21,7 @@ runs:
       uses: ./.github/jobs/rust/build
 
     - name: Auto-approve Release PR
-      if: steps.release.outputs.release_created != 'true'
+      if: steps.release.outputs.pr.number
       shell: bash
       env:
         GITHUB_TOKEN: ${{ github.token }}
@@ -36,9 +36,8 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ github.token }}
+        TAG_NAME: ${{ steps.release.outputs.tag_name }}
       run: |
-        echo "TAG_NAME=$(git describe --tags --abbrev=0)" >> $GITHUB_OUTPUT
-        echo $TAG_NAME
         exit 1
         for file in result/bin/*; do
           gh release upload "$TAG_NAME" "$file"
