@@ -5,26 +5,21 @@ on:
     branches: [ main ]
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/jobs/rust/build
-
   release:
-    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
       id-token: write
-    
+    outputs:
+      released: ${{ steps.release.outputs.release_created }}
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/jobs/release
 
   publish:
     needs: release
+    if: ${{ needs.release.outputs.released == 'true' }}  # Only run if release was created
     runs-on: ubuntu-latest
     permissions:
       contents: read
