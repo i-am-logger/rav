@@ -5,6 +5,13 @@
 
 ### Bug Fixes
 
+* rav is now published to icrates.io ([#11](https://github.com/i-am-logger/rav/issues/11)) ([fa83705](https://github.com/i-am-logger/rav/commit/fa83705a9591a35017153999fa9349afebb2cb66))
+
+## [0.2.4](https://github.com/i-am-logger/rav/compare/rav-v0.2.3...rav-v0.2.4) (2025-02-10)
+
+
+### Bug Fixes
+
 * rav is now published to icrates.io ([#11](https://github.com/i-am-logger/rav/issues/11)) ([5473610](https://github.com/i-am-logger/rav/commit/54736101c213678b65cb6ea6e785de465ee9c45d))
 
 ## [0.2.3](https://github.com/i-am-logger/rav/compare/rav-v0.2.2...rav-v0.2.3) (2025-02-10)
