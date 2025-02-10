@@ -24,7 +24,7 @@ runs:
         GITHUB_TOKEN: ${{ github.token }}
       run: |
         gh pr review --approve
-        gh pr merge --auto --merge
+        gh pr merge --squash --auto
 
     - name: Upload to Release
       if: ${{ steps.release.outputs.release_created }}
