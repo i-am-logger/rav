@@ -1,0 +1,5 @@
+- script to
+  - delete the last release
+  - delete the tag
+  - git commit --ammend --no-edit
+  - git tag
