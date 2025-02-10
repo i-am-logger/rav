@@ -38,7 +38,6 @@ runs:
         GITHUB_TOKEN: ${{ github.token }}
         TAG_NAME: ${{ steps.release.outputs.tag_name }}
       run: |
-        exit 1
         for file in result/bin/*; do
           gh release upload "$TAG_NAME" "$file"
         done
