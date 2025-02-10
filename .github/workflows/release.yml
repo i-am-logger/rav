@@ -19,7 +19,7 @@ jobs:
 
   publish:
     needs: release
-    if: ${{ needs.release.outputs.released == 'true' }}  # Only run if release was created
+    if: ${{ needs.release.outputs.release_uploaded == 'true' }}  # Only run if release was created
     runs-on: ubuntu-latest
     permissions:
       contents: read
