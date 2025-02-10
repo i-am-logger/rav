@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.3](https://github.com/i-am-logger/rav/compare/rav-v0.2.2...rav-v0.2.3) (2025-02-10)
+
+
+### Maintenance
+
+* rav is now published to icrates.io ([#9](https://github.com/i-am-logger/rav/issues/9)) ([8314bcd](https://github.com/i-am-logger/rav/commit/8314bcd2cfca65f84727db8055e9d0a12e11e43c))
+
 ## [0.2.2](https://github.com/i-am-logger/rav/compare/rav-v0.2.1...rav-v0.2.2) (2025-02-09)
 
 
