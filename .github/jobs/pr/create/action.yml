@@ -60,7 +60,7 @@ runs:
         if [ -n "$PR_BODY" ]; then
         gh pr create --title "${{ env.PR_TITLE }}" --body "${{ env.PR_BODY }}" --base main --head ${{ env.BRANCH_NAME }} --draft
         else
-        gh pr create --title "${{ env.PR_TITLE }}" --base main --head ${{ env.BRANCH_NAME }} --draft
+        gh pr create --title "${{ env.PR_TITLE }}" --body "#-empty-" --base main --head ${{ env.BRANCH_NAME }} --draft
         fi
         gh pr edit --add-label "DRAFT"
       env:

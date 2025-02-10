@@ -22,3 +22,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/jobs/release
+
+  publish:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/jobs/rust/publish_crate
