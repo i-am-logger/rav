@@ -1,4 +1,6 @@
 .cargo/
 .direnv/
+.devenv/
 .rustup/
 /target
+.pre-commit-config.yaml

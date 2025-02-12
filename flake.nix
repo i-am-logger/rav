@@ -50,7 +50,7 @@
           toolchain =
             (pkgs.rustChannelOf {
               rustToolchain = ./rust-toolchain.toml;
-              sha256 = "sha256-vFu6RmeJsrTgIjNjNJrC+pVZh1fgr0wm7VX24RJQ14k=";
+              sha256 = "sha256-X4tJ8TywPTCAWazSdFdiAcn5jypsntG9m7T1iYjMdxc=";
             }).rust;
 
           package = pkgs.callPackage ./package.nix {
