@@ -8,7 +8,7 @@ version = "0.2.3"
 edition = "2024"
 
 [dependencies]
-anyhow = "1.0.95"
+anyhow = "1.0.97"
 cpal = "0.15.3"
 crossbeam-channel = "0.5.14"
 crossterm = "0.28.1"
