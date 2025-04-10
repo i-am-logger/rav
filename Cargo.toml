@@ -10,7 +10,7 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.95"
 cpal = "0.15.3"
-crossbeam-channel = "0.5.14"
+crossbeam-channel = "0.5.15"
 crossterm = "0.28.1"
 ratatui = "0.29.0"
 rustfft = "6.2.0"
