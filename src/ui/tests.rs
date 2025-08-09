@@ -154,11 +154,14 @@ mod ui_tests {
             .any(|cell| cell.symbol().contains("SPEEDY") || cell.symbol().contains("⚡"));
         assert!(title_found, "Title should be visible in the buffer");
 
-        // Verify tabs are present
+        // Verify tabs are present: check for any of the tab icons (single cell symbols)
         let tabs_found = buffer
             .content
             .iter()
-            .any(|cell| cell.symbol().contains("NEON") || cell.symbol().contains("BARS"));
+            .any(|cell| {
+                let s = cell.symbol();
+                s.contains("🎧") || s.contains("🌊") || s.contains("🔥") || s.contains("📊")
+            });
         assert!(tabs_found, "Tabs should be visible in the buffer");
     }
 

@@ -20,6 +20,8 @@ use ratatui::{
     widgets::{BarChart, Block, Borders, Chart, Dataset, Paragraph, Sparkline, Tabs},
     Frame, Terminal,
 };
+#[cfg(test)]
+use ratatui::backend::TestBackend;
 use std::{
     io::{self, Stdout},
     time::{Duration, Instant},
@@ -27,10 +29,16 @@ use std::{
 use tokio::time::interval;
 use tracing::{info, warn};
 
+// Use a backend type that adapts to tests vs runtime
+#[cfg(test)]
+type AppTerminal = Terminal<TestBackend>;
+#[cfg(not(test))]
+type AppTerminal = Terminal<CrosstermBackend<Stdout>>;
+
 pub struct App {
     config: Config,
     signal_processor: SignalProcessor,
-    terminal: Terminal<CrosstermBackend<Stdout>>,
+    terminal: AppTerminal,
     current_magnitudes: Vec<f32>,
     normalized_magnitudes: Vec<f32>,
     should_quit: bool,
@@ -50,8 +58,16 @@ pub struct App {
 impl App {
     pub fn new(config: Config, signal_processor: SignalProcessor) -> Self {
         // Initialize terminal
-        let backend = CrosstermBackend::new(io::stdout());
-        let terminal = Terminal::new(backend).expect("Failed to create terminal");
+        #[cfg(not(test))]
+        let terminal: AppTerminal = {
+            let backend = CrosstermBackend::new(io::stdout());
+            Terminal::new(backend).expect("Failed to create terminal")
+        };
+        #[cfg(test)]
+        let terminal: AppTerminal = {
+            let backend = TestBackend::new(80, 24);
+            Terminal::new(backend).expect("Failed to create test terminal")
+        };
 
         // Create v1 interface immediately since we default to professional mode
         let v1_interface = match SpeedyV1Interface::new(
@@ -97,9 +113,12 @@ impl App {
     }
 
     pub async fn run(&mut self, audio_receiver: Receiver<AudioData>) -> Result<()> {
-        // Setup terminal
-        enable_raw_mode()?;
-        io::stdout().execute(EnterAlternateScreen)?;
+        // Setup terminal (skip raw/alt screen in tests)
+        #[cfg(not(test))]
+        {
+            enable_raw_mode()?;
+            io::stdout().execute(EnterAlternateScreen)?;
+        }
         self.terminal.clear()?;
 
         info!("🎨 Starting UI main loop");
@@ -235,35 +254,46 @@ impl App {
         }
 
         // Cleanup terminal
-        disable_raw_mode()?;
-        io::stdout().execute(LeaveAlternateScreen)?;
-        self.terminal.show_cursor()?;
+        #[cfg(not(test))]
+        {
+            disable_raw_mode()?;
+            io::stdout().execute(LeaveAlternateScreen)?;
+            self.terminal.show_cursor()?;
+        }
 
         info!("👋 UI shut down complete");
         Ok(())
     }
 
     async fn handle_events(&mut self) -> Result<()> {
-        // Non-blocking event polling
-        if event::poll(Duration::from_millis(0))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    // Handle UI mode switching first
-                    if let KeyCode::Char('p') = key.code {
-                        self.toggle_professional_ui()?;
-                        return Ok(());
-                    }
+        #[cfg(test)]
+        {
+            // In tests, avoid crossterm I/O entirely to keep the loop running
+            return Ok(());
+        }
+        #[cfg(not(test))]
+        {
+            // Non-blocking event polling
+            if event::poll(Duration::from_millis(0))? {
+                if let Event::Key(key) = event::read()? {
+                    if key.kind == KeyEventKind::Press {
+                        // Handle UI mode switching first
+                        if let KeyCode::Char('p') = key.code {
+                            self.toggle_professional_ui()?;
+                            return Ok(());
+                        }
 
-                    // Handle events based on current UI mode
-                    if self.use_professional_ui {
-                        self.handle_professional_ui_events(key.code).await?
-                    } else {
-                        self.handle_simple_ui_events(key.code).await?
+                        // Handle events based on current UI mode
+                        if self.use_professional_ui {
+                            self.handle_professional_ui_events(key.code).await?
+                        } else {
+                            self.handle_simple_ui_events(key.code).await?
+                        }
                     }
                 }
             }
+            Ok(())
         }
-        Ok(())
     }
 
     /// Toggle between simple and professional UI modes

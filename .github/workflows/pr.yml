@@ -28,6 +28,10 @@ jobs:
     needs: manage-pr
     steps:
       - uses: actions/checkout@v4
+      - name: Install system dependencies (ALSA/Pulse)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libasound2-dev libpulse-dev pkg-config
       - name: Install Rust toolchain (stable)
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -45,7 +49,7 @@ jobs:
       - uses: actions/checkout@v4
         # with:
         #   ref: ${{ github.head_ref }}
-      - name: Build
+      - name: Build (Nix)
         uses: ./.github/jobs/rust/build
 
   manage-pr-success:
