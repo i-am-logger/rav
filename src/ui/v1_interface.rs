@@ -297,7 +297,7 @@ impl SpeedyV1Interface {
             VisualizationMode::Particles => "✦ PARTICLES",
         };
 
-        let title = format!(" ⚡ SPEEDY v1.0  {mode_text}  🎵");
+        let title = format!(" ⚡ RAV v{}  {}  🎵", env!("CARGO_PKG_VERSION"), mode_text);
 
         let paragraph = Paragraph::new(title)
             .style(
@@ -755,7 +755,7 @@ impl SpeedyV1Interface {
         // Help overlay with key bindings
         let help_text = vec![
             Line::from(Span::styled(
-                "⚡ SPEEDY v1.0 - HELP ⚡",
+                format!("⚡ RAV v{} - HELP ⚡", env!("CARGO_PKG_VERSION")),
                 Style::default()
                     .fg(self.current_theme.primary)
                     .add_modifier(Modifier::BOLD),

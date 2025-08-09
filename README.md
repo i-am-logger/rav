@@ -2,6 +2,12 @@
 
 Minimal, terminal-based audio visualizer built with Rust and ratatui.
 
+## Screenshot
+
+This is what RAV looks like in action:
+
+![RAV Spectrum Screenshot](docs/rav-screenshot.png)
+
 ## Develop
 
 Using Nix (recommended):

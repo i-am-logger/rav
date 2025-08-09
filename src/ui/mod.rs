@@ -567,7 +567,7 @@ impl App {
     fn draw_info(&self, f: &mut Frame, area: Rect) {
         let info_text = vec![
             Line::from(vec![Span::styled(
-                "🚀 Speedy Audio Visualizer",
+                "🚀 RAV Audio Visualizer",
                 Style::default().add_modifier(Modifier::BOLD),
             )]),
             Line::from(""),
@@ -719,6 +719,7 @@ impl App {
 
 // Standalone drawing functions to avoid borrowing issues
 pub fn draw_tabs(f: &mut Frame, area: Rect, selected_tab: usize) {
+    const VERSION: &str = env!("CARGO_PKG_VERSION");
     let tab_titles = [
         ("🎧 NEON BARS", Color::Rgb(255, 20, 147)),
         ("🌊 FLUID WAVE", Color::Rgb(0, 191, 255)),
@@ -752,7 +753,7 @@ pub fn draw_tabs(f: &mut Frame, area: Rect, selected_tab: usize) {
             Block::default()
                 .borders(Borders::ALL)
                 .title(Span::styled(
-                    "⚡ SPEEDY AUDIO VISUALIZER v1.0 ⚡",
+                    format!("⚡ RAV v{} ⚡", VERSION),
                     Style::default()
                         .fg(Color::Rgb(0, 255, 255))
                         .add_modifier(Modifier::BOLD),
@@ -1034,7 +1035,7 @@ fn draw_spectrum_standalone(f: &mut Frame, area: Rect, normalized_magnitudes: &[
 fn draw_info_standalone(f: &mut Frame, area: Rect, normalized_magnitudes: &[f32]) {
     let info_text = vec![
         Line::from(vec![Span::styled(
-            "🚀 Speedy Audio Visualizer",
+            "🚀 RAV Audio Visualizer",
             Style::default().add_modifier(Modifier::BOLD),
         )]),
         Line::from(""),
