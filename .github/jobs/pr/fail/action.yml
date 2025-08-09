@@ -3,10 +3,15 @@ description: Fail PR
 runs:
   using: "composite"
   steps:
+    - name: Derive branch name
+      id: vars
+      shell: bash
+      run: |
+        echo "BRANCH_NAME=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
     - name: Comment on PR and mark as draft if build fails
       shell: bash
       run: |
         gh pr comment ${{ env.BRANCH_NAME }} --body "Build failed. Please review the logs and address the issues."
         gh pr edit ${{ env.BRANCH_NAME }} --add-label "BUILD FAILED"
       env:
-        GITHUB_TOKEN: ${{ github.token }}
+        GH_TOKEN: ${{ github.token }}
