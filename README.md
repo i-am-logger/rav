@@ -1,4 +1,36 @@
-# Rust Audio Visualizer
-[![Release](https://github.com/i-am-logger/rav/actions/workflows/release.yml/badge.svg)](https://github.com/i-am-logger/rav/actions/workflows/release.yml)
+# RAV - Rust Audio Visualizer
 
-my play with rust and ratatui
+Minimal, terminal-based audio visualizer built with Rust and ratatui.
+
+## Develop
+
+Using Nix (recommended):
+
+```
+git clone git@github.com:i-am-logger/rav.git
+cd rav
+nix develop
+```
+
+Without Nix:
+- Install Rust (stable) and system deps: ALSA, PulseAudio dev headers, pkg-config, gcc.
+
+## Run
+
+- Debug:
+```
+cargo run --bin rav
+```
+- Release:
+```
+cargo build --release
+./target/release/rav
+```
+
+## Tests
+```
+cargo test
+```
+
+## License
+See LICENSE.
