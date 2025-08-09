@@ -2,7 +2,7 @@
 // This demonstrates the quality improvement over the old interface
 
 use ratatui::{backend::TestBackend, Frame, Terminal};
-use speedy::{
+use rav::{
     config::Config,
     signal::SignalProcessor,
     testing::{audio_generator::AudioGenerator, VisualTester},

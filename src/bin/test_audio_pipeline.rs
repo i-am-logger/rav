@@ -1,5 +1,5 @@
 use anyhow::Result;
-use speedy::{audio::AudioCapture, config::Config, signal::SignalProcessor};
+use rav::{audio::AudioCapture, config::Config, signal::SignalProcessor};
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
 use tracing_subscriber;
