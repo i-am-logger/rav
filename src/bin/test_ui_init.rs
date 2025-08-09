@@ -1,10 +1,6 @@
 // Simple test to verify Professional UI initialization works correctly
-use speedy::{
-    config::Config, 
-    signal::SignalProcessor,
-    ui::SpeedyV1Interface
-};
-use tracing::{info, warn, error};
+use rav::{config::Config, signal::SignalProcessor, ui::SpeedyV1Interface};
+use tracing::{error, info};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize basic logging
@@ -22,7 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let signal_processor = SignalProcessor::new(
         config.audio.sample_rate,
         config.display.frequency_bands,
-        config.display.frequency_range.clone(),
+        config.display.frequency_range,
     );
     info!("✅ SignalProcessor created successfully");
 

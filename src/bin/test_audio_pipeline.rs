@@ -2,7 +2,6 @@ use anyhow::Result;
 use rav::{audio::AudioCapture, config::Config, signal::SignalProcessor};
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
-use tracing_subscriber;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -32,7 +31,7 @@ async fn main() -> Result<()> {
     let mut signal_processor = SignalProcessor::new(
         config.audio.sample_rate,
         config.display.frequency_bands,
-        config.display.frequency_range.clone(),
+        config.display.frequency_range,
     );
 
     info!("✅ Signal processor initialized");

@@ -9,7 +9,7 @@ use tracing::{debug, error, info};
 /// Custom audio monitor device for comprehensive testing
 pub struct AudioMonitor {
     generator: AudioGenerator,
-    host: Host,
+    _host: Host,
     device: Option<Device>,
     stream: Option<Stream>,
     config: StreamConfig,
@@ -70,7 +70,7 @@ impl AudioMonitor {
 
         Ok(AudioMonitor {
             generator,
-            host,
+            _host: host,
             device: Some(device),
             stream: None,
             config: stream_config,

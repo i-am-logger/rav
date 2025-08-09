@@ -119,10 +119,7 @@ impl Theme {
 
     /// Check if theme should use glow effects
     pub fn use_glow(self) -> bool {
-        match self {
-            Theme::CyberNeon | Theme::RetroWave => true,
-            _ => false,
-        }
+        matches!(self, Theme::CyberNeon | Theme::RetroWave)
     }
 
     /// Get the glow intensity for effects

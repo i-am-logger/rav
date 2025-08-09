@@ -97,8 +97,8 @@ impl AudioGenerator {
 
         for (freq, amp) in frequencies.iter().zip(amplitudes.iter()) {
             let mut time = self.time;
-            for i in 0..samples {
-                signal[i] += amp * (2.0 * PI * freq * time).sin();
+            for item in signal.iter_mut().take(samples) {
+                *item += amp * (2.0 * PI * freq * time).sin();
                 time += dt;
             }
         }
@@ -120,9 +120,9 @@ impl AudioGenerator {
             let freq_mult = 2.0_f32.powi(octave);
             let amp_mult = 1.0 / freq_mult.sqrt();
 
-            for i in 0..samples {
+            for sample in signal.iter_mut().take(samples) {
                 let noise_val = rng.gen::<f32>() * 2.0 - 1.0;
-                signal[i] += amplitude * amp_mult * noise_val;
+                *sample += amplitude * amp_mult * noise_val;
             }
         }
 
@@ -329,7 +329,7 @@ mod tests {
         let magnitudes = AudioGenerator::test_spectrum_magnitudes(32);
 
         assert_eq!(magnitudes.len(), 32);
-        assert!(magnitudes.iter().all(|&x| x >= 0.0 && x <= 1.0));
+        assert!(magnitudes.iter().all(|&x| (0.0..=1.0).contains(&x)));
 
         // Bass should generally be stronger than highs
         let bass_avg = magnitudes[0..3].iter().sum::<f32>() / 3.0;

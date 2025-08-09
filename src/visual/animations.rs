@@ -15,6 +15,12 @@ pub struct AnimationEngine {
     pub transition_speed: f32,
 }
 
+impl Default for AnimationEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AnimationEngine {
     pub fn new() -> Self {
         Self {

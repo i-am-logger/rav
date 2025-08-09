@@ -1,17 +1,27 @@
 // Quality Optimizer - Generates corrective and preventive actions for quality improvement
 
-use super::{QualityAssessment, QualityControlActions, ColorEnhancement, AnimationAdjustment, AudioOptimization, ParameterChange, QualityTrend, UrgencyLevel};
+use super::{
+    AnimationAdjustment, AudioOptimization, ColorEnhancement, ParameterChange, QualityAssessment,
+    QualityControlActions, QualityTrend, UrgencyLevel,
+};
 use tracing::info;
 
+#[allow(dead_code)]
 pub struct QualityOptimizer {
     // Optimizer state for learning
     color_enhancement_effectiveness: f32,
     animation_adjustment_effectiveness: f32,
     audio_optimization_effectiveness: f32,
-    
+
     // Adaptation parameters
     min_improvement_threshold: f32,
     aggressive_mode: bool,
+}
+
+impl Default for QualityOptimizer {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl QualityOptimizer {
@@ -24,77 +34,104 @@ impl QualityOptimizer {
             aggressive_mode: false,
         }
     }
-    
+
     /// Generate corrective actions based on current quality assessment
-    pub fn generate_corrective_actions(&mut self, assessment: &QualityAssessment) -> QualityControlActions {
+    pub fn generate_corrective_actions(
+        &mut self,
+        assessment: &QualityAssessment,
+    ) -> QualityControlActions {
         let mut actions = QualityControlActions::default();
-        
+
         // Adjust aggressiveness based on urgency
         self.aggressive_mode = matches!(assessment.urgency_level, UrgencyLevel::Critical);
-        
+
         // Generate color enhancements
         if assessment.color_variety_gap > self.min_improvement_threshold {
-            actions.color_enhancements = self.generate_color_enhancements(assessment.color_variety_gap);
+            actions.color_enhancements =
+                self.generate_color_enhancements(assessment.color_variety_gap);
         }
-        
+
         // Generate animation adjustments
         if assessment.animation_smoothness_gap > self.min_improvement_threshold {
-            actions.animation_adjustments = self.generate_animation_adjustments(assessment.animation_smoothness_gap);
+            actions.animation_adjustments =
+                self.generate_animation_adjustments(assessment.animation_smoothness_gap);
         }
-        
+
         // Generate audio optimizations
         if assessment.audio_responsiveness_gap > self.min_improvement_threshold {
-            actions.audio_optimizations = self.generate_audio_optimizations(assessment.audio_responsiveness_gap);
+            actions.audio_optimizations =
+                self.generate_audio_optimizations(assessment.audio_responsiveness_gap);
         }
-        
+
         // Generate parameter changes for systemic improvements
         actions.parameter_changes = self.generate_parameter_changes(assessment);
-        
+
         info!(
             "🔧 Generated {} corrective actions (Color: {}, Animation: {}, Audio: {}, Params: {})",
-            actions.color_enhancements.len() + actions.animation_adjustments.len() + 
-            actions.audio_optimizations.len() + actions.parameter_changes.len(),
+            actions.color_enhancements.len()
+                + actions.animation_adjustments.len()
+                + actions.audio_optimizations.len()
+                + actions.parameter_changes.len(),
             actions.color_enhancements.len(),
             actions.animation_adjustments.len(),
             actions.audio_optimizations.len(),
             actions.parameter_changes.len()
         );
-        
+
         actions
     }
-    
+
     /// Generate preventive actions based on predicted issues
-    pub fn generate_preventive_actions(&self, predicted_issues: &[PredictedIssue]) -> QualityControlActions {
+    pub fn generate_preventive_actions(
+        &self,
+        predicted_issues: &[PredictedIssue],
+    ) -> QualityControlActions {
         let mut actions = QualityControlActions::default();
-        
+
         for issue in predicted_issues {
             match issue.issue_type {
                 PredictedIssueType::ColorDegradation => {
-                    actions.color_enhancements.push(ColorEnhancement::IncreaseSpectrum);
-                    actions.parameter_changes.push(ParameterChange::UpdateColorPalette);
+                    actions
+                        .color_enhancements
+                        .push(ColorEnhancement::IncreaseSpectrum);
+                    actions
+                        .parameter_changes
+                        .push(ParameterChange::UpdateColorPalette);
                 }
                 PredictedIssueType::AnimationStutter => {
-                    actions.animation_adjustments.push(AnimationAdjustment::SmoothFrameTiming);
-                    actions.parameter_changes.push(ParameterChange::OptimizeBuffering);
+                    actions
+                        .animation_adjustments
+                        .push(AnimationAdjustment::SmoothFrameTiming);
+                    actions
+                        .parameter_changes
+                        .push(ParameterChange::OptimizeBuffering);
                 }
                 PredictedIssueType::AudioLatency => {
-                    actions.audio_optimizations.push(AudioOptimization::ReduceLatency);
-                    actions.audio_optimizations.push(AudioOptimization::EnhanceResponseTime);
+                    actions
+                        .audio_optimizations
+                        .push(AudioOptimization::ReduceLatency);
+                    actions
+                        .audio_optimizations
+                        .push(AudioOptimization::EnhanceResponseTime);
                 }
                 PredictedIssueType::PerformanceDrop => {
-                    actions.parameter_changes.push(ParameterChange::OptimizeBuffering);
-                    actions.animation_adjustments.push(AnimationAdjustment::OptimizeDecay);
+                    actions
+                        .parameter_changes
+                        .push(ParameterChange::OptimizeBuffering);
+                    actions
+                        .animation_adjustments
+                        .push(AnimationAdjustment::OptimizeDecay);
                 }
             }
         }
-        
+
         actions
     }
-    
+
     /// Generate color enhancement actions
     fn generate_color_enhancements(&self, color_gap: f32) -> Vec<ColorEnhancement> {
         let mut enhancements = Vec::new();
-        
+
         // Prioritize enhancements based on gap size and effectiveness
         if color_gap > 0.4 || self.aggressive_mode {
             // Critical color variety issues - apply multiple enhancements
@@ -109,14 +146,14 @@ impl QualityOptimizer {
             // Minor issues - gentle improvements
             enhancements.push(ColorEnhancement::AddGradients);
         }
-        
+
         enhancements
     }
-    
+
     /// Generate animation adjustment actions
     fn generate_animation_adjustments(&self, animation_gap: f32) -> Vec<AnimationAdjustment> {
         let mut adjustments = Vec::new();
-        
+
         if animation_gap > 0.3 || self.aggressive_mode {
             // Critical animation issues
             adjustments.push(AnimationAdjustment::SmoothFrameTiming);
@@ -130,14 +167,14 @@ impl QualityOptimizer {
             // Minor issues
             adjustments.push(AnimationAdjustment::ImproveInterpolation);
         }
-        
+
         adjustments
     }
-    
+
     /// Generate audio optimization actions
     fn generate_audio_optimizations(&self, audio_gap: f32) -> Vec<AudioOptimization> {
         let mut optimizations = Vec::new();
-        
+
         if audio_gap > 0.4 || self.aggressive_mode {
             // Critical audio issues
             optimizations.push(AudioOptimization::IncreaseSensitivity);
@@ -152,45 +189,46 @@ impl QualityOptimizer {
             // Minor issues
             optimizations.push(AudioOptimization::ImproveNormalization);
         }
-        
+
         optimizations
     }
-    
+
     /// Generate parameter change actions
     fn generate_parameter_changes(&self, assessment: &QualityAssessment) -> Vec<ParameterChange> {
         let mut changes = Vec::new();
-        
+
         // Sensitivity adjustments based on audio responsiveness
         if assessment.audio_responsiveness_gap > 0.2 {
             let sensitivity_increase = assessment.audio_responsiveness_gap * 0.5;
             changes.push(ParameterChange::AdjustSensitivity(sensitivity_increase));
         }
-        
+
         // Decay rate adjustments for better animation
         if assessment.animation_smoothness_gap > 0.15 {
             let decay_adjustment = -assessment.animation_smoothness_gap * 0.02; // Slower decay
             changes.push(ParameterChange::ModifyDecayRate(decay_adjustment));
         }
-        
+
         // Color palette updates for variety issues
         if assessment.color_variety_gap > 0.3 {
             changes.push(ParameterChange::UpdateColorPalette);
         }
-        
+
         // Performance optimizations for degrading trends
         if assessment.quality_trend == QualityTrend::Degrading {
             changes.push(ParameterChange::OptimizeBuffering);
         }
-        
+
         // Always consider buffering optimization for high urgency
         if matches!(assessment.urgency_level, UrgencyLevel::Critical) {
             changes.push(ParameterChange::OptimizeBuffering);
         }
-        
+
         changes
     }
-    
+
     /// Update optimizer effectiveness based on results
+    #[allow(dead_code)]
     pub fn update_effectiveness(&mut self, action_type: ActionType, improvement: f32) {
         let learning_rate = 0.1;
         let effectiveness = match action_type {
@@ -198,13 +236,14 @@ impl QualityOptimizer {
             ActionType::Animation => &mut self.animation_adjustment_effectiveness,
             ActionType::Audio => &mut self.audio_optimization_effectiveness,
         };
-        
+
         // Update effectiveness with exponential moving average
         *effectiveness = *effectiveness * (1.0 - learning_rate) + improvement * learning_rate;
         *effectiveness = effectiveness.clamp(0.1, 1.0);
     }
-    
+
     /// Get current optimizer status
+    #[allow(dead_code)]
     pub fn status(&self) -> OptimizerStatus {
         OptimizerStatus {
             color_effectiveness: self.color_enhancement_effectiveness,
@@ -229,11 +268,14 @@ pub enum PredictedIssueType {
 pub struct PredictedIssue {
     pub issue_type: PredictedIssueType,
     pub confidence: f32,
+    #[allow(dead_code)]
     pub severity: f32,
+    #[allow(dead_code)]
     pub time_to_issue: std::time::Duration,
 }
 
 /// Action types for effectiveness tracking
+#[allow(dead_code)]
 pub enum ActionType {
     Color,
     Animation,
@@ -241,6 +283,7 @@ pub enum ActionType {
 }
 
 /// Optimizer status for monitoring
+#[allow(dead_code)]
 pub struct OptimizerStatus {
     pub color_effectiveness: f32,
     pub animation_effectiveness: f32,

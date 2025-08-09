@@ -1,10 +1,7 @@
 // Comprehensive visual testing for Speedy v1.0 development
 // Tests all visualization modes with various frequency scenarios
 
-use rav::{
-    config::Config,
-    testing::{audio_generator::AudioGenerator, VisualTester},
-};
+use rav::testing::{audio_generator::AudioGenerator, VisualTester};
 use std::fs;
 
 fn main() {
@@ -56,12 +53,12 @@ fn main() {
         (3, "System Info"),
     ];
 
-let mut all_results: Vec<(String, Vec<(String, rav::testing::VisualAnalysis)>)> = Vec::new();
+    let mut all_results: Vec<(String, Vec<(String, rav::testing::VisualAnalysis)>)> = Vec::new();
     let mut mode_scores: std::collections::HashMap<String, f32> = std::collections::HashMap::new();
 
     // Test each visualization mode with each audio scenario
     for (mode_id, mode_name) in &visualization_modes {
-        println!("🎨 Testing {} Mode", mode_name);
+        println!("🎨 Testing {mode_name} Mode");
         println!("{}", "=".repeat(50));
 
         let mut mode_total = 0.0;
@@ -89,7 +86,7 @@ let mut all_results: Vec<(String, Vec<(String, rav::testing::VisualAnalysis)>)> 
         mode_scores.insert(mode_name.to_string(), mode_average);
         all_results.push((mode_name.to_string(), scenario_results));
 
-        println!("  📈 Mode Average: {:.1}/100\n", mode_average);
+        println!("  📈 Mode Average: {mode_average:.1}/100\n");
     }
 
     // Frequency response testing
@@ -189,7 +186,7 @@ fn generate_classical_spectrum(bands: usize) -> Vec<f32> {
             // Classical: Natural frequency distribution with rich harmonics
             let fundamental = 0.4 + 0.3 * (freq_ratio * 4.0).sin();
             let harmonics = 0.1 * (freq_ratio * 8.0).sin() + 0.05 * (freq_ratio * 16.0).sin();
-            (fundamental + harmonics).min(1.0).max(0.0)
+            (fundamental + harmonics).clamp(0.0, 1.0)
         })
         .collect()
 }
@@ -295,7 +292,7 @@ fn generate_frequency_range_test(start_ratio: f32, end_ratio: f32, bands: usize)
 }
 
 fn generate_comprehensive_report(
-    results: &[(String, Vec<(String, speedy::testing::VisualAnalysis)>)],
+    results: &[(String, Vec<(String, rav::testing::VisualAnalysis)>)],
     mode_scores: &std::collections::HashMap<String, f32>,
 ) {
     let mut report = String::new();
@@ -317,16 +314,16 @@ fn generate_comprehensive_report(
         } else {
             "🔴 Poor"
         };
-        report.push_str(&format!("- **{}**: {:.1}/100 {}\n", mode, score, status));
+        report.push_str(&format!("- **{mode}**: {score:.1}/100 {status}\n"));
     }
 
     report.push_str("\n## Detailed Analysis by Mode\n\n");
 
     for (mode_name, scenarios) in results {
-        report.push_str(&format!("### {} Mode\n\n", mode_name));
+        report.push_str(&format!("### {mode_name} Mode\n\n"));
 
         for (scenario, analysis) in scenarios {
-            report.push_str(&format!("#### {} Scenario\n", scenario));
+            report.push_str(&format!("#### {scenario} Scenario\n"));
             report.push_str(&format!(
                 "- Quality Score: {:.1}/100\n",
                 analysis.visual_quality_score
@@ -341,28 +338,28 @@ fn generate_comprehensive_report(
             if !analysis.issues.is_empty() {
                 report.push_str("- Issues:\n");
                 for issue in &analysis.issues {
-                    report.push_str(&format!("  - ❌ {}\n", issue));
+                    report.push_str(&format!("  - ❌ {issue}\n"));
                 }
             }
 
             if !analysis.recommendations.is_empty() {
                 report.push_str("- Recommendations:\n");
                 for rec in &analysis.recommendations {
-                    report.push_str(&format!("  - 💡 {}\n", rec));
+                    report.push_str(&format!("  - 💡 {rec}\n"));
                 }
             }
-            report.push_str("\n");
+            report.push('\n');
         }
     }
 
     // Save report
     if let Err(e) = fs::create_dir_all("test_outputs") {
-        eprintln!("Warning: Could not create test_outputs directory: {}", e);
+        eprintln!("Warning: Could not create test_outputs directory: {e}");
         return;
     }
 
     if let Err(e) = fs::write("test_outputs/comprehensive_analysis.md", report) {
-        eprintln!("Warning: Could not save comprehensive report: {}", e);
+        eprintln!("Warning: Could not save comprehensive report: {e}");
     } else {
         println!("📊 Comprehensive analysis saved to test_outputs/comprehensive_analysis.md");
     }

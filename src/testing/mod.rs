@@ -37,7 +37,7 @@ impl VisualTester {
         let signal_processor = SignalProcessor::new(
             config.audio.sample_rate,
             config.display.frequency_bands,
-            config.display.frequency_range.clone(),
+            config.display.frequency_range,
         );
 
         Self {
@@ -163,7 +163,7 @@ impl VisualTester {
                     }
                     _ => '?',
                 };
-                write!(&mut output, "{}", color_char).unwrap();
+                write!(&mut output, "{color_char}").unwrap();
             }
 
             writeln!(&mut output).unwrap();
@@ -215,7 +215,7 @@ impl VisualAnalysis {
                     Color::Cyan => "cyan",
                     Color::White => "white",
                     Color::Rgb(r, g, b) => {
-                        unique_colors.insert(format!("rgb({},{},{})", r, g, b));
+                        unique_colors.insert(format!("rgb({r},{g},{b})"));
                         "rgb"
                     }
                     _ => "other",
@@ -320,14 +320,14 @@ impl VisualAnalysis {
 
         writeln!(&mut report, "Color Distribution:").unwrap();
         for (color, count) in &self.color_distribution {
-            writeln!(&mut report, "  {}: {}", color, count).unwrap();
+            writeln!(&mut report, "  {color}: {count}").unwrap();
         }
         writeln!(&mut report).unwrap();
 
         if !self.issues.is_empty() {
             writeln!(&mut report, "Issues Found:").unwrap();
             for issue in &self.issues {
-                writeln!(&mut report, "  ❌ {}", issue).unwrap();
+                writeln!(&mut report, "  ❌ {issue}").unwrap();
             }
             writeln!(&mut report).unwrap();
         }
@@ -335,7 +335,7 @@ impl VisualAnalysis {
         if !self.recommendations.is_empty() {
             writeln!(&mut report, "Recommendations:").unwrap();
             for rec in &self.recommendations {
-                writeln!(&mut report, "  💡 {}", rec).unwrap();
+                writeln!(&mut report, "  💡 {rec}").unwrap();
             }
             writeln!(&mut report).unwrap();
         }

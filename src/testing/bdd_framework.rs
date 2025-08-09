@@ -28,7 +28,13 @@ pub struct BDDTestResult {
 pub struct BDDTestFramework {
     audio_generator: AudioGenerator,
     visual_analyzer: VisualAnalyzer,
-    test_results: HashMap<String, BDDTestResult>,
+    _test_results: HashMap<String, BDDTestResult>,
+}
+
+impl Default for BDDTestFramework {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl BDDTestFramework {
@@ -36,7 +42,7 @@ impl BDDTestFramework {
         Self {
             audio_generator: AudioGenerator::new(44100.0),
             visual_analyzer: VisualAnalyzer::new(),
-            test_results: HashMap::new(),
+            _test_results: HashMap::new(),
         }
     }
 
@@ -102,7 +108,7 @@ impl BDDTestFramework {
 
         for mode in &modes {
             for (scenario_name, magnitudes) in &audio_scenarios {
-                let test_name = format!("{:?} Mode - {}", mode, scenario_name);
+                let test_name = format!("{mode:?} Mode - {scenario_name}");
                 let result = self.test_visualization_quality(*mode, magnitudes.clone(), &test_name);
                 results.push(result);
             }
@@ -116,22 +122,18 @@ impl BDDTestFramework {
         println!("\n👤 Testing User Experience Scenarios");
         println!("====================================");
 
-        let mut results = Vec::new();
-
-        // Theme switching test
-        results.push(self.test_theme_switching_experience());
-
-        // Mode cycling test
-        results.push(self.test_mode_cycling_experience());
-
-        // Responsiveness test
-        results.push(self.test_responsiveness_experience());
-
-        // Visual consistency test
-        results.push(self.test_visual_consistency_experience());
-
-        // Color accessibility test
-        results.push(self.test_color_accessibility());
+        let results = vec![
+            // Theme switching test
+            self.test_theme_switching_experience(),
+            // Mode cycling test
+            self.test_mode_cycling_experience(),
+            // Responsiveness test
+            self.test_responsiveness_experience(),
+            // Visual consistency test
+            self.test_visual_consistency_experience(),
+            // Color accessibility test
+            self.test_color_accessibility(),
+        ];
 
         results
     }
@@ -141,19 +143,16 @@ impl BDDTestFramework {
         println!("\n⚡ Testing Performance Scenarios");
         println!("===============================");
 
-        let mut results = Vec::new();
-
-        // Frame rate consistency
-        results.push(self.test_frame_rate_consistency());
-
-        // Memory usage
-        results.push(self.test_memory_usage());
-
-        // CPU efficiency
-        results.push(self.test_cpu_efficiency());
-
-        // Large dataset handling
-        results.push(self.test_large_dataset_handling());
+        let results = vec![
+            // Frame rate consistency
+            self.test_frame_rate_consistency(),
+            // Memory usage
+            self.test_memory_usage(),
+            // CPU efficiency
+            self.test_cpu_efficiency(),
+            // Large dataset handling
+            self.test_large_dataset_handling(),
+        ];
 
         results
     }
@@ -163,19 +162,16 @@ impl BDDTestFramework {
         println!("\n🔍 Testing Edge Case Scenarios");
         println!("==============================");
 
-        let mut results = Vec::new();
-
-        // Extreme values
-        results.push(self.test_extreme_values());
-
-        // Terminal resize
-        results.push(self.test_terminal_resize());
-
-        // Rapid mode switching
-        results.push(self.test_rapid_mode_switching());
-
-        // Zero data handling
-        results.push(self.test_zero_data_handling());
+        let results = vec![
+            // Extreme values
+            self.test_extreme_values(),
+            // Terminal resize
+            self.test_terminal_resize(),
+            // Rapid mode switching
+            self.test_rapid_mode_switching(),
+            // Zero data handling
+            self.test_zero_data_handling(),
+        ];
 
         results
     }
@@ -185,16 +181,14 @@ impl BDDTestFramework {
         println!("\n🔗 Testing Integration Scenarios");
         println!("================================");
 
-        let mut results = Vec::new();
-
-        // Real audio simulation
-        results.push(self.test_real_audio_simulation());
-
-        // Multi-mode workflow
-        results.push(self.test_multi_mode_workflow());
-
-        // Extended usage session
-        results.push(self.test_extended_usage_session());
+        let results = vec![
+            // Real audio simulation
+            self.test_real_audio_simulation(),
+            // Multi-mode workflow
+            self.test_multi_mode_workflow(),
+            // Extended usage session
+            self.test_extended_usage_session(),
+        ];
 
         results
     }
@@ -210,11 +204,8 @@ impl BDDTestFramework {
         let mut terminal = Terminal::new(backend).unwrap();
 
         let config = Config::default();
-        let signal_processor = SignalProcessor::new(
-            config.audio.sample_rate,
-            64,
-            config.display.frequency_range.clone(),
-        );
+        let signal_processor =
+            SignalProcessor::new(config.audio.sample_rate, 64, config.display.frequency_range);
 
         // Create interface without terminal (we'll use external terminal)
         let mut interface = create_interface_for_testing(config, signal_processor, mode);
@@ -252,14 +243,13 @@ impl BDDTestFramework {
         }
 
         if ux_score < 0.7 {
-            issues.push(format!("UX quality below threshold: {:.2}", ux_score));
+            issues.push(format!("UX quality below threshold: {ux_score:.2}"));
             recommendations.push("Enhance visual clarity and readability".to_string());
         }
 
         if performance_score < 0.8 {
             issues.push(format!(
-                "Performance below threshold: {:.2}",
-                performance_score
+                "Performance below threshold: {performance_score:.2}"
             ));
             recommendations.push("Optimize rendering efficiency".to_string());
         }
@@ -691,17 +681,17 @@ impl BDDTestFramework {
         let avg_overall =
             results.iter().map(|r| r.overall_score).sum::<f32>() / results.len() as f32;
 
-        println!("Average Visual Quality: {:.2}", avg_visual);
-        println!("Average UX Quality: {:.2}", avg_ux);
-        println!("Average Performance: {:.2}", avg_perf);
-        println!("Average Overall Score: {:.2}", avg_overall);
+        println!("Average Visual Quality: {avg_visual:.2}");
+        println!("Average UX Quality: {avg_ux:.2}");
+        println!("Average Performance: {avg_perf:.2}");
+        println!("Average Overall Score: {avg_overall:.2}");
 
         println!("\n🚨 CRITICAL ISSUES:");
         for result in results {
             if !result.passed {
                 println!("  ❌ {}: {:.2}", result.scenario, result.overall_score);
                 for issue in &result.issues {
-                    println!("     - {}", issue);
+                    println!("     - {issue}");
                 }
             }
         }
@@ -735,10 +725,7 @@ impl BDDTestFramework {
                 );
             }
             if avg_overall < 0.75 {
-                println!(
-                    "   - Increase overall score to 0.75+ (currently {:.2})",
-                    avg_overall
-                );
+                println!("   - Increase overall score to 0.75+ (currently {avg_overall:.2})");
             }
         }
     }

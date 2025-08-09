@@ -6,7 +6,6 @@ use tracing::{error, info, warn};
 
 use rav::{
     config::Config,
-    signal::SignalProcessor,
     testing::{
         audio_monitor::{AudioMonitor, TestProfile},
         bdd_framework::BDDTestFramework,
@@ -61,9 +60,9 @@ async fn main() -> Result<()> {
     std::fs::create_dir_all(&args.output_dir)?;
 
     // Initialize components
-    let mut audio_monitor = AudioMonitor::new()?;
-    let mut bdd_framework = BDDTestFramework::new();
-    let config = Config::default();
+    let audio_monitor = AudioMonitor::new()?;
+    let _bdd_framework = BDDTestFramework::new();
+    let _config = Config::default();
 
     // Get test profiles
     let profiles = match args.profile.as_str() {
@@ -144,7 +143,7 @@ async fn run_single_test_suite(
         audio_monitor.stop_monitoring();
 
         // Analyze results
-        let test_result = analyze_test_result(&profile, &args.output_dir).await?;
+        let test_result = analyze_test_result(profile, &args.output_dir).await?;
 
         if test_result.passed {
             passed_tests += 1;
@@ -235,9 +234,9 @@ struct TestResult {
     recommendations: Vec<String>,
 }
 
-async fn analyze_test_result(profile: &TestProfile, output_dir: &str) -> Result<TestResult> {
+async fn analyze_test_result(profile: &TestProfile, _output_dir: &str) -> Result<TestResult> {
     // Simulate visual analysis (in real implementation, this would analyze actual UI output)
-    let mut analyzer = VisualAnalyzer::new();
+    let analyzer = VisualAnalyzer::new();
 
     // Generate test magnitudes based on profile
     let test_magnitudes = generate_test_magnitudes(profile);
@@ -277,16 +276,16 @@ async fn generate_final_report(
     passed_tests: usize,
     output_dir: &str,
 ) -> Result<()> {
-    let report_path = format!("{}/frequency_test_report.md", output_dir);
+    let report_path = format!("{output_dir}/frequency_test_report.md");
     let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
 
     let mut report = String::new();
-    report.push_str(&format!("# Frequency Test Suite Report\n"));
-    report.push_str(&format!("*Generated: {}*\n\n", timestamp));
+    report.push_str("# Frequency Test Suite Report\n");
+    report.push_str(&format!("*Generated: {timestamp}*\n\n"));
 
     report.push_str("## Summary\n\n");
-    report.push_str(&format!("- **Total Tests**: {}\n", total_tests));
-    report.push_str(&format!("- **Passed**: {}\n", passed_tests));
+    report.push_str(&format!("- **Total Tests**: {total_tests}\n"));
+    report.push_str(&format!("- **Passed**: {passed_tests}\n"));
     report.push_str(&format!("- **Failed**: {}\n", total_tests - passed_tests));
     report.push_str(&format!(
         "- **Pass Rate**: {:.1}%\n\n",
@@ -295,7 +294,7 @@ async fn generate_final_report(
 
     // Calculate average score
     let avg_score = results.iter().map(|r| r.score).sum::<f32>() / results.len() as f32;
-    report.push_str(&format!("- **Average Score**: {:.1}/100\n\n", avg_score));
+    report.push_str(&format!("- **Average Score**: {avg_score:.1}/100\n\n"));
 
     report.push_str("## Test Results\n\n");
 
@@ -313,17 +312,17 @@ async fn generate_final_report(
         if !result.issues.is_empty() {
             report.push_str("**Issues:**\n");
             for issue in &result.issues {
-                report.push_str(&format!("- {}\n", issue));
+                report.push_str(&format!("- {issue}\n"));
             }
-            report.push_str("\n");
+            report.push('\n');
         }
 
         if !result.recommendations.is_empty() {
             report.push_str("**Recommendations:**\n");
             for rec in &result.recommendations {
-                report.push_str(&format!("- {}\n", rec));
+                report.push_str(&format!("- {rec}\n"));
             }
-            report.push_str("\n");
+            report.push('\n');
         }
     }
 
@@ -357,8 +356,8 @@ fn get_linear_sweep_profile() -> TestProfile {
         frequencies: (20..=20000).step_by(200).map(|f| f as f32).collect(),
         duration_ms: 50,
         amplitude: 0.5,
-waveform: rav::testing::audio_monitor::WaveformType::Sine,
-sweep_type: rav::testing::audio_monitor::SweepType::Linear,
+        waveform: rav::testing::audio_monitor::WaveformType::Sine,
+        sweep_type: rav::testing::audio_monitor::SweepType::Linear,
         test_all_visualizations: true,
     }
 }
@@ -369,8 +368,8 @@ fn get_bass_test_profile() -> TestProfile {
         frequencies: (20..=200).step_by(10).map(|f| f as f32).collect(),
         duration_ms: 150,
         amplitude: 0.8,
-        waveform: speedy::testing::audio_monitor::WaveformType::Sine,
-sweep_type: rav::testing::audio_monitor::SweepType::Stepped,
+        waveform: rav::testing::audio_monitor::WaveformType::Sine,
+        sweep_type: rav::testing::audio_monitor::SweepType::Stepped,
         test_all_visualizations: false,
     }
 }
@@ -381,8 +380,8 @@ fn get_midrange_test_profile() -> TestProfile {
         frequencies: (200..=2000).step_by(100).map(|f| f as f32).collect(),
         duration_ms: 100,
         amplitude: 0.6,
-waveform: rav::testing::audio_monitor::WaveformType::Square,
-        sweep_type: speedy::testing::audio_monitor::SweepType::Linear,
+        waveform: rav::testing::audio_monitor::WaveformType::Square,
+        sweep_type: rav::testing::audio_monitor::SweepType::Linear,
         test_all_visualizations: true,
     }
 }
@@ -393,8 +392,8 @@ fn get_treble_test_profile() -> TestProfile {
         frequencies: (2000..=20000).step_by(1000).map(|f| f as f32).collect(),
         duration_ms: 75,
         amplitude: 0.4,
-waveform: rav::testing::audio_monitor::WaveformType::Triangle,
-        sweep_type: speedy::testing::audio_monitor::SweepType::Linear,
+        waveform: rav::testing::audio_monitor::WaveformType::Triangle,
+        sweep_type: rav::testing::audio_monitor::SweepType::Linear,
         test_all_visualizations: true,
     }
 }
@@ -405,8 +404,8 @@ fn get_noise_test_profile() -> TestProfile {
         frequencies: vec![0.0],
         duration_ms: 2000,
         amplitude: 0.3,
-waveform: rav::testing::audio_monitor::WaveformType::WhiteNoise,
-sweep_type: rav::testing::audio_monitor::SweepType::Continuous,
+        waveform: rav::testing::audio_monitor::WaveformType::WhiteNoise,
+        sweep_type: rav::testing::audio_monitor::SweepType::Continuous,
         test_all_visualizations: true,
     }
 }
@@ -421,8 +420,8 @@ fn get_stress_test_profile() -> TestProfile {
         frequencies,
         duration_ms: 25,
         amplitude: 0.7,
-waveform: rav::testing::audio_monitor::WaveformType::Square,
-sweep_type: rav::testing::audio_monitor::SweepType::Random,
+        waveform: rav::testing::audio_monitor::WaveformType::Square,
+        sweep_type: rav::testing::audio_monitor::SweepType::Random,
         test_all_visualizations: true,
     }
 }

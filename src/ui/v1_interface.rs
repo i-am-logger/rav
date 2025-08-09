@@ -2,12 +2,12 @@
 // Inspired by Spotify's sleek design, CAVA's powerful visualizations, and Winamp's iconic style
 
 use crate::{
-    config::Config, 
-    signal::SignalProcessor,
+    config::Config,
     quality::{
-        CyberneticQualityController, FrameData, QualityControlActions, 
-        ColorEnhancement, AnimationAdjustment, AudioOptimization, ParameterChange
+        AnimationAdjustment, AudioOptimization, ColorEnhancement, CyberneticQualityController,
+        FrameData, ParameterChange, QualityControlActions,
     },
+    signal::SignalProcessor,
 };
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -16,11 +16,8 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
-use std::{
-    collections::VecDeque,
-    time::Instant,
-};
-use tracing::{info, debug};
+use std::{collections::VecDeque, time::Instant};
+use tracing::{debug, info};
 
 /// Professional v1.0 UI State
 pub struct SpeedyV1Interface {
@@ -34,7 +31,7 @@ pub struct SpeedyV1Interface {
 
     // UI State
     pub(crate) show_help: bool,
-    pub(crate) show_settings: bool,
+    pub(crate) _show_settings: bool,
     pub(crate) fps: f32,
     pub(crate) peak_hold: Vec<f32>,
     pub(crate) volume_level: f32,
@@ -45,7 +42,7 @@ pub struct SpeedyV1Interface {
 
     // Theme
     pub(crate) current_theme: ColorTheme,
-    
+
     // Quality Control System
     quality_controller: CyberneticQualityController,
 }
@@ -66,6 +63,7 @@ pub struct ColorTheme {
     pub accent: Color,
     pub background: Color,
     pub text: Color,
+    #[allow(dead_code)]
     pub glow: Color,
 }
 
@@ -111,7 +109,7 @@ impl SpeedyV1Interface {
             normalized_magnitudes: vec![0.0; 64],
             magnitude_history: VecDeque::with_capacity(100),
             show_help: false,
-            show_settings: false,
+            _show_settings: false,
             fps: 60.0,
             peak_hold: vec![0.0; 64],
             volume_level: 0.0,
@@ -127,7 +125,9 @@ impl SpeedyV1Interface {
         let mut enhanced_magnitudes = magnitudes;
         let total_amplitude: f32 = enhanced_magnitudes.iter().sum();
         let avg_amplitude = total_amplitude / enhanced_magnitudes.len() as f32;
-        let rms_amplitude = (enhanced_magnitudes.iter().map(|x| x * x).sum::<f32>() / enhanced_magnitudes.len() as f32).sqrt();
+        let rms_amplitude = (enhanced_magnitudes.iter().map(|x| x * x).sum::<f32>()
+            / enhanced_magnitudes.len() as f32)
+            .sqrt();
 
         // Advanced magnitude enhancement for better audio tracking
         let magnitudes_len = enhanced_magnitudes.len();
@@ -135,13 +135,13 @@ impl SpeedyV1Interface {
             // Apply frequency-specific sensitivity boosting
             let freq_ratio = i as f32 / magnitudes_len as f32;
             let freq_boost = match freq_ratio {
-                r if r < 0.1 => 1.2,     // Boost sub-bass
-                r if r < 0.3 => 1.1,     // Slight boost for bass
-                r if r < 0.7 => 1.0,     // Neutral for mids
-                r if r < 0.9 => 1.1,     // Boost presence
-                _ => 1.3,                // Boost highs
+                r if r < 0.1 => 1.2, // Boost sub-bass
+                r if r < 0.3 => 1.1, // Slight boost for bass
+                r if r < 0.7 => 1.0, // Neutral for mids
+                r if r < 0.9 => 1.1, // Boost presence
+                _ => 1.3,            // Boost highs
             };
-            
+
             // Dynamic range compression for better visibility
             *mag = (*mag * freq_boost).powf(0.8); // Gentle compression
         }
@@ -152,17 +152,19 @@ impl SpeedyV1Interface {
             let magnitudes_len = enhanced_magnitudes.len();
             for (i, mag) in enhanced_magnitudes.iter_mut().enumerate() {
                 let freq_factor = i as f32 / magnitudes_len as f32;
-                
+
                 // Multi-layered breathing pattern for natural feel
-                let primary_breath = (time * 0.5 + freq_factor * std::f32::consts::PI).sin().abs();
+                let primary_breath = (time * 0.5 + freq_factor * std::f32::consts::PI)
+                    .sin()
+                    .abs();
                 let secondary_breath = (time * 1.2 + freq_factor * 2.5).sin().abs();
                 let tertiary_breath = (time * 0.3 + freq_factor * 4.0).cos().abs();
-                
-                let combined_baseline = 0.01 + 
-                    0.006 * primary_breath + 
-                    0.003 * secondary_breath + 
-                    0.002 * tertiary_breath;
-                    
+
+                let combined_baseline = 0.01
+                    + 0.006 * primary_breath
+                    + 0.003 * secondary_breath
+                    + 0.002 * tertiary_breath;
+
                 *mag = (*mag + combined_baseline).min(0.04); // Cap to prevent overwhelming real audio
             }
         }
@@ -245,7 +247,7 @@ impl SpeedyV1Interface {
         let now = Instant::now();
         let dt = now.duration_since(self.last_update).as_secs_f32();
         self.animation_time += dt;
-        
+
         // 🔄 CYBERNETIC QUALITY CONTROL LOOP
         // Extract colors from current rendering for quality analysis
         let colors_used = self.extract_current_colors();
@@ -256,13 +258,13 @@ impl SpeedyV1Interface {
             render_time: now.duration_since(self.last_update),
             frame_timestamp: now,
         };
-        
+
         // Run the cybernetic control loop for continuous quality improvement
         let quality_actions = self.quality_controller.control_loop(&frame_data);
-        
+
         // Apply quality improvements automatically
         self.apply_quality_control_actions(&quality_actions);
-        
+
         self.last_update = now;
 
         if self.show_help {
@@ -295,7 +297,7 @@ impl SpeedyV1Interface {
             VisualizationMode::Particles => "✦ PARTICLES",
         };
 
-        let title = format!(" ⚡ SPEEDY v1.0  {}  🎵", mode_text);
+        let title = format!(" ⚡ SPEEDY v1.0  {mode_text}  🎵");
 
         let paragraph = Paragraph::new(title)
             .style(
@@ -401,7 +403,7 @@ impl SpeedyV1Interface {
                     wave_amplitude + 0.1 * (self.animation_time * 2.0 + x as f32 * 0.1).sin();
                 let wave_height = (animated_amplitude * center_y as f32) as usize;
 
-                let distance_from_center = (row as i32 - center_y as i32).abs() as usize;
+                let distance_from_center = (row as i32 - center_y as i32).unsigned_abs() as usize;
                 let (char, color) = if distance_from_center <= wave_height {
                     let intensity = 1.0 - (distance_from_center as f32 / wave_height as f32);
                     let color = self.get_wave_color(x as f32 / width as f32, intensity);
@@ -529,7 +531,7 @@ impl SpeedyV1Interface {
                     let freq_text = if freq_hz >= 1000 {
                         format!("{:2}k", freq_hz / 1000)
                     } else {
-                        format!("{:3}", freq_hz)
+                        format!("{freq_hz:3}")
                     };
 
                     for (j, ch) in freq_text.chars().enumerate() {
@@ -834,18 +836,18 @@ impl SpeedyV1Interface {
             ],
             Color::Rgb(0, 255, 128) => [
                 // Green theme - Natural spectrum mapping
-                Color::Rgb(139, 69, 19),   // Brown (sub-bass)
-                Color::Rgb(255, 69, 0),    // Red-orange (bass)
-                Color::Rgb(255, 140, 0),   // Orange (low-mid)
-                Color::Rgb(255, 215, 0),   // Gold (mid)
-                Color::Rgb(255, 255, 0),   // Yellow (upper-mid)
-                Color::Rgb(154, 255, 0),   // Yellow-green (presence)
-                Color::Rgb(0, 255, 0),     // Pure green (brilliance)
-                Color::Rgb(0, 255, 127),   // Spring green (air)
-                Color::Rgb(0, 191, 255),   // Deep sky blue (ultra)
-                Color::Rgb(30, 144, 255),  // Dodger blue (highest)
-                Color::Rgb(138, 43, 226),  // Blue violet (super high)
-                Color::Rgb(255, 20, 147),  // Deep pink (extreme)
+                Color::Rgb(139, 69, 19),  // Brown (sub-bass)
+                Color::Rgb(255, 69, 0),   // Red-orange (bass)
+                Color::Rgb(255, 140, 0),  // Orange (low-mid)
+                Color::Rgb(255, 215, 0),  // Gold (mid)
+                Color::Rgb(255, 255, 0),  // Yellow (upper-mid)
+                Color::Rgb(154, 255, 0),  // Yellow-green (presence)
+                Color::Rgb(0, 255, 0),    // Pure green (brilliance)
+                Color::Rgb(0, 255, 127),  // Spring green (air)
+                Color::Rgb(0, 191, 255),  // Deep sky blue (ultra)
+                Color::Rgb(30, 144, 255), // Dodger blue (highest)
+                Color::Rgb(138, 43, 226), // Blue violet (super high)
+                Color::Rgb(255, 20, 147), // Deep pink (extreme)
             ],
             _ => [
                 // Amber theme - Warm spectrum with good contrast
@@ -878,12 +880,18 @@ impl SpeedyV1Interface {
             (Color::Rgb(r1, g1, b1), Color::Rgb(r2, g2, b2)) => {
                 let intensity_boost = (intensity * 0.8 + 0.2).clamp(0.2, 1.0);
                 let contrast_boost = 1.0 + (intensity - 0.5).abs() * 0.3; // Boost contrast at extremes
-                
-                let r = ((r1 as f32 * (1.0 - blend_factor) + r2 as f32 * blend_factor) * intensity_boost * contrast_boost) as u8;
-                let g = ((g1 as f32 * (1.0 - blend_factor) + g2 as f32 * blend_factor) * intensity_boost * contrast_boost) as u8;
-                let b = ((b1 as f32 * (1.0 - blend_factor) + b2 as f32 * blend_factor) * intensity_boost * contrast_boost) as u8;
-                
-                Color::Rgb(r.min(255), g.min(255), b.min(255))
+
+                let r = ((r1 as f32 * (1.0 - blend_factor) + r2 as f32 * blend_factor)
+                    * intensity_boost
+                    * contrast_boost) as u8;
+                let g = ((g1 as f32 * (1.0 - blend_factor) + g2 as f32 * blend_factor)
+                    * intensity_boost
+                    * contrast_boost) as u8;
+                let b = ((b1 as f32 * (1.0 - blend_factor) + b2 as f32 * blend_factor)
+                    * intensity_boost
+                    * contrast_boost) as u8;
+
+                Color::Rgb(r, g, b)
             }
             _ => base_color,
         }
@@ -1035,46 +1043,45 @@ impl SpeedyV1Interface {
     }
 
     // 🔄 CYBERNETIC QUALITY CONTROL HELPER FUNCTIONS
-    
+
     fn extract_current_colors(&self) -> Vec<(u8, u8, u8)> {
         // Extract representative colors from current rendering for quality analysis
         let mut colors = Vec::new();
-        
+
         // Sample colors from the current theme and visualization state
         match self.current_theme.primary {
             Color::Rgb(r, g, b) => colors.push((r, g, b)),
             _ => colors.push((255, 255, 255)),
         }
-        
+
         match self.current_theme.secondary {
             Color::Rgb(r, g, b) => colors.push((r, g, b)),
             _ => colors.push((128, 128, 128)),
         }
-        
+
         match self.current_theme.accent {
             Color::Rgb(r, g, b) => colors.push((r, g, b)),
             _ => colors.push((255, 0, 255)),
         }
-        
+
         // Add frequency-based colors for variety analysis
         for (i, &magnitude) in self.normalized_magnitudes.iter().enumerate() {
-            if magnitude > 0.1 { // Only include active frequencies
+            if magnitude > 0.1 {
+                // Only include active frequencies
                 let freq_ratio = i as f32 / self.normalized_magnitudes.len() as f32;
                 let color = self.get_frequency_color(freq_ratio, magnitude);
-                match color {
-                    Color::Rgb(r, g, b) => colors.push((r, g, b)),
-                    _ => {}
+                if let Color::Rgb(r, g, b) = color {
+                    colors.push((r, g, b))
                 }
             }
         }
-        
+
         // Limit to prevent overload
         colors.truncate(32);
         colors
     }
-    
+
     fn apply_quality_control_actions(&mut self, actions: &QualityControlActions) {
-        
         // Apply color enhancements
         for enhancement in &actions.color_enhancements {
             match enhancement {
@@ -1082,113 +1089,116 @@ impl SpeedyV1Interface {
                     debug!("🎨 Increasing color spectrum variety");
                     Self::enhance_color(&mut self.current_theme.primary, 1.2);
                     Self::enhance_color(&mut self.current_theme.secondary, 1.1);
-                },
+                }
                 ColorEnhancement::AddGradients => {
                     debug!("🎨 Adding color gradients");
                     // Could implement gradient color transitions
-                },
+                }
                 ColorEnhancement::EnhanceContrast => {
                     debug!("🎨 Enhancing color contrast");
                     Self::enhance_color(&mut self.current_theme.accent, 1.3);
-                },
+                }
                 ColorEnhancement::BoostSaturation => {
                     debug!("🎨 Boosting color saturation");
                     Self::enhance_color(&mut self.current_theme.primary, 1.15);
                     Self::enhance_color(&mut self.current_theme.accent, 1.15);
-                },
+                }
             }
         }
-        
+
         // Apply animation adjustments
         for adjustment in &actions.animation_adjustments {
             match adjustment {
                 AnimationAdjustment::SmoothFrameTiming => {
                     debug!("🎬 Smoothing frame timing");
                     // Could adjust animation smoothing parameters
-                },
+                }
                 AnimationAdjustment::ReduceJitter => {
                     debug!("🎬 Reducing animation jitter");
                     // Could implement jitter reduction
-                },
+                }
                 AnimationAdjustment::ImproveInterpolation => {
                     debug!("🎬 Improving interpolation");
                     // Could enhance interpolation algorithms
-                },
+                }
                 AnimationAdjustment::OptimizeDecay => {
                     debug!("🎬 Optimizing decay rate");
                     // Could adjust peak hold decay rates
-                },
+                }
             }
         }
-        
+
         // Apply audio optimizations
         for optimization in &actions.audio_optimizations {
             match optimization {
                 AudioOptimization::IncreaseSensitivity => {
                     debug!("🎵 Increasing audio sensitivity");
-                    self.config.display.sensitivity = (self.config.display.sensitivity * 1.1).clamp(0.1, 5.0);
-                },
+                    self.config.display.sensitivity =
+                        (self.config.display.sensitivity * 1.1).clamp(0.1, 5.0);
+                }
                 AudioOptimization::ReduceLatency => {
                     debug!("🎵 Reducing audio latency");
                     // Could optimize buffer sizes
-                },
+                }
                 AudioOptimization::EnhanceResponseTime => {
                     debug!("🎵 Enhancing response time");
                     // Could adjust responsiveness parameters
-                },
+                }
                 AudioOptimization::ImproveNormalization => {
                     debug!("🎵 Improving normalization");
                     // Could enhance magnitude normalization
-                },
+                }
             }
         }
-        
+
         // Apply parameter changes
         for change in &actions.parameter_changes {
             match change {
                 ParameterChange::AdjustSensitivity(delta) => {
                     debug!("⚙️ Adjusting sensitivity by {}", delta);
-                    self.config.display.sensitivity = (self.config.display.sensitivity + delta).clamp(0.1, 5.0);
-                },
+                    self.config.display.sensitivity =
+                        (self.config.display.sensitivity + delta).clamp(0.1, 5.0);
+                }
                 ParameterChange::ModifyDecayRate(delta) => {
                     debug!("⚙️ Modifying decay rate by {}", delta);
                     // Could adjust peak hold decay rates
-                },
+                }
                 ParameterChange::UpdateColorPalette => {
                     debug!("⚙️ Updating color palette");
                     // Could cycle to next theme or enhance current one
                     Self::enhance_color(&mut self.current_theme.primary, 1.05);
-                },
+                }
                 ParameterChange::OptimizeBuffering => {
                     debug!("⚙️ Optimizing buffering");
                     // Could adjust buffer parameters
-                },
+                }
             }
         }
     }
-    
+
+    #[allow(dead_code)]
     fn enhance_theme_color(&mut self, color: &mut Color, boost_factor: f32) {
         // Enhance color saturation and brightness within visual limits
         if let Color::Rgb(r, g, b) = *color {
             let boost = boost_factor.clamp(0.5, 2.0); // Reasonable enhancement range
-            
+
             let new_r = ((r as f32 * boost).min(255.0)) as u8;
             let new_g = ((g as f32 * boost).min(255.0)) as u8;
             let new_b = ((b as f32 * boost).min(255.0)) as u8;
-            
+
             *color = Color::Rgb(new_r, new_g, new_b);
         }
     }
-    
+
     // Static helper method for color enhancement
     fn enhance_color(color: &mut Color, boost_factor: f32) {
         if let Color::Rgb(r, g, b) = *color {
             let boost = boost_factor.clamp(0.5, 2.0); // Reasonable enhancement range
-            
+
             let new_r = ((r as f32 * boost).min(255.0)) as u8;
             let new_g = ((g as f32 * boost).min(255.0)) as u8;
             let new_b = ((b as f32 * boost).min(255.0)) as u8;
-            
+
             *color = Color::Rgb(new_r, new_g, new_b);
         }
     }

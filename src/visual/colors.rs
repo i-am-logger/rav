@@ -13,6 +13,12 @@ pub struct ColorSystem {
     pub brightness: f32,
 }
 
+impl Default for ColorSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ColorSystem {
     pub fn new() -> Self {
         Self {

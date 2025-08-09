@@ -9,12 +9,12 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     Terminal,
 };
-use speedy::{
+use rav::{
     audio::AudioData,
     config::Config,
     signal::SignalProcessor,
     testing::audio_generator::AudioGenerator,
-    ui::{draw_main_content, draw_status_bar, draw_tabs, App},
+    ui::{draw_main_content, draw_status_bar, draw_tabs},
 };
 use std::{
     io::{self, Stdout},
@@ -131,7 +131,7 @@ impl DemoApp {
                         Constraint::Min(0),
                         Constraint::Length(3),
                     ])
-                    .split(f.size());
+                    .split(f.area());
 
                 draw_tabs(f, chunks[0], selected_tab);
                 draw_main_content(f, chunks[1], selected_tab, normalized_magnitudes);
@@ -200,7 +200,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let samples = match pattern % 4 {
                 0 => {
                     // Rock-style spectrum
-                    let magnitudes = AudioGenerator::test_spectrum_magnitudes(80);
                     audio_gen.generate_music_spectrum(1024)
                 }
                 1 => {

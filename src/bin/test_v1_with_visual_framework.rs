@@ -1,13 +1,7 @@
 // Test the new V1 interface with the visual testing framework
 // This demonstrates the quality improvement over the old interface
 
-use ratatui::{backend::TestBackend, Frame, Terminal};
-use rav::{
-    config::Config,
-    signal::SignalProcessor,
-    testing::{audio_generator::AudioGenerator, VisualTester},
-    ui::v1_interface::{SpeedyV1Interface, VisualizationMode},
-};
+use rav::{config::Config, signal::SignalProcessor, ui::v1_interface::VisualizationMode};
 
 fn main() {
     println!("🚀 Speedy v1.0 Visual Quality Comparison");
@@ -22,10 +16,10 @@ fn main() {
 
     // Create a mock V1 interface for testing
     let config = Config::default();
-    let signal_processor = SignalProcessor::new(
+    let _signal_processor = SignalProcessor::new(
         config.audio.sample_rate,
         frequency_bands,
-        config.display.frequency_range.clone(),
+        config.display.frequency_range,
     );
 
     // Test with various audio scenarios
@@ -54,7 +48,7 @@ fn main() {
     println!("🎨 Testing all V1.0 visualization modes:\n");
 
     for (mode, mode_name) in &visualization_modes {
-        println!("  Testing {} Mode:", mode_name);
+        println!("  Testing {mode_name} Mode:");
         println!("  {}", "─".repeat(40));
 
         let mut total_score = 0.0;
@@ -64,7 +58,7 @@ fn main() {
             // Simulate the v1 interface rendering
             let quality_score = simulate_v1_rendering(*mode, magnitudes, test_width, test_height);
 
-            println!("    {}: {:.1}/100", scenario_name, quality_score);
+            println!("    {scenario_name}: {quality_score:.1}/100");
             total_score += quality_score;
             scenario_count += 1;
         }
@@ -80,7 +74,7 @@ fn main() {
             "🔴 POOR"
         };
 
-        println!("    Average: {:.1}/100 {}\n", average_score, status);
+        println!("    Average: {average_score:.1}/100 {status}\n");
     }
 
     println!("✨ V1.0 Interface Quality Assessment:");
@@ -98,8 +92,8 @@ fn main() {
 fn simulate_v1_rendering(
     mode: VisualizationMode,
     magnitudes: &[f32],
-    width: u16,
-    height: u16,
+    _width: u16,
+    _height: u16,
 ) -> f32 {
     let mut score: f32 = 0.0;
 

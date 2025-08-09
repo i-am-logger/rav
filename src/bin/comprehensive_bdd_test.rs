@@ -72,7 +72,7 @@ async fn run_interactive_validation() -> Result<(), Box<dyn std::error::Error>> 
     let signal_processor = SignalProcessor::new(
         config.audio.sample_rate,
         128, // Higher resolution for v1.0
-        config.display.frequency_range.clone(),
+        config.display.frequency_range,
     );
 
     let mut interface = create_enhanced_v1_interface(config, signal_processor)?;
@@ -141,7 +141,7 @@ async fn run_interactive_validation() -> Result<(), Box<dyn std::error::Error>> 
         }
 
         // Update FPS calculation
-        let frame_time = last_frame_time.elapsed();
+        let _frame_time = last_frame_time.elapsed();
         last_frame_time = Instant::now();
 
         // Wait for next frame
@@ -158,8 +158,8 @@ async fn run_interactive_validation() -> Result<(), Box<dyn std::error::Error>> 
     let fps = 1000.0 / avg_frame_time;
 
     println!("\n📊 Interactive Test Results:");
-    println!("Average Frame Time: {:.2}ms", avg_frame_time);
-    println!("Average FPS: {:.1}", fps);
+    println!("Average Frame Time: {avg_frame_time:.2}ms");
+    println!("Average FPS: {fps:.1}");
 
     if fps >= 55.0 {
         println!("✅ Performance: Excellent");
@@ -229,7 +229,7 @@ fn create_enhanced_test_scenarios(audio_gen: &mut AudioGenerator) -> Vec<(String
 }
 
 /// Generate realistic dynamic rock spectrum
-fn generate_dynamic_rock_spectrum(audio_gen: &AudioGenerator) -> Vec<f32> {
+fn generate_dynamic_rock_spectrum(_audio_gen: &AudioGenerator) -> Vec<f32> {
     let time = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -254,7 +254,7 @@ fn generate_dynamic_rock_spectrum(audio_gen: &AudioGenerator) -> Vec<f32> {
         .collect()
 }
 
-fn generate_electronic_spectrum(audio_gen: &AudioGenerator) -> Vec<f32> {
+fn generate_electronic_spectrum(_audio_gen: &AudioGenerator) -> Vec<f32> {
     let time = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -490,14 +490,14 @@ fn save_test_results(results: &[BDDTestResult]) -> Result<(), Box<dyn std::error
         if !result.issues.is_empty() {
             writeln!(file, "Issues:")?;
             for issue in &result.issues {
-                writeln!(file, "  - {}", issue)?;
+                writeln!(file, "  - {issue}")?;
             }
         }
 
         if !result.recommendations.is_empty() {
             writeln!(file, "Recommendations:")?;
             for rec in &result.recommendations {
-                writeln!(file, "  - {}", rec)?;
+                writeln!(file, "  - {rec}")?;
             }
         }
 
@@ -535,10 +535,10 @@ fn generate_v1_readiness_report(results: &[BDDTestResult]) {
         passed_tests,
         total_tests
     );
-    println!("  Visual Quality: {:.2}/1.0", avg_visual);
-    println!("  User Experience: {:.2}/1.0", avg_ux);
-    println!("  Performance: {:.2}/1.0", avg_perf);
-    println!("  Overall Score: {:.2}/1.0", avg_overall);
+    println!("  Visual Quality: {avg_visual:.2}/1.0");
+    println!("  User Experience: {avg_ux:.2}/1.0");
+    println!("  Performance: {avg_perf:.2}/1.0");
+    println!("  Overall Score: {avg_overall:.2}/1.0");
 
     let v1_ready = pass_rate >= 0.80 && avg_overall >= 0.75;
 
@@ -559,24 +559,15 @@ fn generate_v1_readiness_report(results: &[BDDTestResult]) {
         }
 
         if avg_visual < 0.75 {
-            println!(
-                "   🔴 Visual quality must reach 0.75+ (currently {:.2})",
-                avg_visual
-            );
+            println!("   🔴 Visual quality must reach 0.75+ (currently {avg_visual:.2})");
         }
 
         if avg_ux < 0.75 {
-            println!(
-                "   🔴 UX quality must reach 0.75+ (currently {:.2})",
-                avg_ux
-            );
+            println!("   🔴 UX quality must reach 0.75+ (currently {avg_ux:.2})");
         }
 
         if avg_perf < 0.75 {
-            println!(
-                "   🔴 Performance must reach 0.75+ (currently {:.2})",
-                avg_perf
-            );
+            println!("   🔴 Performance must reach 0.75+ (currently {avg_perf:.2})");
         }
 
         println!("\n🔧 PRIORITY FIXES NEEDED:");

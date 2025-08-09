@@ -1,9 +1,8 @@
 use anyhow::Result;
 use regex::Regex;
-use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 /// Visual Analysis Report for captured terminal output
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -465,7 +464,7 @@ fn print_report(report: &VisualAnalysisReport) {
         }
     );
     if let Some(ref mode) = report.ui_state.current_visualization_mode {
-        println!("  Current Mode: {}", mode);
+        println!("  Current Mode: {mode}");
     }
     println!("  Mode Switches: {}", report.ui_state.mode_switches);
     println!("  Theme Switches: {}", report.ui_state.theme_switches);
@@ -536,7 +535,7 @@ fn print_report(report: &VisualAnalysisReport) {
                 issue.description
             );
             if let Some(ref suggestion) = issue.suggestion {
-                println!("     💡 {}", suggestion);
+                println!("     💡 {suggestion}");
             }
         }
         println!();
@@ -603,7 +602,7 @@ async fn main() -> Result<()> {
 
     let file_path = Path::new(&args[1]);
     if !file_path.exists() {
-        eprintln!("❌ File not found: {:?}", file_path);
+        eprintln!("❌ File not found: {file_path:?}");
         std::process::exit(1);
     }
 
@@ -615,7 +614,7 @@ async fn main() -> Result<()> {
             let report_json = serde_json::to_string_pretty(&report)?;
             let report_file = file_path.with_extension("analysis.json");
             fs::write(&report_file, report_json)?;
-            println!("📄 Detailed report saved to: {:?}", report_file);
+            println!("📄 Detailed report saved to: {report_file:?}");
         }
         Err(e) => {
             error!("Failed to analyze output: {}", e);

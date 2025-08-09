@@ -1,10 +1,7 @@
 // Visual test runner for Speedy audio visualizer
 // Run with: cargo run --bin visual_test
 
-use rav::{
-    config::Config,
-    testing::{audio_generator::AudioGenerator, VisualTester},
-};
+use rav::testing::{audio_generator::AudioGenerator, VisualTester};
 use std::fs;
 
 fn main() {
@@ -102,7 +99,7 @@ fn main() {
     let mut sorted_issues: Vec<_> = all_issues.iter().collect();
     sorted_issues.sort_by(|a, b| b.1.cmp(a.1));
     for (issue, count) in sorted_issues.iter().take(3) {
-        println!("  ❌ {} (appears in {} tests)", issue, count);
+        println!("  ❌ {issue} (appears in {count} tests)");
     }
     println!();
 
@@ -110,7 +107,7 @@ fn main() {
     let mut sorted_recs: Vec<_> = all_recommendations.iter().collect();
     sorted_recs.sort_by(|a, b| b.1.cmp(a.1));
     for (rec, count) in sorted_recs.iter().take(3) {
-        println!("  💡 {} (suggested {} times)", rec, count);
+        println!("  💡 {rec} (suggested {count} times)");
     }
     println!();
 
@@ -124,7 +121,7 @@ fn main() {
 fn save_test_results(analyses: &[(&str, &rav::testing::VisualAnalysis)], tester: &VisualTester) {
     // Create output directory
     if let Err(e) = fs::create_dir_all("test_outputs") {
-        eprintln!("Warning: Could not create test_outputs directory: {}", e);
+        eprintln!("Warning: Could not create test_outputs directory: {e}");
         return;
     }
 
@@ -133,25 +130,25 @@ fn save_test_results(analyses: &[(&str, &rav::testing::VisualAnalysis)], tester:
     summary.push_str("# Speedy Visual Test Results\n\n");
 
     for (name, analysis) in analyses {
-        summary.push_str(&format!("## {}\n\n", name));
+        summary.push_str(&format!("## {name}\n\n"));
         summary.push_str(&analysis.report());
-        summary.push_str("\n");
+        summary.push('\n');
     }
 
     if let Err(e) = fs::write("test_outputs/summary.md", summary) {
-        eprintln!("Warning: Could not save summary report: {}", e);
+        eprintln!("Warning: Could not save summary report: {e}");
     }
 
     // Save visual captures
     let visual_output = tester.capture_with_colors();
     if let Err(e) = fs::write("test_outputs/latest_visual.txt", visual_output) {
-        eprintln!("Warning: Could not save visual capture: {}", e);
+        eprintln!("Warning: Could not save visual capture: {e}");
     }
 
     // Save raw text output
     let text_output = tester.capture_as_text();
     if let Err(e) = fs::write("test_outputs/latest_raw.txt", text_output) {
-        eprintln!("Warning: Could not save raw text capture: {}", e);
+        eprintln!("Warning: Could not save raw text capture: {e}");
     }
 
     println!("💾 Test results saved successfully!");

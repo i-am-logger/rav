@@ -61,7 +61,7 @@ async fn main() -> Result<()> {
         .append(true)
         .open("speedy.log")
         .expect("Failed to create log file");
-    
+
     if args.clean {
         // Clean mode: minimal logging to file only
         tracing_subscriber::registry()
@@ -86,10 +86,7 @@ async fn main() -> Result<()> {
                 tracing_subscriber::EnvFilter::try_from_default_env()
                     .unwrap_or_else(|_| format!("speedy={log_level},info").into()),
             )
-            .with(
-                tracing_subscriber::fmt::layer()
-                    .with_writer(log_file)
-            )
+            .with(tracing_subscriber::fmt::layer().with_writer(log_file))
             .init();
     }
 
@@ -117,7 +114,7 @@ async fn main() -> Result<()> {
     let signal_processor = SignalProcessor::new(
         config.audio.sample_rate,
         config.display.frequency_bands,
-        config.display.frequency_range.clone(),
+        config.display.frequency_range,
     );
 
     // Start audio capture

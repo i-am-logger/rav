@@ -1,7 +1,7 @@
 use crate::{audio::AudioData, config::Config, signal::SignalProcessor};
 
 pub mod v1_interface;
-pub use v1_interface::{ColorTheme, SpeedyV1Interface, VisualizationMode};
+pub use v1_interface::{SpeedyV1Interface, VisualizationMode};
 
 #[cfg(test)]
 mod tests;
@@ -59,7 +59,7 @@ impl App {
             SignalProcessor::new(
                 config.audio.sample_rate,
                 config.display.frequency_bands,
-                config.display.frequency_range.clone(),
+                config.display.frequency_range,
             ),
         ) {
             Ok(interface) => {
@@ -67,7 +67,10 @@ impl App {
                 Some(interface)
             }
             Err(e) => {
-                warn!("⚠️ Failed to create professional UI, falling back to simple interface: {}", e);
+                warn!(
+                    "⚠️ Failed to create professional UI, falling back to simple interface: {}",
+                    e
+                );
                 None
             }
         };
@@ -246,12 +249,9 @@ impl App {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
                     // Handle UI mode switching first
-                    match key.code {
-                        KeyCode::Char('p') => {
-                            self.toggle_professional_ui()?;
-                            return Ok(());
-                        }
-                        _ => {}
+                    if let KeyCode::Char('p') = key.code {
+                        self.toggle_professional_ui()?;
+                        return Ok(());
                     }
 
                     // Handle events based on current UI mode
@@ -277,7 +277,7 @@ impl App {
                 SignalProcessor::new(
                     self.config.audio.sample_rate,
                     self.config.display.frequency_bands,
-                    self.config.display.frequency_range.clone(),
+                    self.config.display.frequency_range,
                 ),
             )
             .map_err(|e| anyhow::anyhow!("Failed to create professional interface: {}", e))?;
@@ -389,7 +389,7 @@ impl App {
 
     #[allow(dead_code)] // Kept for potential future refactoring
     fn draw_tabs(&self, f: &mut Frame, area: Rect) {
-        let titles: Vec<Line> = vec!["Bars", "Wave", "Spectrum", "Info"]
+        let titles: Vec<Line> = ["Bars", "Wave", "Spectrum", "Info"]
             .iter()
             .cloned()
             .map(Line::from)
@@ -702,7 +702,7 @@ pub fn draw_tabs(f: &mut Frame, area: Rect, selected_tab: usize) {
         .map(|(i, (title, color))| {
             if i == selected_tab {
                 Line::from(Span::styled(
-                    format!(" {} ", title),
+                    format!(" {title} "),
                     Style::default()
                         .fg(*color)
                         .bg(Color::Rgb(20, 20, 40))
@@ -710,7 +710,7 @@ pub fn draw_tabs(f: &mut Frame, area: Rect, selected_tab: usize) {
                 ))
             } else {
                 Line::from(Span::styled(
-                    format!(" {} ", title),
+                    format!(" {title} "),
                     Style::default().fg(Color::Rgb(100, 100, 120)),
                 ))
             }
@@ -893,8 +893,8 @@ fn draw_wave_standalone(f: &mut Frame, area: Rect, normalized_magnitudes: &[f32]
     for y in 0..height {
         let mut line_spans = Vec::new();
 
-        for x in 0..width {
-            let wave_height = wave_points[x];
+        for (x, wave_height) in wave_points.iter().enumerate().take(width) {
+            let wave_height = *wave_height;
             let normalized_y = (y as f32 / height as f32) - 0.5; // -0.5 to 0.5
             let wave_y = wave_height * 0.5; // Scale wave
 
@@ -1043,8 +1043,7 @@ pub fn draw_status_bar(
     band_count: usize,
 ) {
     let status_text = format!(
-        " FPS: {:.1} | Sensitivity: {:.1} | Bands: {} | Press 'q' to quit ",
-        current_fps, sensitivity, band_count
+        " FPS: {current_fps:.1} | Sensitivity: {sensitivity:.1} | Bands: {band_count} | Press 'q' to quit "
     );
 
     let status = Paragraph::new(status_text)

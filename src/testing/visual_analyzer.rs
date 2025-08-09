@@ -5,6 +5,12 @@ use std::collections::HashMap;
 /// Analyzes visual elements for quality metrics
 pub struct VisualAnalyzer;
 
+impl Default for VisualAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VisualAnalyzer {
     pub fn new() -> Self {
         Self
@@ -223,6 +229,7 @@ impl VisualAnalyzer {
     /// Detect visual patterns and rhythm
     pub fn analyze_visual_patterns(buffer: &Buffer) -> VisualPatternMetrics {
         let mut patterns = HashMap::new();
+        #[allow(unused_assignments)]
         let mut rhythm_score = 0.0;
         let mut repetitive_elements = 0;
 
@@ -306,7 +313,7 @@ impl VisualAnalyzer {
                 let cell = &buffer[(x, y)];
                 let color = cell.fg;
 
-                *color_counts.entry(format!("{:?}", color)).or_insert(0) += 1;
+                *color_counts.entry(format!("{color:?}")).or_insert(0) += 1;
 
                 if let Color::Rgb(r, g, b) = color {
                     rgb_colors.push((r, g, b));
@@ -441,49 +448,56 @@ impl VisualAnalyzer {
     }
 
     /// Analyze frequency spectrum data
-    pub fn analyze_frequencies(&self, magnitudes: &[f32], sample_rate: u32) -> FrequencyAnalysisResult {
+    pub fn analyze_frequencies(
+        &self,
+        magnitudes: &[f32],
+        sample_rate: u32,
+    ) -> FrequencyAnalysisResult {
         let peak_frequency = self.find_peak_frequency(magnitudes, sample_rate);
         let noise_floor = self.calculate_noise_floor(magnitudes);
         let harmonic_content = self.analyze_harmonics(magnitudes, sample_rate);
-        
+
         // Calculate overall quality based on various factors
         let mut quality_score: f32 = 50.0; // Base score
-        
+
         // Good peak frequency range (20Hz - 20kHz)
-        if peak_frequency >= 20.0 && peak_frequency <= 20000.0 {
+        if (20.0..=20000.0).contains(&peak_frequency) {
             quality_score += 20.0;
         }
-        
+
         // Low noise floor is good
         if noise_floor < 0.1 {
             quality_score += 20.0;
         } else if noise_floor < 0.3 {
             quality_score += 10.0;
         }
-        
+
         // Rich harmonic content is good
         if harmonic_content.len() >= 3 {
             quality_score += 10.0;
         }
-        
+
         let mut issues = Vec::new();
         let mut recommendations = Vec::new();
-        
-        if peak_frequency < 20.0 || peak_frequency > 20000.0 {
-            issues.push(format!("Peak frequency {}Hz is outside audible range", peak_frequency));
+
+        if !(20.0..=20000.0).contains(&peak_frequency) {
+            issues.push(format!(
+                "Peak frequency {peak_frequency}Hz is outside audible range"
+            ));
             recommendations.push("Check audio input source".to_string());
         }
-        
+
         if noise_floor > 0.5 {
             issues.push("High noise floor detected".to_string());
-            recommendations.push("Improve audio input quality or reduce background noise".to_string());
+            recommendations
+                .push("Improve audio input quality or reduce background noise".to_string());
         }
-        
+
         if harmonic_content.is_empty() {
             issues.push("No harmonics detected".to_string());
             recommendations.push("Check for musical or tonal content".to_string());
         }
-        
+
         FrequencyAnalysisResult {
             peak_frequency,
             frequency_distribution: self.analyze_frequency_distribution(magnitudes),
@@ -494,7 +508,7 @@ impl VisualAnalyzer {
             recommendations,
         }
     }
-    
+
     fn find_peak_frequency(&self, magnitudes: &[f32], sample_rate: u32) -> f32 {
         let peak_index = magnitudes
             .iter()
@@ -502,10 +516,10 @@ impl VisualAnalyzer {
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
             .map(|(i, _)| i)
             .unwrap_or(0);
-        
+
         (peak_index as f32 * sample_rate as f32) / (magnitudes.len() as f32 * 2.0)
     }
-    
+
     fn analyze_frequency_distribution(&self, magnitudes: &[f32]) -> Vec<(f32, f32)> {
         magnitudes
             .iter()
@@ -513,28 +527,29 @@ impl VisualAnalyzer {
             .map(|(i, &magnitude)| (i as f32, magnitude))
             .collect()
     }
-    
+
     fn analyze_harmonics(&self, magnitudes: &[f32], sample_rate: u32) -> Vec<f32> {
         // Simple harmonic analysis - find peaks at multiples of fundamental
         let fundamental = self.find_peak_frequency(magnitudes, sample_rate);
         let mut harmonics = Vec::new();
-        
+
         for harmonic in 2..=8 {
             let harmonic_freq = fundamental * harmonic as f32;
-            let harmonic_index = (harmonic_freq * magnitudes.len() as f32 * 2.0 / sample_rate as f32) as usize;
-            
+            let harmonic_index =
+                (harmonic_freq * magnitudes.len() as f32 * 2.0 / sample_rate as f32) as usize;
+
             if harmonic_index < magnitudes.len() {
                 harmonics.push(magnitudes[harmonic_index]);
             }
         }
-        
+
         harmonics
     }
-    
+
     fn calculate_noise_floor(&self, magnitudes: &[f32]) -> f32 {
         let mut sorted_mags: Vec<f32> = magnitudes.to_vec();
         sorted_mags.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        
+
         // Use lower 10% as noise floor estimate
         let noise_samples = sorted_mags.len() / 10;
         sorted_mags[..noise_samples].iter().sum::<f32>() / noise_samples as f32

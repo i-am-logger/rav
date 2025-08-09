@@ -11,9 +11,9 @@ use rav::{
     config::Config,
     signal::SignalProcessor,
     testing::audio_generator::AudioGenerator,
-    testing::bdd_framework::{BDDTestFramework, BDDTestResult},
     ui::{SpeedyV1Interface, VisualizationMode},
 };
+use std::io;
 use tokio::time::{interval, Duration};
 
 #[tokio::main]
@@ -36,14 +36,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let signal_processor = SignalProcessor::new(
         config.audio.sample_rate,
         64, // More frequency bands for v1.0
-        config.display.frequency_range.clone(),
+        config.display.frequency_range,
     );
 
     // Create V1 interface
     let mut interface = SpeedyV1Interface::new(config, signal_processor)?;
 
     // Audio generator for testing
-    let mut audio_gen = AudioGenerator::new(44100.0);
+    let _audio_gen = AudioGenerator::new(44100.0);
     let mut scenario_index = 0;
 
     // Test scenarios that cycle automatically

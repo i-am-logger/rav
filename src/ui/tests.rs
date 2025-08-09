@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod ui_tests {
-    use super::*;
-use speedy::testing::audio_generator::AudioGenerator;
+    // Allow using `rav::` to point to current crate inside unit tests
+    // use crate as rav; // no longer needed; tests import crate modules directly
     use crate::{
         config::Config,
         signal::SignalProcessor,
@@ -125,7 +125,7 @@ use speedy::testing::audio_generator::AudioGenerator;
         let mut terminal = Terminal::new(backend).unwrap();
 
         // Generate demo audio data
-        let demo_magnitudes = AudioGenerator::test_spectrum_magnitudes(80);
+        let demo_magnitudes = gen_test_spectrum_magnitudes(80);
 
         terminal
             .draw(|f| {
@@ -165,7 +165,7 @@ use speedy::testing::audio_generator::AudioGenerator;
     #[test]
     fn test_audio_data_processing() {
         let config = Config::default();
-        let mut signal_processor = SignalProcessor::new(
+        let signal_processor = SignalProcessor::new(
             config.audio.sample_rate,
             config.display.frequency_bands,
             config.display.frequency_range,
@@ -174,8 +174,7 @@ use speedy::testing::audio_generator::AudioGenerator;
         let mut app = App::new(config, signal_processor);
 
         // Generate test audio data
-        let mut audio_gen = AudioGenerator::new(44100.0);
-        let test_samples = audio_gen.generate_sine_wave(440.0, 1024);
+        let test_samples = gen_sine_wave(440.0, 1024);
 
         // Simulate audio data processing
         let magnitudes = app
@@ -213,7 +212,7 @@ use speedy::testing::audio_generator::AudioGenerator;
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
 
-        let demo_magnitudes = AudioGenerator::dynamic_spectrum_magnitudes(80);
+        let demo_magnitudes = gen_dynamic_spectrum_magnitudes(80);
 
         // Test all 4 visualization modes
         for tab in 0..4 {
@@ -231,7 +230,7 @@ use speedy::testing::audio_generator::AudioGenerator;
                 .content
                 .iter()
                 .any(|cell| !cell.symbol().trim().is_empty() && cell.symbol() != " ");
-            assert!(has_content, "Tab {} should render visible content", tab);
+            assert!(has_content, "Tab {tab} should render visible content");
         }
     }
 
@@ -249,14 +248,26 @@ use speedy::testing::audio_generator::AudioGenerator;
 
         // Generate continuous fake audio
         tokio::spawn(async move {
-            let mut audio_gen = AudioGenerator::new(44100.0);
+            use rand::Rng;
             for i in 0..10 {
                 let samples = if i % 3 == 0 {
-                    audio_gen.generate_music_spectrum(1024)
+                    // Music-like: sum of a few sines
+                    let mut buf = Vec::with_capacity(1024);
+                    for n in 0..1024 {
+                        let t = n as f32 / 44100.0;
+                        let s = (2.0 * std::f32::consts::PI * 220.0 * t).sin()
+                            + 0.5 * (2.0 * std::f32::consts::PI * 440.0 * t).sin()
+                            + 0.25 * (2.0 * std::f32::consts::PI * 880.0 * t).sin();
+                        buf.push(s);
+                    }
+                    buf
                 } else if i % 3 == 1 {
-                    audio_gen.generate_white_noise(1024)
+                    // White noise
+                    let mut rng = rand::thread_rng();
+                    (0..1024).map(|_| rng.gen_range(-1.0..1.0)).collect()
                 } else {
-                    audio_gen.generate_sine_wave(440.0 + i as f32 * 110.0, 1024)
+                    // Simple sine
+                    gen_sine_wave(440.0 + i as f32 * 110.0, 1024)
                 };
 
                 let audio_data = crate::audio::AudioData {
@@ -284,7 +295,7 @@ use speedy::testing::audio_generator::AudioGenerator;
 
     // Helper function to simulate key presses
     fn simulate_key_press(app: &mut App, key_code: KeyCode) {
-        let key_event = KeyEvent {
+        let _key_event = KeyEvent {
             code: key_code,
             modifiers: crossterm::event::KeyModifiers::NONE,
             kind: KeyEventKind::Press,
@@ -321,14 +332,14 @@ use speedy::testing::audio_generator::AudioGenerator;
         let color3 = get_neon_color_for_frequency(0.5, 0.5, 0.5); // Mid freq, half intensity
 
         // Colors should be different
-        assert_ne!(format!("{:?}", color1), format!("{:?}", color2));
-        assert_ne!(format!("{:?}", color2), format!("{:?}", color3));
+        assert_ne!(format!("{color1:?}"), format!("{:?}", color2));
+        assert_ne!(format!("{color2:?}"), format!("{:?}", color3));
 
         // Test wave colors
         let wave_color1 = get_wave_color(0.0, 1.0);
         let wave_color2 = get_wave_color(1.0, 1.0);
 
-        assert_ne!(format!("{:?}", wave_color1), format!("{:?}", wave_color2));
+        assert_ne!(format!("{wave_color1:?}"), format!("{:?}", wave_color2));
     }
 
     #[test]
@@ -351,5 +362,30 @@ use speedy::testing::audio_generator::AudioGenerator;
         if app.last_update.elapsed() >= Duration::from_secs(1) {
             assert!(app.current_fps > 0.0);
         }
+    }
+    // Helper signal generation utilities for tests (avoid pulling testing module)
+    fn gen_test_spectrum_magnitudes(len: usize) -> Vec<f32> {
+        (0..len)
+            .map(|i| {
+                let x = i as f32 / len as f32;
+                (0.2 + 0.8 * (10.0 * x).sin().abs()).min(1.0)
+            })
+            .collect()
+    }
+
+    fn gen_dynamic_spectrum_magnitudes(len: usize) -> Vec<f32> {
+        (0..len)
+            .map(|i| {
+                let x = i as f32 / len as f32;
+                (0.1 + 0.9 * (3.0 * x).cos().abs()).min(1.0)
+            })
+            .collect()
+    }
+
+    fn gen_sine_wave(freq_hz: f32, len: usize) -> Vec<f32> {
+        let sr = 44100.0f32;
+        (0..len)
+            .map(|n| (2.0 * std::f32::consts::PI * freq_hz * (n as f32 / sr)).sin())
+            .collect()
     }
 }

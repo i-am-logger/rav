@@ -170,7 +170,7 @@ impl AudioCapture {
                 .unwrap_or(false);
 
             let marker = if is_default { " (default)" } else { "" };
-            println!("  • {}{}", name, marker);
+            println!("  • {name}{marker}");
 
             if let Ok(configs) = device.supported_input_configs() {
                 for config in configs.take(3) {
@@ -221,7 +221,7 @@ impl AudioCapture {
                     };
 
                     // Use try_send to avoid blocking in the audio callback
-                    if let Err(_) = tx.try_send(audio_data) {
+                    if tx.try_send(audio_data).is_err() {
                         // Buffer full, skip this frame to avoid blocking audio
                     }
                 }
