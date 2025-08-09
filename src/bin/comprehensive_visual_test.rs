@@ -1,7 +1,7 @@
 // Comprehensive visual testing for Speedy v1.0 development
 // Tests all visualization modes with various frequency scenarios
 
-use speedy::{
+use rav::{
     config::Config,
     testing::{audio_generator::AudioGenerator, VisualTester},
 };
@@ -56,7 +56,7 @@ fn main() {
         (3, "System Info"),
     ];
 
-    let mut all_results: Vec<(String, Vec<(String, speedy::testing::VisualAnalysis)>)> = Vec::new();
+let mut all_results: Vec<(String, Vec<(String, rav::testing::VisualAnalysis)>)> = Vec::new();
     let mut mode_scores: std::collections::HashMap<String, f32> = std::collections::HashMap::new();
 
     // Test each visualization mode with each audio scenario

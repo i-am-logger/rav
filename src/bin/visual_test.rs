@@ -1,7 +1,7 @@
 // Visual test runner for Speedy audio visualizer
 // Run with: cargo run --bin visual_test
 
-use speedy::{
+use rav::{
     config::Config,
     testing::{audio_generator::AudioGenerator, VisualTester},
 };
@@ -121,7 +121,7 @@ fn main() {
     println!("📁 Detailed results saved to test_outputs/");
 }
 
-fn save_test_results(analyses: &[(&str, &speedy::testing::VisualAnalysis)], tester: &VisualTester) {
+fn save_test_results(analyses: &[(&str, &rav::testing::VisualAnalysis)], tester: &VisualTester) {
     // Create output directory
     if let Err(e) = fs::create_dir_all("test_outputs") {
         eprintln!("Warning: Could not create test_outputs directory: {}", e);

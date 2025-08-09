@@ -7,7 +7,7 @@ use crossterm::{
     ExecutableCommand,
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
-use speedy::{
+use rav::{
     config::Config,
     signal::SignalProcessor,
     testing::audio_generator::AudioGenerator,

@@ -7,13 +7,13 @@ use crossterm::{
     ExecutableCommand,
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
-use speedy::{
+use rav::{
     config::Config,
     signal::SignalProcessor,
     testing::audio_generator::AudioGenerator,
+    testing::bdd_framework::{BDDTestFramework, BDDTestResult},
     ui::{SpeedyV1Interface, VisualizationMode},
 };
-use std::io;
 use tokio::time::{interval, Duration};
 
 #[tokio::main]

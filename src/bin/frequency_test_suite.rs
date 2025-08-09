@@ -4,7 +4,7 @@ use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{error, info, warn};
 
-use speedy::{
+use rav::{
     config::Config,
     signal::SignalProcessor,
     testing::{
@@ -50,7 +50,7 @@ async fn main() -> Result<()> {
 
     // Initialize minimal logging for clean output
     tracing_subscriber::fmt()
-        .with_env_filter("frequency_test_suite=info,speedy=warn")
+        .with_env_filter("frequency_test_suite=info,rav=warn")
         .compact()
         .with_target(false)
         .init();
@@ -357,8 +357,8 @@ fn get_linear_sweep_profile() -> TestProfile {
         frequencies: (20..=20000).step_by(200).map(|f| f as f32).collect(),
         duration_ms: 50,
         amplitude: 0.5,
-        waveform: speedy::testing::audio_monitor::WaveformType::Sine,
-        sweep_type: speedy::testing::audio_monitor::SweepType::Linear,
+waveform: rav::testing::audio_monitor::WaveformType::Sine,
+sweep_type: rav::testing::audio_monitor::SweepType::Linear,
         test_all_visualizations: true,
     }
 }
@@ -370,7 +370,7 @@ fn get_bass_test_profile() -> TestProfile {
         duration_ms: 150,
         amplitude: 0.8,
         waveform: speedy::testing::audio_monitor::WaveformType::Sine,
-        sweep_type: speedy::testing::audio_monitor::SweepType::Stepped,
+sweep_type: rav::testing::audio_monitor::SweepType::Stepped,
         test_all_visualizations: false,
     }
 }
@@ -381,7 +381,7 @@ fn get_midrange_test_profile() -> TestProfile {
         frequencies: (200..=2000).step_by(100).map(|f| f as f32).collect(),
         duration_ms: 100,
         amplitude: 0.6,
-        waveform: speedy::testing::audio_monitor::WaveformType::Square,
+waveform: rav::testing::audio_monitor::WaveformType::Square,
         sweep_type: speedy::testing::audio_monitor::SweepType::Linear,
         test_all_visualizations: true,
     }
@@ -393,7 +393,7 @@ fn get_treble_test_profile() -> TestProfile {
         frequencies: (2000..=20000).step_by(1000).map(|f| f as f32).collect(),
         duration_ms: 75,
         amplitude: 0.4,
-        waveform: speedy::testing::audio_monitor::WaveformType::Triangle,
+waveform: rav::testing::audio_monitor::WaveformType::Triangle,
         sweep_type: speedy::testing::audio_monitor::SweepType::Linear,
         test_all_visualizations: true,
     }
@@ -405,8 +405,8 @@ fn get_noise_test_profile() -> TestProfile {
         frequencies: vec![0.0],
         duration_ms: 2000,
         amplitude: 0.3,
-        waveform: speedy::testing::audio_monitor::WaveformType::WhiteNoise,
-        sweep_type: speedy::testing::audio_monitor::SweepType::Continuous,
+waveform: rav::testing::audio_monitor::WaveformType::WhiteNoise,
+sweep_type: rav::testing::audio_monitor::SweepType::Continuous,
         test_all_visualizations: true,
     }
 }
@@ -421,8 +421,8 @@ fn get_stress_test_profile() -> TestProfile {
         frequencies,
         duration_ms: 25,
         amplitude: 0.7,
-        waveform: speedy::testing::audio_monitor::WaveformType::Square,
-        sweep_type: speedy::testing::audio_monitor::SweepType::Random,
+waveform: rav::testing::audio_monitor::WaveformType::Square,
+sweep_type: rav::testing::audio_monitor::SweepType::Random,
         test_all_visualizations: true,
     }
 }
