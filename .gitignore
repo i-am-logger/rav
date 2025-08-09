@@ -1,6 +1,6 @@
-.cargo/
-.direnv/
-.devenv/
-.rustup/
 /target
-.pre-commit-config.yaml
+test_outputs/
+# Ignore large logs and artifacts
+*.log
+*.ansi
+*.txt

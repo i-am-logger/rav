@@ -51,7 +51,7 @@ runs:
           gh pr edit --add-label "DRAFT"
         fi
       env:
-        GITHUB_TOKEN: ${{ github.token }}
+        GH_TOKEN: ${{ github.token }}
 
     - name: Create draft PR
       shell: bash
@@ -64,7 +64,7 @@ runs:
         fi
         gh pr edit --add-label "DRAFT"
       env:
-        GITHUB_TOKEN: ${{ github.token }}
+        GH_TOKEN: ${{ github.token }}
 
     - name: Update draft PR
       shell: bash
@@ -75,3 +75,5 @@ runs:
         else
           gh pr edit --title "$PR_TITLE"
         fi
+      env:
+        GH_TOKEN: ${{ github.token }}
