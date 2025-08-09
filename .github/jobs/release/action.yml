@@ -22,9 +22,10 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ github.token }}
+        PR_NUMBER: ${{ steps.release.outputs.pr }}
       run: |
-        gh pr review --approve
-        gh pr merge --squash --auto
+        gh pr review $PR_NUMBER --approve
+        gh pr merge $PR_NUMBER --squash --auto
 
     - name: Upload to Release
       if: ${{ steps.release.outputs.release_created }}
