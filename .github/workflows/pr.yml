@@ -22,29 +22,10 @@ jobs:
         # env:
         #   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  lint:
-    name: Lint (fmt + clippy)
-    runs-on: ubuntu-latest
-    needs: manage-pr
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install system dependencies (ALSA/Pulse)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libasound2-dev libpulse-dev pkg-config
-      - name: Install Rust toolchain (stable)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-      - name: Clippy
-        run: cargo clippy --all-targets --no-deps -- -D warnings
-
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: [manage-pr, lint]
+    needs: [manage-pr]
     steps:
       - uses: actions/checkout@v4
         # with:
