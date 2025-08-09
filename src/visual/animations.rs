@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 // Animation engine for smooth transitions and visual effects
 // Provides easing functions, interpolation, and time-based animations
 

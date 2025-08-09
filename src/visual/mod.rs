@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 // Modern visual system for the Speedy audio visualizer
 // Implements professional-grade graphics with smooth animations,
 // gradient effects, and responsive design principles

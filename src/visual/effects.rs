@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 // Advanced visual effects and custom rendering
 // Implements sophisticated graphics beyond basic ratatui widgets
 

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 // Advanced color system for professional-grade visualizations
 // Implements smooth gradients, HSV color space, and dynamic color generation
 

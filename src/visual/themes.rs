@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 // Theme system for consistent visual aesthetics
 // Each theme defines colors, styles, and visual effects
 
