@@ -1,6 +1,6 @@
 [package]
 name = "rav"
-version = "0.2.4"
+version = "0.2.5"
 edition = "2021"
 authors = ["RAV Team <i-am-logger@users.noreply.github.com>"]
 description = "RAV (Rust Audio Visualizer): High-performance terminal audio visualizer built with Rust and ratatui"
