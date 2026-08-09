@@ -1,0 +1,180 @@
+name: CI
+
+# A branch push fires only the pull_request event; master fires only push. A
+# single trigger per commit, so one concurrency group governs it.
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+concurrency:
+  group: ci-${{ github.head_ref || github.ref }}
+  # master is exempt: it publishes to an immutable registry, then tags and
+  # releases as separate steps. A cancel between them cannot be undone.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  format:
+    name: Format
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # cpal links ALSA on Linux; anything that compiles the audio module needs
+      # these headers.
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux
+      # --all-targets so the tests are linted too, not just the library.
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux
+      - run: cargo test --all-features
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux
+      # No -C target-cpu=native: this binary is attached to the release and runs
+      # on machines other than the one that built it.
+      - run: cargo build --release --bin rav
+      - uses: actions/upload-artifact@v7
+        with:
+          name: rav-linux-x86_64
+          path: target/release/rav
+          if-no-files-found: error
+
+  release:
+    name: Release
+    needs: [format, lint, test, build]
+    # Every gate is named: a job in needs: but absent from if: is not gated.
+    # !cancelled() rather than always(), so a cancelled run cannot publish.
+    if: |
+      !cancelled() &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/master' &&
+      needs.format.result == 'success' &&
+      needs.lint.result == 'success' &&
+      needs.test.result == 'success' &&
+      needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: read
+    outputs:
+      releases_created: ${{ steps.release-plz.outputs.releases_created }}
+    steps:
+      # fetch-depth: 0 for the tags release-plz diffs against. Credentials stay
+      # on the remote: this job pushes the tag it creates.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      # cargo publish compiles the packaged tarball before upload, and
+      # semver_check builds rustdoc JSON. Both link ALSA.
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: release-plz/action@v0.5.131
+        id: release-plz
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Download the binary
+        if: steps.release-plz.outputs.releases_created == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: rav-linux-x86_64
+          path: dist
+      - name: Attach it to the release
+        if: steps.release-plz.outputs.releases_created == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          TAG=$(git describe --tags --abbrev=0)
+          chmod +x dist/rav
+          mv dist/rav dist/rav-linux-x86_64
+          gh release upload "$TAG" dist/rav-linux-x86_64 --clobber
+
+  release-pr:
+    name: Release PR
+    # After release, not beside it: this computes the next bump from the newest
+    # tag, which the release job creates.
+    needs: [release]
+    if: |
+      !cancelled() &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/master' &&
+      needs.release.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # Credentials stay on the remote: this job pushes the release branch.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: release-plz/action@v0.5.131
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

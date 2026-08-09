@@ -10,27 +10,34 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        inherit (pkgs) lib stdenv;
+        # Cargo.toml is the single source of truth for the version. release-plz
+        # bumps it on release, and reading it here is what keeps the flake from
+        # drifting out of sync with it.
+        cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
       in
       {
         packages.default = pkgs.rustPlatform.buildRustPackage {
           pname = "rav";
-          version = "0.3.0";
+          version = cargoToml.package.version;
           src = ./.;
           cargoLock = {
             lockFile = ./Cargo.lock;
           };
-          nativeBuildInputs = with pkgs; [ pkg-config ];
-          buildInputs = with pkgs; [
-            alsa-lib
-            pulseaudio
-            jack2
-            portaudio
-            fftw
-          ];
+          # pkg-config/alsa-lib are only needed to link cpal's ALSA backend on
+          # Linux. On macOS cpal uses CoreAudio, which comes from the SDK in
+          # stdenv, so there is nothing extra to add.
+          nativeBuildInputs = lib.optionals stdenv.isLinux [ pkgs.pkg-config ];
+          buildInputs = lib.optionals stdenv.isLinux [ pkgs.alsa-lib ];
+
+          # `nix run` falls back to pname when this is unset, which happens to be
+          # right here - but only by coincidence. Stating it means adding or
+          # renaming a binary cannot silently change what `nix run` executes.
+          meta.mainProgram = "rav";
         };
 
         devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [
+          buildInputs = (with pkgs; [
             # Rust toolchain
             rustc
             cargo
@@ -38,42 +45,39 @@
             rust-analyzer
             clippy
 
-            # Audio development libraries
-            alsa-lib
-            alsa-utils
-            pulseaudio
-            jack2
-            portaudio
-            
             # Development tools
             pkg-config
-            gcc
-            
-            # System libraries often needed for audio
-            udev
-            
-            # Optional: for advanced audio processing
-            fftw
-            
+
             # Build tools
             cmake
             gnumake
-            
+
             # Audio analysis tools for testing
             sox
             ffmpeg
-            
-            # Debugging tools
-            gdb
-            
+
             # Visual testing and monitoring
             cargo-watch    # For continuous testing
-            util-linux     # Contains script command for terminal capture
-          ];
+          ]) ++ lib.optionals stdenv.isLinux (with pkgs; [
+            # Audio development libraries (Linux backends for cpal)
+            alsa-lib
+            alsa-utils
+
+            # System libraries often needed for audio
+            udev
+
+            # Debugging tools
+            gdb
+          ]);
 
           shellHook = ''
-            export PKG_CONFIG_PATH="${pkgs.alsa-lib.dev}/lib/pkgconfig:${pkgs.pulseaudio.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
-            export LD_LIBRARY_PATH="${pkgs.alsa-lib}/lib:${pkgs.pulseaudio}/lib:${pkgs.jack2}/lib:$LD_LIBRARY_PATH"
+            ${lib.optionalString stdenv.isLinux ''
+              # Interpolating alsa-lib forces it to evaluate, and it does not
+              # evaluate on darwin - so this has to be guarded here too, not just
+              # in buildInputs above.
+              export PKG_CONFIG_PATH="${pkgs.alsa-lib.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
+              export LD_LIBRARY_PATH="${pkgs.alsa-lib}/lib:$LD_LIBRARY_PATH"
+            ''}
             export RUST_BACKTRACE=1
             export RUST_LOG="rav=debug,info"
             
@@ -93,86 +97,32 @@
                 --ignore "scripts/**"
             }
             
-            visual-capture() {
-              echo "📺 Capturing visual output for analysis..."
-              OUTPUT_DIR="test_outputs/visual_watch"
-              mkdir -p "$OUTPUT_DIR"
-              TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-              OUTPUT_FILE="$OUTPUT_DIR/visual_capture_$TIMESTAMP"
-              
-              echo "Duration: 10 seconds"
-              echo "Output will be saved to: $OUTPUT_FILE.txt"
-              echo ""
-              echo "Starting visualizer - play some audio now!"
-              timeout 10 script -q -c "cargo run --bin rav" "$OUTPUT_FILE.txt" || true
-              
-              echo "✅ Capture completed: $OUTPUT_FILE.txt"
-              echo "Run 'visual-analyze $OUTPUT_FILE.txt' to analyze the output"
-            }
-            
-            visual-analyze() {
-              if [ $# -eq 0 ]; then
-                echo "❌ Usage: visual-analyze <captured_output_file>"
-                echo "Example: visual-analyze test_outputs/visual_watch/visual_capture_20250109_014700.txt"
-                return 1
-              fi
-              
-              if [ ! -f "$1" ]; then
-                echo "❌ File not found: $1"
-                return 1
-              fi
-              
-              echo "🔍 Analyzing visual output: $1"
-              cargo run --bin visual_analyzer "$1"
-            }
-            
             test-audio-pipeline() {
               echo "🧪 Testing audio pipeline functionality..."
               echo "This will validate that audio capture and processing work correctly"
               echo ""
               cargo run --bin test_audio_pipeline
             }
-            
-            comprehensive-test() {
-              echo "🧪 Running comprehensive visual and audio tests..."
-              echo "==============================================="
-              echo ""
-              
-              # Run BDD tests
-              echo "1. Running BDD test suite..."
-              cargo run --bin comprehensive_bdd_test
-              echo ""
-              
-              # Test audio pipeline
-              echo "2. Testing audio pipeline..."
-              test-audio-pipeline
-              echo ""
-              
-              # Capture visual output
-              echo "3. Capturing visual output..."
-              visual-capture
-              echo ""
-              
-              echo "✅ Comprehensive testing completed!"
-              echo "Check test_outputs/ directory for results"
-            }
-            
+
             echo "🚀 RAV Development Environment"
             echo "📦 Rust version: $(rustc --version)"
             echo "🔧 Cargo version: $(cargo --version)"
-            echo "🎵 Audio libraries: ALSA, PulseAudio, JACK available"
             echo ""
             echo "Available audio devices:"
-            aplay -l 2>/dev/null || echo "No audio playback devices found"
+            if [ "$(uname -s)" = "Darwin" ]; then
+              echo "🎵 Audio backend: CoreAudio (system audio via Background Music)"
+              system_profiler SPAudioDataType 2>/dev/null | grep -E '^        [A-Za-z]' || echo "Could not query CoreAudio"
+            else
+              echo "🎵 Audio backend: ALSA (system audio via a PulseAudio/PipeWire monitor source)"
+              aplay -l 2>/dev/null || echo "No audio playback devices found"
+            fi
             echo ""
             echo "Visual Testing Functions:"
             echo "  • visual-watch       - Continuous testing with cargo watch"
-            echo "  • visual-capture     - Capture 10s of visual output"
-            echo "  • visual-analyze     - Analyze captured output"
             echo "  • test-audio-pipeline - Test audio capture functionality"
-            echo "  • comprehensive-test - Run all tests and capture output"
             echo ""
-            echo "⚡ Ready to build advanced audio visualizer with ratatui!"
+            echo "This shell is the fallback for plain 'nix develop'; the project"
+            echo "itself uses devenv (see .envrc), which also has record-demo."
           '';
         };
       });

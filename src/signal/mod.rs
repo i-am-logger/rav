@@ -1,211 +1,99 @@
-use crate::audio::AudioData;
-use anyhow::Result;
-use realfft::{RealFftPlanner, RealToComplex};
-use std::sync::Arc;
-use tracing::debug;
+//! Signal analysis: FFT front end, bin-to-bar mapping, and bar/cap motion.
 
-pub struct SignalProcessor {
-    #[allow(dead_code)] // Used in future versions for resampling
-    sample_rate: u32,
-    #[allow(dead_code)] // Used for bounds checking and validation
-    frequency_bands: usize,
-    #[allow(dead_code)] // Used for frequency filtering
-    frequency_range: (f32, f32),
-    fft: Arc<dyn RealToComplex<f32>>,
-    #[allow(dead_code)] // Used for buffer size calculations
-    fft_size: usize,
-    spectrum_buffer: Vec<f32>,
-    magnitude_buffer: Vec<f32>,
-    band_frequencies: Vec<f32>,
-    smoothed_magnitudes: Vec<f32>,
-    smoothing_factor: f32,
-}
+pub mod ballistics;
+pub mod mapping;
+pub mod spectrum;
 
-impl SignalProcessor {
-    pub fn new(sample_rate: u32, frequency_bands: usize, frequency_range: (f32, f32)) -> Self {
-        let mut planner = RealFftPlanner::<f32>::new();
-        let fft_size = 1024; // We'll use a fixed FFT size for now
-        let fft = planner.plan_fft_forward(fft_size);
+#[cfg(test)]
+mod pipeline_tests {
+    //! End-to-end checks over the whole analysis chain, driven by generated
+    //! signals rather than live audio so they are deterministic.
 
-        // Calculate the frequencies for each band
-        let band_frequencies = Self::calculate_band_frequencies(
-            frequency_bands,
-            frequency_range,
-            sample_rate,
-            fft_size,
-        );
+    use super::mapping::{bin_for_hz, BarMap, DEFAULT_SCALE};
+    use super::spectrum::Spectrum;
+    use crate::testing::AudioGenerator;
 
-        debug!(
-            "Initialized signal processor with {} bands",
-            frequency_bands
-        );
-        debug!("Band frequencies: {:?}", band_frequencies);
+    const RATE: u32 = 48_000;
+    const BARS: usize = 60;
 
-        Self {
-            sample_rate,
-            frequency_bands,
-            frequency_range,
-            fft,
-            fft_size,
-            spectrum_buffer: vec![0.0; fft_size / 2 + 1],
-            magnitude_buffer: vec![0.0; frequency_bands],
-            band_frequencies,
-            smoothed_magnitudes: vec![0.0; frequency_bands],
-            smoothing_factor: 0.8,
-        }
-    }
-
-    fn calculate_band_frequencies(
-        frequency_bands: usize,
-        frequency_range: (f32, f32),
-        sample_rate: u32,
-        fft_size: usize,
-    ) -> Vec<f32> {
-        let (min_freq, max_freq) = frequency_range;
-        let nyquist = sample_rate as f32 / 2.0;
-        let max_freq = max_freq.min(nyquist);
-
-        // Use logarithmic scale for frequency bands (more natural for audio)
-        let log_min = min_freq.ln();
-        let log_max = max_freq.ln();
-        let log_step = (log_max - log_min) / (frequency_bands - 1) as f32;
-
-        (0..frequency_bands)
-            .map(|i| {
-                let log_freq = log_min + i as f32 * log_step;
-                let freq = log_freq.exp();
-
-                // Convert to FFT bin index
-                let bin = (freq * fft_size as f32 / sample_rate as f32).round() as usize;
-                bin.min(fft_size / 2) as f32
-            })
-            .collect()
-    }
-
-    pub fn process(&mut self, audio_data: &AudioData) -> Result<Vec<f32>> {
-        let samples = &audio_data.samples;
-        let fft_size = self.fft.len();
-
-        // Ensure we have enough samples for FFT
-        if samples.len() < fft_size {
-            return Ok(self.smoothed_magnitudes.clone());
-        }
-
-        // Apply Hanning window function to the audio data
-        let mut windowed_samples: Vec<f32> = samples
-            .iter()
-            .take(fft_size)
+    /// Analyse `samples` and return the index of the loudest bar.
+    fn loudest_bar(samples: &[f32]) -> usize {
+        let mut spectrum = Spectrum::new(Spectrum::DEFAULT_SIZE).unwrap();
+        let top = bin_for_hz(16_000, RATE, spectrum.bins());
+        let map = BarMap::with_top_bin(BARS, spectrum.bins(), top, DEFAULT_SCALE);
+        let magnitudes = spectrum.analyse(samples);
+        let mut bars = Vec::new();
+        map.sample(magnitudes, &mut bars);
+        bars.iter()
             .enumerate()
-            .map(|(i, &sample)| {
-                let window_val = 0.5
-                    * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (fft_size - 1) as f32).cos());
-                sample * window_val
-            })
-            .collect();
-
-        // Prepare output buffer for FFT
-        let mut spectrum = vec![num_complex::Complex::new(0.0f32, 0.0f32); fft_size / 2 + 1];
-
-        // Perform FFT
-        self.fft
-            .process(&mut windowed_samples, &mut spectrum)
-            .map_err(|e| anyhow::anyhow!("FFT processing failed: {:?}", e))?;
-
-        // Convert complex spectrum to magnitudes
-        for (i, complex) in spectrum.iter().enumerate() {
-            let magnitude = (complex.re * complex.re + complex.im * complex.im).sqrt();
-            if i < self.spectrum_buffer.len() {
-                self.spectrum_buffer[i] = magnitude;
-            }
-        }
-
-        // Map FFT bins to frequency bands
-        self.map_to_frequency_bands()?;
-
-        // Apply smoothing to reduce flickering
-        self.apply_smoothing();
-
-        Ok(self.smoothed_magnitudes.clone())
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .map(|(i, _)| i)
+            .unwrap()
     }
 
-    fn map_to_frequency_bands(&mut self) -> Result<()> {
-        // Reset magnitude buffer
-        self.magnitude_buffer.fill(0.0);
-
-        // For each frequency band, sum the corresponding FFT bins
-        for (band_idx, &_start_bin) in self.band_frequencies.iter().enumerate() {
-            if band_idx == 0 {
-                continue;
-            }
-
-            let start_bin = self.band_frequencies[band_idx - 1] as usize;
-            let end_bin = self.band_frequencies[band_idx] as usize;
-            let end_bin = end_bin.min(self.spectrum_buffer.len() - 1);
-
-            if start_bin <= end_bin {
-                let mut sum = 0.0;
-                let mut count = 0;
-
-                for bin in start_bin..=end_bin {
-                    if bin < self.spectrum_buffer.len() {
-                        sum += self.spectrum_buffer[bin];
-                        count += 1;
-                    }
-                }
-
-                if count > 0 {
-                    self.magnitude_buffer[band_idx - 1] = sum / count as f32;
-                }
-            }
-        }
-
-        Ok(())
+    /// Centre frequency a bar corresponds to.
+    fn bar_hz(bar: usize) -> f32 {
+        let spectrum = Spectrum::new(Spectrum::DEFAULT_SIZE).unwrap();
+        let top = bin_for_hz(16_000, RATE, spectrum.bins());
+        let map = BarMap::with_top_bin(BARS, spectrum.bins(), top, DEFAULT_SCALE);
+        let bin = map.positions()[bar];
+        bin * RATE as f32 / spectrum.size() as f32
     }
 
-    fn apply_smoothing(&mut self) {
-        for (i, &new_magnitude) in self.magnitude_buffer.iter().enumerate() {
-            if i < self.smoothed_magnitudes.len() {
-                self.smoothed_magnitudes[i] = self.smoothing_factor * self.smoothed_magnitudes[i]
-                    + (1.0 - self.smoothing_factor) * new_magnitude;
-            }
+    #[test]
+    fn a_tone_lands_in_a_bar_at_its_own_frequency() {
+        // Three semitones is generous, but it is the tolerance that catches an
+        // aliased mapping: any band table that folds many bars onto one bin puts
+        // a tone octaves away from where it belongs.
+        let mut gen = AudioGenerator::new(RATE as f32);
+        for hz in [220.0f32, 1000.0, 4000.0] {
+            let samples = gen.sine_wave(hz, 1.0, Spectrum::DEFAULT_SIZE);
+            let found = bar_hz(loudest_bar(&samples));
+            let error = (found / hz).log2().abs() * 12.0; // semitones
+            assert!(
+                error < 3.0,
+                "{hz}Hz landed at {found:.0}Hz ({error:.1} semitones out)"
+            );
         }
     }
 
-    #[allow(dead_code)] // Used for runtime configuration adjustments
-    pub fn set_smoothing_factor(&mut self, factor: f32) {
-        self.smoothing_factor = factor.clamp(0.0, 1.0);
-    }
-
-    #[allow(dead_code)] // Used for debugging and configuration validation
-    pub fn get_frequency_bands(&self) -> usize {
-        self.frequency_bands
-    }
-
-    #[allow(dead_code)] // Used for debugging and configuration validation
-    pub fn get_frequency_range(&self) -> (f32, f32) {
-        self.frequency_range
-    }
-
-    /// Normalize the magnitudes to a 0.0-1.0 range
-    pub fn normalize_magnitudes(&self, magnitudes: &[f32], sensitivity: f32) -> Vec<f32> {
-        if magnitudes.is_empty() {
-            return vec![];
+    #[test]
+    fn a_rising_sweep_moves_the_peak_rightwards() {
+        let mut gen = AudioGenerator::new(RATE as f32);
+        let mut last = 0usize;
+        for hz in [100.0f32, 500.0, 2000.0, 8000.0] {
+            let samples = gen.sine_wave(hz, 1.0, Spectrum::DEFAULT_SIZE);
+            let bar = loudest_bar(&samples);
+            assert!(bar >= last, "{hz}Hz went backwards: bar {bar} after {last}");
+            last = bar;
         }
+    }
 
-        // Find the maximum magnitude for normalization
-        let max_magnitude = magnitudes.iter().fold(0.0f32, |max, &val| max.max(val));
+    #[test]
+    fn silence_produces_no_output_at_all() {
+        let gen = AudioGenerator::new(RATE as f32);
+        let samples = gen.generate_silence(Spectrum::DEFAULT_SIZE);
+        let mut spectrum = Spectrum::new(Spectrum::DEFAULT_SIZE).unwrap();
+        assert!(spectrum.analyse(&samples).iter().all(|&m| m == 0.0));
+    }
 
-        if max_magnitude <= 0.0 {
-            return vec![0.0; magnitudes.len()];
-        }
-
-        // Apply sensitivity and normalize
-        magnitudes
-            .iter()
-            .map(|&magnitude| {
-                let normalized = (magnitude / max_magnitude) * sensitivity;
-                normalized.clamp(0.0, 1.0)
-            })
-            .collect()
+    #[test]
+    fn broadband_noise_lights_the_whole_display() {
+        // Energy everywhere must light bars everywhere. A mapping that collapses
+        // onto a handful of bins fails this while still passing a single-tone
+        // check.
+        let gen = AudioGenerator::new(RATE as f32);
+        let samples = gen.pink_noise(1.0, Spectrum::DEFAULT_SIZE);
+        let mut spectrum = Spectrum::new(Spectrum::DEFAULT_SIZE).unwrap();
+        let top = bin_for_hz(16_000, RATE, spectrum.bins());
+        let map = BarMap::with_top_bin(BARS, spectrum.bins(), top, DEFAULT_SCALE);
+        let magnitudes = spectrum.analyse(&samples);
+        let mut bars = Vec::new();
+        map.sample(magnitudes, &mut bars);
+        let lit = bars.iter().filter(|&&v| v > 0.0).count();
+        assert!(
+            lit > BARS * 3 / 4,
+            "only {lit} of {BARS} bars had any energy"
+        );
     }
 }

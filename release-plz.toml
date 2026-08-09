@@ -1,0 +1,34 @@
+# Release configuration. The workflow restricts releasing to master; this file
+# decides what gets released once there.
+
+[workspace]
+# Matches the tag format already in the repository's history.
+git_tag_name = "rav-v{{ version }}"
+
+git_release_enable = true
+
+# cargo-semver-checks before each release: a breaking change proposed as a patch
+# bump is rejected and the version escalated.
+semver_check = true
+
+# Publishing requires merging a Release PR. An ordinary commit landing on master
+# does not publish, however it got there. crates.io is immutable, so the second
+# merge is the point.
+release_always = false
+
+pr_labels = ["release", "automated"]
+
+[changelog]
+header = """# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+"""
+
+# Release commits are not changes. Parsed in, each one back-fills a changelog
+# entry and opens another release PR, which produces another release commit.
+commit_parsers = [
+    { message = "^chore(\\(.+\\))?: release", skip = true },
+]

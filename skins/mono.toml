@@ -1,0 +1,14 @@
+# rav skin — see docs/skins.md for the format.
+
+name = "mono"
+description = "Greys only. Height alone carries the level."
+
+[colors]
+# One colour for the whole bar. A grey ramp reads as a washed-out colour ramp
+# rather than a deliberate look; three tones is the entire design - grid dim,
+# bars mid, caps bright.
+bars = "white"
+grid = "bright-black"
+peak = "bright-white"
+
+scope = ["bright-white", "white", "white", "bright-black", "bright-black"]

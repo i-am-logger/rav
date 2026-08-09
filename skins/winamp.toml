@@ -1,0 +1,49 @@
+# rav skin — see docs/skins.md for the format.
+
+name = "winamp"
+description = "The classic green-to-red analyser, from Winamp's default skin."
+
+[about]
+source = "https://github.com/captbaritone/webamp"
+license = "MIT"
+copyright = "Copyright (c) 2015 Jordan Eldredge"
+note = """
+The colour values are transcribed from base-2.91's VISCOLOR.TXT as redistributed
+by Webamp, a reimplementation of Winamp 2.9 whose visualiser was reverse
+engineered from the original binaries. Webamp's MIT licence permits this, and
+its permission notice travels with the values: see LICENSE-MIT.txt alongside.
+The data originates as Nullsoft's Winamp default skin; both are credited.
+"""
+
+[colors]
+# 16 stops, foot of the bar first. VISCOLOR rows 2..=17, reversed - the file
+# stores them top-down, rav indexes by screen row, which counts up.
+bars = [
+  "#188408",  # 17, foot
+  "#299400",  # 16
+  "#319c08",  # 15
+  "#39b510",  # 14
+  "#32be10",  # 13
+  "#29ce10",  # 12
+  "#94de21",  # 11
+  "#bdde29",  # 10
+  "#d6b521",  # 9
+  "#dea518",  # 8
+  "#c67b08",  # 7
+  "#d67300",  # 6
+  "#d66600",  # 5
+  "#d65a00",  # 4
+  "#ce2910",  # 3
+  "#ef3110",  # 2, tip
+]
+
+# One colour, used for every row. A skin may give 16 instead, to match `bars`
+# stop for stop - see `terminal.toml`.
+grid = "#182129"
+
+# The peak caps. Grey in this skin, not white.
+peak = "#969696"
+
+# The oscilloscope, 5 levels, centre of the trace first. The trace is brightest
+# along the centre line and fades as it swings away.
+scope = ["#ffffff", "#d6d6de", "#b5bdbd", "#a0aaaf", "#949ca5"]
