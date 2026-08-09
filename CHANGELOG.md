@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.0-beta.2](https://github.com/i-am-logger/rav/compare/rav-v1.0.0-beta.1...rav-v1.0.0-beta.2) - 2026-08-09
+
+### Fixed
+
+- *(ci)* take the release tag from release-plz output, not git describe ([#44](https://github.com/i-am-logger/rav/pull/44))
+
 ## [1.0.0-beta.1](https://github.com/i-am-logger/rav/releases/tag/rav-v1.0.0-beta.1) - 2026-08-09
 
 First release on crates.io.
