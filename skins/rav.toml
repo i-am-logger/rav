@@ -1,0 +1,78 @@
+# rav skin — see docs/skins.md for the format.
+
+name = "rav"
+description = "Winamp's ramp over a backdrop of its own colours, dimmed."
+
+[about]
+source = "https://github.com/captbaritone/webamp"
+license = "MIT"
+copyright = "Copyright (c) 2015 Jordan Eldredge"
+note = """
+The analyser ramp is the one from base-2.91's VISCOLOR.TXT as redistributed by
+Webamp, a reimplementation of Winamp 2.9 whose visualiser was reverse engineered
+from the original binaries. Webamp's MIT licence permits this and its permission
+notice travels with the values.
+
+What is rav's own is the backdrop: where the original uses one flat dim colour
+for the whole panel, this uses each stop's own colour at 12% brightness, so
+an unlit column is a shadow of the bar that would fill it. `winamp.toml` is the
+faithful reproduction; this is the one to look at.
+"""
+
+[colors]
+# 16 stops, foot of the bar first.
+bars = [
+  "#188408",  # foot
+  "#299400",
+  "#319c08",
+  "#39b510",
+  "#32be10",
+  "#29ce10",
+  "#94de21",
+  "#bdde29",
+  "#d6b521",
+  "#dea518",
+  "#c67b08",
+  "#d67300",
+  "#d66600",
+  "#d65a00",
+  "#ce2910",
+  "#ef3110",  # tip
+]
+
+# Each bar colour at 12% brightness, written out rather than asked for with
+# `darken`. All three channels are scaled together, which is what keeps the hue -
+# scaling per channel drains the ambers towards brown on the way down.
+#
+# Spelled out because these are exact values a skin should own, not a transform
+# applied to it. `darken` exists for colours that cannot be written down: an ANSI
+# name has no number until the terminal is asked what it means.
+#
+# The two reds near the top are not a mistake. Winamp's ramp dips there - stop 14
+# is darker than both its neighbours - and dimming makes that visible as a band,
+# because the eye reads small steps near black far more readily than the same
+# step at full strength. It is left alone: the ramp is the ramp.
+grid = [
+  "#031001",  # foot
+  "#051200",
+  "#061301",
+  "#071602",
+  "#061702",
+  "#051902",
+  "#121b04",
+  "#171b05",
+  "#1a1604",
+  "#1b1403",
+  "#180f01",
+  "#1a0e00",
+  "#1a0c00",
+  "#1a0b00",
+  "#190502",
+  "#1d0602",  # tip
+]
+
+# The peak caps. Grey, not white.
+peak = "#969696"
+
+# The oscilloscope, 5 levels, centre of the trace first.
+scope = ["#ffffff", "#d6d6de", "#b5bdbd", "#a0aaaf", "#949ca5"]

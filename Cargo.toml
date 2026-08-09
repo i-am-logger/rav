@@ -1,13 +1,28 @@
 [package]
 name = "rav"
-version = "0.2.4"
+version = "1.0.0-beta.1"
+# There are two binaries, so `cargo run` cannot guess. Without this it errors
+# out and tells you to pass --bin, which is a poor first impression.
+default-run = "rav"
 edition = "2021"
 authors = ["RAV Team <i-am-logger@users.noreply.github.com>"]
-description = "RAV (Rust Audio Visualizer): High-performance terminal audio visualizer built with Rust and ratatui"
+description = "Rust audio visualiser: a real-time spectrum analyser with bars, peak caps and an oscilloscope, in truecolour"
 license-file = "LICENSE"
 repository = "https://github.com/i-am-logger/rav"
-keywords = ["audio", "visualizer", "terminal", "tui", "cava"]
-categories = ["multimedia::audio", "command-line-utilities"]
+homepage = "https://github.com/i-am-logger/rav"
+documentation = "https://github.com/i-am-logger/rav#readme"
+readme = "README.md"
+# crates.io allows at most five keywords, each at most 20 characters.
+keywords = ["winamp", "audio", "visualizer", "spectrum", "tui"]
+categories = ["multimedia::audio", "command-line-utilities", "visualization"]
+exclude = ["assets/demo.gif", ".github/", "devenv.nix", "devenv.yaml", "devenv.lock"]
+
+# Denied rather than warned: a warning in a `nix build` scrolls past in CI logs
+# and nobody sees it. `dead_code` is a member of `unused`, so this covers the
+# cross-platform case that started it - fields used only behind
+# `#[cfg(target_os = "macos")]` are genuinely dead on Linux and should say so.
+[lints.rust]
+unused = "deny"
 
 [dependencies]
 # Terminal User Interface
@@ -15,11 +30,8 @@ ratatui = "0.28"
 crossterm = "0.28"
 
 # Audio capture and processing
-alsa = "0.9"
+# cpal is the only backend used; it selects ALSA on Linux and CoreAudio on macOS.
 cpal = "0.15"
-portaudio-rs = "0.3"
-libpulse-binding = "2.28"
-libpulse-simple-binding = "2.28"
 
 # Signal processing and FFT
 rustfft = "6.2"
@@ -27,15 +39,10 @@ realfft = "3.3"
 
 # Configuration and serialization
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-regex = "1.0"
-chrono = { version = "0.4", features = ["serde"] }
 toml = "0.8"
-confy = "0.6"
 
 # Error handling and logging
 anyhow = "1.0"
-thiserror = "2.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
@@ -43,51 +50,22 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio = { version = "1.0", features = ["full"] }
 flume = "0.11"
 
-# Mathematical operations
-num-complex = "0.4"
-num-traits = "0.2"
-
 # Utilities
 clap = { version = "4.5", features = ["derive"] }
-dirs = "5.0"
-once_cell = "1.19"
-rand = "0.8"
+# Only for poll(2), so the terminal palette query can wait with a deadline
+# instead of blocking forever on a terminal that never answers.
+libc = "0.2"
 
-[dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
-proptest = "1.5"
+dirs = "5.0"
+rand = "0.8"
 
 [[bin]]
 name = "rav"
 path = "src/main.rs"
 
 [[bin]]
-name = "visual_test"
-path = "src/bin/visual_test.rs"
-
-[[bin]]
-name = "comprehensive_visual_test"
-path = "src/bin/comprehensive_visual_test.rs"
-
-[[bin]]
-name = "test_v1_interface"
-path = "src/bin/test_v1_interface.rs"
-
-[[bin]]
-name = "test_v1_with_visual_framework"
-path = "src/bin/test_v1_with_visual_framework.rs"
-
-[[bin]]
-name = "visual_analyzer"
-path = "src/bin/visual_analyzer.rs"
-
-[[bin]]
 name = "test_audio_pipeline"
 path = "src/bin/test_audio_pipeline.rs"
-
-[[bin]]
-name = "frequency_test_suite"
-path = "src/bin/frequency_test_suite.rs"
 
 [profile.release]
 lto = true
@@ -97,3 +75,7 @@ strip = true
 
 [profile.dev]
 opt-level = 1
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.4"
+objc2-foundation = "0.3.2"

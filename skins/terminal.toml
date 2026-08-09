@@ -1,0 +1,38 @@
+# rav skin — see docs/skins.md for the format.
+
+name = "terminal"
+description = "Your terminal's own 16 colours, so rav follows whatever theme you run."
+
+# How much brightness the backdrop keeps. The dark twins below are the darkest a
+# theme names in those hues, and behind a full-height column they are still far
+# too bright - so rav asks the terminal what they actually are and scales them.
+# A number rather than `true` because this is the dial: lower is darker.
+darken = 0.25
+
+[colors]
+# Named colours resolve to ANSI slots, which the terminal paints from its theme.
+# That is the whole point of this skin: it has no opinion about the actual hues.
+#
+# 16 stops, foot of the bar first. Green-heavy like the Winamp ramp, so the foot
+# of a tall bar stays one colour and the top still sweeps through to red.
+bars = [
+  "bright-green", "bright-green", "bright-green", "bright-green",
+  "bright-green", "bright-green", "bright-green", "bright-green",
+  "bright-yellow", "bright-yellow", "bright-yellow", "bright-yellow",
+  "bright-red", "bright-red", "bright-red", "bright-red",
+]
+
+# 16 stops rather than one, matching `bars` stop for stop. Every ANSI colour has
+# a dark twin - `green` is the normal slot, `bright-green` the bright one - so an
+# unlit row can be the dark version of the colour it lights up in: dark green low
+# down, dark yellow through the middle, dark red at the top.
+grid = [
+  "green", "green", "green", "green",
+  "green", "green", "green", "green",
+  "yellow", "yellow", "yellow", "yellow",
+  "red", "red", "red", "red",
+]
+
+peak = "bright-white"
+
+scope = ["bright-white", "white", "white", "bright-black", "bright-black"]
