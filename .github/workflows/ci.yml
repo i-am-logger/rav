@@ -139,12 +139,17 @@ jobs:
         with:
           name: rav-linux-x86_64
           path: dist
+      # The tag comes from release-plz's own output. It creates the tag through
+      # the GitHub API, so the tag exists on the remote while this checkout has
+      # none of it - git describe finds nothing here.
       - name: Attach it to the release
         if: steps.release-plz.outputs.releases_created == 'true'
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          RELEASES: ${{ steps.release-plz.outputs.releases }}
         run: |
-          TAG=$(git describe --tags --abbrev=0)
+          TAG=$(echo "$RELEASES" | jq -r '.[0].tag')
+          test -n "$TAG" && test "$TAG" != "null"
           chmod +x dist/rav
           mv dist/rav dist/rav-linux-x86_64
           gh release upload "$TAG" dist/rav-linux-x86_64 --clobber
