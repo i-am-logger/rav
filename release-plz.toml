@@ -7,6 +7,10 @@ git_tag_name = "rav-v{{ version }}"
 
 git_release_enable = true
 
+# "auto" marks a version carrying a pre-release suffix as a GitHub pre-release,
+# so a beta does not present itself as the latest stable download.
+git_release_type = "auto"
+
 # cargo-semver-checks before each release: a breaking change proposed as a patch
 # bump is rejected and the version escalated.
 semver_check = true
@@ -27,8 +31,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 """
 
-# Release commits are not changes. Parsed in, each one back-fills a changelog
-# entry and opens another release PR, which produces another release commit.
+# The changelog carries what a user of the crate would notice. Everything else -
+# chore, ci, build, test, refactor, and release-plz's own release commits - is
+# skipped by the trailing catch-all.
+#
+# Group names match the Keep a Changelog headings the header above promises.
+# These replace git-cliff's defaults rather than adding to them, so feat and fix
+# have to be listed for them to appear at all.
 commit_parsers = [
-    { message = "^chore(\\(.+\\))?: release", skip = true },
+    { message = "^feat", group = "Added" },
+    { message = "^fix", group = "Fixed" },
+    { message = "^perf", group = "Performance" },
+    { message = "^doc", group = "Documentation" },
+    { message = ".*", skip = true },
 ]
