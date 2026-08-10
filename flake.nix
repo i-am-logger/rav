@@ -4,9 +4,10 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    crane.url = "github:ipetkov/crane";
   };
 
-  outputs = { nixpkgs, flake-utils, ... }:
+  outputs = { nixpkgs, flake-utils, crane, ... }:
     flake-utils.lib.eachSystem [
       "x86_64-linux"
       "aarch64-linux"
@@ -16,34 +17,50 @@
         let
           pkgs = nixpkgs.legacyPackages.${system};
           inherit (pkgs) lib stdenv;
-          # Cargo.toml is the single source of truth for the version. release-plz
-          # bumps it on release, and reading it here is what keeps the flake from
-          # drifting out of sync with it.
-          cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
+          craneLib = crane.mkLib pkgs;
 
-          rav = pkgs.rustPlatform.buildRustPackage {
-            pname = "rav";
-            version = cargoToml.package.version;
+          # src/visual/skin.rs pulls skins/*.toml in with include_str!, so they
+          # have to survive filtering. crane's filter keeps every .toml today,
+          # which covers them incidentally rather than deliberately; the second
+          # clause states the requirement so a narrower filter upstream cannot
+          # quietly break the build.
+          src = lib.cleanSourceWith {
             src = ./.;
-            cargoLock = {
-              lockFile = ./Cargo.lock;
-            };
-            # pkg-config/alsa-lib are only needed to link cpal's ALSA backend on
-            # Linux. On macOS cpal uses CoreAudio, which comes from the SDK in
-            # stdenv, so there is nothing extra to add.
+            filter = path: type:
+              (craneLib.filterCargoSources path type)
+              || (lib.hasInfix "/skins/" path);
+            name = "source";
+          };
+
+          # pkg-config/alsa-lib are only needed to link cpal's ALSA backend on
+          # Linux. On macOS cpal uses CoreAudio, which comes from the SDK in
+          # stdenv, so there is nothing extra to add.
+          commonArgs = {
+            inherit src;
+            strictDeps = true;
             nativeBuildInputs = lib.optionals stdenv.isLinux [ pkgs.pkg-config ];
             buildInputs = lib.optionals stdenv.isLinux [ pkgs.alsa-lib ];
+          };
 
-            # buildRustPackage runs cargo test by default. The test job already
-            # does, with a cargo cache this build cannot use, so this exists to
-            # prove packaging rather than to re-prove the tests.
+          # The dependencies as a store path of their own, built from a stub
+          # crate so the hash follows Cargo.lock rather than src. Editing rav
+          # leaves this untouched, so the 119 dependency crates are restored
+          # from the store instead of recompiled.
+          cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+
+          rav = craneLib.buildPackage (commonArgs // {
+            inherit cargoArtifacts;
+
+            # crane runs cargo test by default. The checks job already does,
+            # with a cargo cache this build cannot use, so this proves packaging
+            # rather than re-proving the tests.
             doCheck = false;
 
-            # `nix run` falls back to pname when this is unset, which happens to be
-            # right here - but only by coincidence. Stating it means adding or
-            # renaming a binary cannot silently change what `nix run` executes.
+            # `nix run` falls back to pname when this is unset, which happens to
+            # be right here - but only by coincidence. Stating it means adding
+            # or renaming a binary cannot silently change what `nix run` runs.
             meta.mainProgram = "rav";
-          };
+          });
         in
         {
           packages.default = rav;
