@@ -87,7 +87,7 @@ pub fn cap_row(peak: f32, height: u16) -> u16 {
 ///
 /// The value is chosen so a four-row display lands on one green, one yellow,
 /// one orange and one red - a full hue sweep in the smallest window worth
-/// drawing. It is a display judgement, not a value any API or skin owns.
+/// drawing. It is a display judgement, not a value any API or theme owns.
 ///
 /// The alternative - sampling at uniform *perceptual* distance - gives red,
 /// yellow, yellow-green, green at four rows, with no orange at all.
@@ -97,10 +97,10 @@ pub fn cap_row(peak: f32, height: u16) -> u16 {
 /// across hues. Spanning the hues is what reads as a spectrum.
 ///
 /// Applied *only* while subsampling; once there is a row per stop the ramp is
-/// used exactly as the skin has it.
+/// used exactly as the theme has it.
 const SUBSAMPLE_SKEW: f32 = 0.57;
 
-/// Map a screen row (counted from the bottom) onto a stop in the skin's ramp.
+/// Map a screen row (counted from the bottom) onto a stop in the theme's ramp.
 ///
 /// The ramp is **stretched** to fit, so the bottom row always takes the first
 /// stop and the top row the last, at any height. The original panel was always
@@ -108,7 +108,7 @@ const SUBSAMPLE_SKEW: f32 = 0.57;
 /// choose, and sampling a fixed 16-stop ramp positionally means a display
 /// shorter than 16 rows never reaches red.
 ///
-/// Stops stay discrete rather than interpolated: they are 16 colours the skin
+/// Stops stay discrete rather than interpolated: they are 16 colours the theme
 /// actually contains, and blending would invent ones it does not.
 #[inline]
 pub fn ramp_index(row_from_bottom: u16, height: u16, bands: usize) -> usize {
@@ -120,7 +120,7 @@ pub fn ramp_index(row_from_bottom: u16, height: u16, bands: usize) -> usize {
     }
     let t = row_from_bottom.min(height - 1) as f32 / (height - 1) as f32;
     // Only skew while stops are being skipped. With a row per stop every colour
-    // is reachable anyway and the ramp should be used exactly as the skin has it.
+    // is reachable anyway and the ramp should be used exactly as the theme has it.
     let t = if (height as usize) < bands {
         t.powf(SUBSAMPLE_SKEW)
     } else {

@@ -1,4 +1,4 @@
-# rav skin — see docs/skins.md for the format.
+# rav theme — see docs/themes.md for the format.
 
 name = "rav"
 description = "Winamp's ramp over a backdrop of its own colours, dimmed."
@@ -44,7 +44,7 @@ bars = [
 # `darken`. All three channels are scaled together, which is what keeps the hue -
 # scaling per channel drains the ambers towards brown on the way down.
 #
-# Spelled out because these are exact values a skin should own, not a transform
+# Spelled out because these are exact values a theme should own, not a transform
 # applied to it. `darken` exists for colours that cannot be written down: an ANSI
 # name has no number until the terminal is asked what it means.
 #

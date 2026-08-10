@@ -38,7 +38,7 @@ Or from source: `cargo build --release && ./target/release/rav`.
 
 ```
 rav                   # analyser
-rav --skin winamp     # rav, winamp, terminal, mono, or a path to a skin
+rav --theme winamp    # rav, winamp, terminal, mono, or a path to a theme
 rav --list-devices    # what rav can capture from
 rav -d "<name>"       # capture from a named device
 rav --clean           # keep logging out of the display
@@ -50,7 +50,7 @@ Everything else is a keypress, and `h` shows the lot with their current values:
 |---|---|
 | `q` / `Esc` | quit |
 | `Space` / `Tab` / `o` | switch analyser ↔ oscilloscope |
-| `s` | skin — rav, winamp, terminal, mono |
+| `s` | theme — rav, winamp, terminal, mono |
 | `b` | bar style — blocks, solid, thick, half, line, shade |
 | `p` | peak caps — fine, coarse, off |
 | `g` | grid behind the bars, on/off |
@@ -62,7 +62,7 @@ Everything else is a keypress, and `h` shows the lot with their current values:
 
 Logs go to `rav.log`, never to the display.
 
-## Skins
+## Themes
 
 Four, cycled with `s` and all compiled in — the binary needs nothing on disk:
 
@@ -73,8 +73,8 @@ Four, cycled with `s` and all compiled in — the binary needs nothing on disk:
 | **terminal** | the terminal's own 16 colours, so rav follows your theme |
 | **mono** | greys only; height alone carries the level |
 
-A skin is a TOML file, not code — `rav --skin ./sunset.toml`. See
-**[docs/skins.md](docs/skins.md)** and send one.
+A theme is a TOML file, not code — `rav --theme ./sunset.toml`. See
+**[docs/themes.md](docs/themes.md)** and send one.
 
 ## Capturing system audio
 
@@ -87,13 +87,13 @@ See **[docs/developing.md](docs/developing.md)**.
 
 ## Attribution
 
-The ballistics, and the ramp the `rav` and `winamp` skins use, come from
+The ballistics, and the ramp the `rav` and `winamp` themes use, come from
 [Webamp](https://github.com/captbaritone/webamp) — MIT, © 2015 Jordan Eldredge.
 
 ## What's next
 
 A GUI. Only `src/ui/` knows about terminal cells, so the same display and the
-same skins can be drawn anywhere.
+same themes can be drawn anywhere.
 
 ## License
 

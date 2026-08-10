@@ -36,9 +36,9 @@ struct Args {
     #[arg(long)]
     clean: bool,
 
-    /// Skin: `rav`, `winamp`, `terminal`, `mono`, or a name/path of a skin file
+    /// Theme: `rav`, `winamp`, `terminal`, `mono`, or a name/path of a theme file
     #[arg(long, value_name = "NAME|PATH")]
-    skin: Option<String>,
+    theme: Option<String>,
 }
 
 #[tokio::main]
@@ -146,11 +146,11 @@ async fn main() -> Result<()> {
         audio_capture.sample_rate(),
     )?;
 
-    // A named skin that cannot be read is an error rather than a silent fall
-    // back to the default: the display would look right and be the wrong skin.
-    if let Some(skin) = args.skin.as_deref() {
-        app.set_skin(rav::visual::Skin::load(skin)?);
-        info!("Using skin: {skin}");
+    // A named theme that cannot be read is an error rather than a silent fall
+    // back to the default: the display would look right and be the wrong theme.
+    if let Some(theme) = args.theme.as_deref() {
+        app.set_theme(rav::visual::Theme::load(theme)?);
+        info!("Using theme: {theme}");
     }
 
     // Prefer a CoreAudio process tap. It captures every process' output ahead of

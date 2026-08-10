@@ -156,7 +156,7 @@
   # the same size as the committed one and drops straight into the README.
   #
   # The recording is a guided tour rather than a static shot - it drives rav from
-  # the outside while filming, so the GIF shows the three skins and then the
+  # the outside while filming, so the GIF shows the three themes and then the
   # oscilloscope instead of one view for the whole clip. RAV_DEMO_TOUR is a list
   # of `seconds:key` steps: hold for that many seconds, then send that key.
   # `-` sends nothing, which is how the last segment gets its screen time.
@@ -182,9 +182,9 @@
     # re-record at a higher rate is pending.
     FPS="''${RAV_DEMO_FPS:-25}"
     LEAD="''${RAV_DEMO_LEAD:-5}"
-    # Every skin, then the oscilloscope, then the help overlay - and back to the
+    # Every theme, then the oscilloscope, then the help overlay - and back to the
     # defaults, so the GIF loops from the same frame it started on. There is one
-    # `s` per skin: the last press is what returns to the first, and leaving it
+    # `s` per theme: the last press is what returns to the first, and leaving it
     # out is how the tour quietly stops ending where it began.
     TOUR="''${RAV_DEMO_TOUR:-3:s 3:s 3:s 3:s 1:space 4:space 1:h 4:h 2:-}"
     # Total duration is the sum of the tour's holds, so the two never drift.

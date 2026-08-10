@@ -1,7 +1,7 @@
 //! The analyser view: bars, peak caps and the dotted background behind them.
 
 use crate::ui::scale::{CAP_LOW, CAP_MID, bar_eighths, cap_position, ramp_index, segment_top};
-use crate::visual::{Skin, Theme};
+use crate::visual::{Palette, Theme};
 use ratatui::{buffer::Buffer, layout::Rect, style::Color, widgets::Widget};
 
 /// Eighth-block glyphs, empty through full.
@@ -348,9 +348,9 @@ impl Widget for Analyzer<'_> {
 ///
 /// Colour is a function of the row, never of the bar's own value — that is what
 /// makes a tall bar and a short one agree on colour where they overlap, which is
-/// the look this reproduces. Recomputed only when the height or skin changes.
-pub fn row_colors(height: u16, skin: &Skin) -> Vec<Color> {
-    stretch(&skin.bars, height)
+/// the look this reproduces. Recomputed only when the height or theme changes.
+pub fn row_colors(height: u16, theme: &Theme) -> Vec<Color> {
+    stretch(&theme.bars, height)
 }
 
 /// Backdrop colour for every screen row, bottom-up.
@@ -359,18 +359,18 @@ pub fn row_colors(height: u16, skin: &Skin) -> Vec<Color> {
 /// lit row that would replace it are always the same stop - the backdrop is a
 /// preview of the colour a bar reaches when it gets there.
 ///
-/// This is where a skin's `darken` is applied, because it is the only place that
-/// has the terminal's palette. A skin that named `green` gets *this* terminal's
+/// This is where a theme's `darken` is applied, because it is the only place that
+/// has the terminal's palette. A theme that named `green` gets *this* terminal's
 /// green, scaled - still the user's theme, just further down. A terminal that
 /// will not say what its green is leaves the colour alone; there is nothing to
 /// scale, and inventing one would replace the theme rather than dim it.
-pub fn grid_colors(height: u16, skin: &Skin, theme: &Theme) -> Vec<Color> {
-    let stops: Vec<Color> = match skin.darken {
-        None => skin.grid.clone(),
-        Some(floor) => skin
+pub fn grid_colors(height: u16, theme: &Theme, palette: &Palette) -> Vec<Color> {
+    let stops: Vec<Color> = match theme.darken {
+        None => theme.grid.clone(),
+        Some(floor) => theme
             .grid
             .iter()
-            .map(|&c| match theme.rgb(c) {
+            .map(|&c| match palette.rgb(c) {
                 // All three channels scale together, which keeps the hue.
                 // Scaling per channel drains a saturated colour towards black by
                 // way of brown.
@@ -400,16 +400,16 @@ mod tests {
     use crate::ui::scale::CAP_HIGH;
     use ratatui::buffer::Buffer;
 
-    /// The default skin's backdrop colour for a given screen row. It is a ramp,
+    /// The default theme's backdrop colour for a given screen row. It is a ramp,
     /// not one flat colour, so the row matters.
     fn fill_color_at(y: u16, height: u16) -> Color {
-        let colors = grid_colors(height, &Skin::default(), &Theme::default());
+        let colors = grid_colors(height, &Theme::default(), &Palette::default());
         colors[(height - 1 - y) as usize]
     }
 
-    /// The default skin's cap colour.
+    /// The default theme's cap colour.
     fn cap_color() -> Color {
-        Skin::default().peak
+        Theme::default().peak
     }
 
     /// For tests about the bars themselves. Caps rest on the bottom row now, so
@@ -452,14 +452,14 @@ mod tests {
     ) -> Buffer {
         let area = Rect::new(0, 0, w, h);
         let mut buf = Buffer::empty(area);
-        let skin = Skin::default();
-        let colors = row_colors(h, &skin);
-        let backdrop = grid.then(|| grid_colors(h, &skin, &Theme::default()));
+        let theme = Theme::default();
+        let colors = row_colors(h, &theme);
+        let backdrop = grid.then(|| grid_colors(h, &theme, &Palette::default()));
         Analyzer {
             bars,
             peaks,
             row_colors: &colors,
-            cap_color: skin.peak,
+            cap_color: theme.peak,
             grid: backdrop.as_deref(),
             bar_style: style,
             layout: BarLayout {
@@ -505,10 +505,10 @@ mod tests {
     #[test]
     fn the_ramp_runs_green_at_the_bottom_to_red_at_the_top() {
         let buf = render_bars(&[1.0], 1, 16, false);
-        assert_eq!(buf[(0, 15)].fg, Skin::default().bars[0], "bottom is green");
+        assert_eq!(buf[(0, 15)].fg, Theme::default().bars[0], "bottom is green");
         assert_eq!(
             buf[(0, 0)].fg,
-            *Skin::default().bars.last().unwrap(),
+            *Theme::default().bars.last().unwrap(),
             "top is red"
         );
     }
@@ -571,7 +571,7 @@ mod tests {
         // terminal, so the index is clamped instead.
         let area = Rect::new(0, 0, 1, 40);
         let mut buf = Buffer::empty(area);
-        let colors = row_colors(24, &Skin::default()); // deliberately short
+        let colors = row_colors(24, &Theme::default()); // deliberately short
         Analyzer {
             bars: &[1.0],
             peaks: &[1.0],
@@ -837,12 +837,12 @@ mod tests {
     fn darkening_scales_the_backdrop_and_keeps_its_hue() {
         // All three channels together, never per channel: a saturated colour has
         // to stay itself on the way down, not drift towards brown.
-        let skin = Skin {
+        let theme = Theme {
             grid: vec![Color::Rgb(240, 48, 16); 16],
             darken: Some(0.25),
-            ..Skin::default()
+            ..Theme::default()
         };
-        let colors = grid_colors(16, &skin, &Theme::default());
+        let colors = grid_colors(16, &theme, &Palette::default());
         assert_eq!(
             colors[0],
             Color::Rgb(60, 12, 4),
@@ -852,17 +852,17 @@ mod tests {
 
     #[test]
     fn a_named_backdrop_is_darkened_through_the_terminals_own_palette() {
-        // The skin said `green`, so the answer has to be *this* terminal's green
+        // The theme said `green`, so the answer has to be *this* terminal's green
         // taken down - not a green rav picked.
-        let skin = Skin {
+        let theme = Theme {
             grid: vec![Color::Green; 16],
             darken: Some(0.5),
-            ..Skin::default()
+            ..Theme::default()
         };
 
         // A terminal that will not say leaves the colour alone; inventing one
         // would replace the theme rather than dim it.
-        let silent = grid_colors(16, &skin, &Theme::default());
+        let silent = grid_colors(16, &theme, &Palette::default());
         assert_eq!(silent[0], Color::Green);
     }
 
@@ -874,8 +874,8 @@ mod tests {
         for style in [BarStyle::Blocks, BarStyle::Shade] {
             let area = Rect::new(0, 0, 1, 4);
             let mut buf = Buffer::empty(area);
-            let skin = Skin::default();
-            let colors = row_colors(4, &skin);
+            let theme = Theme::default();
+            let colors = row_colors(4, &theme);
             Analyzer {
                 bars: &[0.0],
                 peaks: &[0.0],

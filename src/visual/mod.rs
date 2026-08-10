@@ -1,7 +1,7 @@
 //! Colour data for the visualiser.
 
-pub mod skin;
+pub mod palette;
 pub mod theme;
 
-pub use skin::Skin;
+pub use palette::Palette;
 pub use theme::Theme;

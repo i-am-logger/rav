@@ -1,4 +1,4 @@
-# rav skin — see docs/skins.md for the format.
+# rav theme — see docs/themes.md for the format.
 
 name = "mono"
 description = "Greys only. Height alone carries the level."

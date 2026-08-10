@@ -13,7 +13,7 @@ use crate::{
         },
         spectrum::{MAX_HEIGHT, Spectrum},
     },
-    visual::{Skin, Theme},
+    visual::{Palette, Theme},
 };
 use analyzer::{Analyzer, BarLayout, BarStyle, Peaks, grid_colors, row_colors};
 use anyhow::Result;
@@ -132,15 +132,15 @@ pub struct App {
     sampled: Vec<f32>,
     bands: Vec<f32>,
 
-    skin: Skin,
-    /// A skin loaded from disk by `--skin`, kept so the `s` cycle returns to it.
-    loaded_skin: Option<Skin>,
+    theme: Theme,
+    /// A theme loaded from disk by `--theme`, kept so the `s` cycle returns to it.
+    loaded_theme: Option<Theme>,
     row_colors: Vec<Color>,
     /// Backdrop colour per row, cached with `row_colors` and rebuilt with it.
     grid_colors: Vec<Color>,
-    /// The terminal's own palette, read once at startup. A skin that names a
+    /// The terminal's own palette, read once at startup. A theme that names a
     /// colour rather than spelling it out needs this to be adjustable at all.
-    theme: Theme,
+    palette: Palette,
     layout: BarLayout,
     /// Size the cached mapping and colours were built for.
     sized_for: (u16, u16),
@@ -196,11 +196,11 @@ impl App {
             gain_db: 0.0,
             sampled: Vec::new(),
             bands: Vec::new(),
-            skin: Skin::default(),
-            loaded_skin: None,
+            theme: Theme::default(),
+            loaded_theme: None,
             row_colors: Vec::new(),
             grid_colors: Vec::new(),
-            theme: Theme::default(),
+            palette: Palette::default(),
             layout: BarLayout::default(),
             sized_for: (0, 0),
             view: View::default(),
@@ -223,18 +223,18 @@ impl App {
         })
     }
 
-    /// Use `skin` from now on, and put it in the `s` cycle if it is not one of
+    /// Use `theme` from now on, and put it in the `s` cycle if it is not one of
     /// the built-ins. Colours are cached per height, so the cache is dropped.
-    pub fn set_skin(&mut self, skin: Skin) {
-        if Skin::built_in_names().all(|n| n != skin.name) {
-            self.loaded_skin = Some(skin.clone());
+    pub fn set_theme(&mut self, theme: Theme) {
+        if Theme::built_in_names().all(|n| n != theme.name) {
+            self.loaded_theme = Some(theme.clone());
         }
-        // Read the terminal's palette the first time a skin actually needs it -
-        // once, and never for a skin that spells its colours out.
-        if skin.needs_terminal_palette() && self.theme == Theme::default() {
-            self.theme = Theme::query(true);
+        // Read the terminal's palette the first time a theme actually needs it -
+        // once, and never for a theme that spells its colours out.
+        if theme.needs_terminal_palette() && self.palette == Palette::default() {
+            self.palette = Palette::query(true);
         }
-        self.skin = skin;
+        self.theme = theme;
         self.sized_for = (0, 0);
     }
 
@@ -272,8 +272,8 @@ impl App {
         } else {
             height.saturating_sub(1).max(1)
         };
-        self.row_colors = row_colors(ramp_height, &self.skin);
-        self.grid_colors = grid_colors(ramp_height, &self.skin, &self.theme);
+        self.row_colors = row_colors(ramp_height, &self.theme);
+        self.grid_colors = grid_colors(ramp_height, &self.theme, &self.palette);
         self.sized_for = (width, height);
     }
 
@@ -384,9 +384,9 @@ impl App {
                 self.note(format!("bars {}", self.bar_style.label()));
             }
             Action::CycleSkin => {
-                let next = self.next_skin();
-                self.set_skin(next);
-                self.note(format!("skin {}", self.skin.name));
+                let next = self.next_theme();
+                self.set_theme(next);
+                self.note(format!("theme {}", self.theme.name));
             }
             Action::Gain(delta) => {
                 self.gain_db = (self.gain_db + delta as f32).clamp(-40.0, 40.0);
@@ -401,21 +401,21 @@ impl App {
         }
     }
 
-    /// The next skin in the `s` rotation.
+    /// The next theme in the `s` rotation.
     ///
-    /// The built-ins in file order, with a `--skin` one inserted after the
+    /// The built-ins in file order, with a `--theme` one inserted after the
     /// default so cycling always comes back to it rather than dropping it after
     /// the first press.
-    fn next_skin(&self) -> Skin {
-        let mut order: Vec<Skin> = Skin::built_in_names()
-            .filter_map(|n| Skin::built_in(n).and_then(|r| r.ok()))
+    fn next_theme(&self) -> Theme {
+        let mut order: Vec<Theme> = Theme::built_in_names()
+            .filter_map(|n| Theme::built_in(n).and_then(|r| r.ok()))
             .collect();
-        if let Some(loaded) = &self.loaded_skin {
+        if let Some(loaded) = &self.loaded_theme {
             order.insert(1, loaded.clone());
         }
         let at = order
             .iter()
-            .position(|s| s.name == self.skin.name)
+            .position(|s| s.name == self.theme.name)
             .unwrap_or(0);
         order[(at + 1) % order.len()].clone()
     }
@@ -463,8 +463,8 @@ impl App {
             },
             HelpRow {
                 key: "s",
-                description: "skin",
-                value: Some(self.skin.name.clone()),
+                description: "theme",
+                value: Some(self.theme.name.clone()),
             },
             HelpRow {
                 key: "b",
@@ -600,7 +600,7 @@ impl App {
                 ballistics,
                 row_colors,
                 grid_colors,
-                skin,
+                theme,
                 layout,
                 window,
                 view,
@@ -610,7 +610,7 @@ impl App {
                 bar_style,
                 ..
             } = self;
-            let cap_color = skin.peak;
+            let cap_color = theme.peak;
             let grid = show_grid.then_some(grid_colors.as_slice());
             terminal.draw(|f| {
                 match view {
@@ -630,7 +630,7 @@ impl App {
                     View::Oscilloscope => f.render_widget(
                         Scope {
                             samples: window,
-                            skin,
+                            theme,
                             style: *scope_style,
                             gain: scope_gain,
                         },
@@ -698,7 +698,7 @@ fn draw_status(buf: &mut ratatui::buffer::Buffer, area: ratatui::layout::Rect, t
         buf[(x, area.y)]
             .set_symbol(&ch.to_string())
             .set_fg(Color::Rgb(222, 222, 222))
-            .set_bg(Skin::default().grid[0]);
+            .set_bg(Theme::default().grid[0]);
     }
 }
 
@@ -768,7 +768,7 @@ mod tests {
         assert_eq!(a.row_colors.len(), 4, "ramp spans the bar's visible rows");
         assert_eq!(
             *a.row_colors.last().unwrap(),
-            *Skin::default().bars.last().unwrap(),
+            *Theme::default().bars.last().unwrap(),
             "topmost visible bar row must be red"
         );
 
@@ -779,7 +779,7 @@ mod tests {
         assert_eq!(a.row_colors.len(), 5);
         assert_eq!(
             *a.row_colors.last().unwrap(),
-            *Skin::default().bars.last().unwrap()
+            *Theme::default().bars.last().unwrap()
         );
     }
 
@@ -985,7 +985,7 @@ mod tests {
 
     #[test]
     fn cycling_colours_rebuilds_the_row_ramp() {
-        // The cached ramp is a function of the skin, so a change that did not
+        // The cached ramp is a function of the theme, so a change that did not
         // invalidate it would leave the old colours on screen until a resize.
         let mut a = app();
         a.resize(80, 24);
@@ -993,25 +993,25 @@ mod tests {
         // is what has to change here - the bars deliberately do not.
         let before = a.grid_colors.clone();
         a.apply(Action::CycleSkin);
-        assert_eq!(a.skin.name, "winamp");
+        assert_eq!(a.theme.name, "winamp");
         assert_eq!(a.sized_for, (0, 0), "the ramp cache must be invalidated");
         a.resize(80, 24);
         assert_ne!(a.grid_colors, before, "colours did not change");
-        assert_eq!(a.active_status(), Some("skin winamp"));
+        assert_eq!(a.active_status(), Some("theme winamp"));
     }
 
     #[test]
     fn a_loaded_skin_stays_in_the_cycle() {
-        // --skin puts a fourth entry in the rotation; cycling all the way round
+        // --theme puts a fourth entry in the rotation; cycling all the way round
         // has to come back to it rather than dropping it after the first change.
         let mut a = app();
-        a.set_skin(Skin {
+        a.set_theme(Theme {
             name: "custom".into(),
-            ..Skin::default()
+            ..Theme::default()
         });
         let seen: Vec<String> = (0..4)
             .map(|_| {
-                let label = a.skin.name.clone();
+                let label = a.theme.name.clone();
                 a.apply(Action::CycleSkin);
                 label
             })

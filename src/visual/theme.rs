@@ -1,194 +1,274 @@
-//! Reading the terminal's own colour palette.
+//! Themes: the colours the display is drawn in, as data.
 //!
-//! A skin that names `green` is saying "whatever this theme calls green". That
-//! is exactly what makes those skins follow your setup — and exactly what makes
-//! them impossible to adjust, because rav has no number to work with. There is
-//! no ANSI slot for "darker than green", so a skin that wants a dimmer backdrop
-//! has nothing to ask for.
+//! A theme is a TOML file. Everything rav ships is one of these — nothing about
+//! the palette lives in code — so contributing a theme means writing a file, not
+//! touching Rust. `docs/themes.md` is the format's documentation; this module is
+//! its implementation.
 //!
-//! Terminals will tell you, though. `OSC 4 ; n ; ?` asks what index `n` actually
-//! resolves to and the reply carries the RGB. With that in hand a named colour
-//! can be scaled like any other, and the result is still the user's theme —
-//! their green, darkened — rather than a colour rav invented.
-//!
-//! Terminals that do not answer are the normal case, not an error: rav waits a
-//! moment, gives up, and leaves those colours alone.
+//! Colours are either `"#rrggbb"`, which looks the same everywhere, or one of
+//! the sixteen ANSI names, which the terminal paints from the active theme. A
+//! theme can mix them freely: that choice is the difference between reproducing a
+//! specific look and following whatever the user already runs.
 
+use anyhow::{Context, Result, bail};
 use ratatui::style::Color;
-use std::io::{Read, Write};
-use std::os::fd::AsRawFd;
-use std::time::{Duration, Instant};
+use serde::Deserialize;
+use std::path::{Path, PathBuf};
 
-/// How long to wait for the whole reply. Long enough for a terminal over ssh,
-/// short enough not to be a visible pause at startup.
-const TIMEOUT: Duration = Duration::from_millis(120);
+/// Stops in the analyser ramp, and in a per-stop backdrop.
+pub const STOPS: usize = 16;
+/// Levels in the oscilloscope ladder.
+pub const SCOPE_LEVELS: usize = 5;
 
-/// The sixteen ANSI colours as this terminal actually paints them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// The themes rav ships, compiled in so the binary needs nothing on disk. First
+/// is the default, and the order is the one `s` cycles.
+///
+/// `rav.toml` and `winamp.toml` carry their own attribution blocks - that is
+/// where the MIT notice for the transcribed ramp lives, there being no vendored
+/// file to put it alongside.
+const BUILT_IN: [(&str, &str); 4] = [
+    ("rav", include_str!("../../themes/rav.toml")),
+    ("winamp", include_str!("../../themes/winamp.toml")),
+    ("terminal", include_str!("../../themes/terminal.toml")),
+    ("mono", include_str!("../../themes/mono.toml")),
+];
+
+/// A parsed theme: every colour the display needs, resolved and length-checked.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Theme {
-    slots: [Option<(u8, u8, u8)>; 16],
+    pub name: String,
+    /// Analyser ramp, foot of the bar first.
+    pub bars: Vec<Color>,
+    /// Backdrop per stop, aligned with `bars`.
+    pub grid: Vec<Color>,
+    pub peak: Color,
+    /// Oscilloscope ladder, centre of the trace first.
+    pub scope: Vec<Color>,
+    /// How much brightness the backdrop keeps, when the theme asked to darken it.
+    ///
+    /// Applied at render time rather than here, because darkening a colour the
+    /// theme only *named* needs the terminal's actual palette - see
+    /// [`crate::visual::Palette`].
+    pub darken: Option<f32>,
+}
+
+impl Default for Theme {
+    fn default() -> Self {
+        // Validated by `every_built_in_skin_parses`, so a failure here means the
+        // build embedded something unexpected.
+        Self::built_in("rav")
+            .expect("rav is built in")
+            .expect("the bundled rav theme must parse")
+    }
 }
 
 impl Theme {
-    /// Ask the terminal for its palette, if `needed`.
-    ///
-    /// Asking is not free and it is not invisible: it writes escape sequences and
-    /// reads the replies straight off the terminal. Skins that spell their
-    /// colours out in hex never need it, so the common case says nothing at all.
-    ///
-    /// Must run before the alternate screen is entered and while nothing else is
-    /// reading stdin.
-    #[cfg(not(test))]
-    pub fn query(needed: bool) -> Self {
-        if !needed {
-            return Self::default();
-        }
-        // Raw mode, or the terminal echoes every reply back as visible text and
-        // line buffering holds them until the user presses Enter. Restored to
-        // however it was found - the caller may already have set it up.
-        let was_raw = crossterm::terminal::is_raw_mode_enabled().unwrap_or(false);
-        if !was_raw && crossterm::terminal::enable_raw_mode().is_err() {
-            return Self::default();
-        }
-        let theme = Self::query_via(&mut std::io::stdout(), &mut std::io::stdin());
-        if !was_raw {
-            let _ = crossterm::terminal::disable_raw_mode();
-        }
-        theme
+    /// Names of the compiled-in themes, in the order `s` cycles them.
+    pub fn built_in_names() -> impl Iterator<Item = &'static str> {
+        BUILT_IN.iter().map(|(name, _)| *name)
     }
 
-    /// The palette without asking anything.
-    #[cfg(test)]
-    pub fn query(_needed: bool) -> Self {
-        Self::default()
+    /// One of the compiled-in themes by name.
+    pub fn built_in(name: &str) -> Option<Result<Self>> {
+        BUILT_IN
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(n, text)| Self::parse(text).with_context(|| format!("built-in theme '{n}'")))
     }
 
-    /// Resolve a colour to RGB, if it is one this theme can speak for.
+    /// Load a theme: a built-in name, or a `.toml` file on disk.
     ///
-    /// `Rgb` passes through - the skin already said exactly what it wanted.
-    pub fn rgb(&self, color: Color) -> Option<(u8, u8, u8)> {
-        match color {
-            Color::Rgb(r, g, b) => Some((r, g, b)),
-            other => index_of(other).and_then(|i| self.slots[i]),
+    /// Built-ins win over a file of the same name, so `--theme mono` cannot be
+    /// silently shadowed by a `themes/mono.toml` that happens to be lying around.
+    pub fn load(spec: &str) -> Result<Self> {
+        if let Some(built_in) = Self::built_in(spec) {
+            return built_in;
         }
+        let path = Self::resolve(spec)
+            .with_context(|| format!("no theme '{spec}': not built in, and no such file"))?;
+        let text = std::fs::read_to_string(&path)
+            .with_context(|| format!("reading {}", path.display()))?;
+        Self::parse(&text).with_context(|| format!("parsing {}", path.display()))
     }
 
-    fn query_via<W: Write, R: Read + AsRawFd>(out: &mut W, input: &mut R) -> Self {
-        let mut theme = Self::default();
-        for i in 0..16 {
-            if write!(out, "\x1b]4;{i};?\x07").is_err() {
-                return theme;
-            }
+    /// Turn a theme spec into the file it names, if one exists.
+    ///
+    /// A bare name is looked up in `themes/` under the current directory - which
+    /// is the repo checkout during development - and then in
+    /// `<config dir>/rav/themes/`, which is where an installed rav finds one.
+    fn resolve(spec: &str) -> Option<PathBuf> {
+        let direct = Path::new(spec);
+        if direct.is_file() {
+            return Some(direct.to_path_buf());
         }
-        if out.flush().is_err() {
-            return theme;
+        let mut roots = vec![PathBuf::from("themes")];
+        if let Some(dir) = dirs::config_dir() {
+            roots.push(dir.join("rav").join("themes"));
         }
+        roots.into_iter().find_map(|root| {
+            let named = root.join(format!("{spec}.toml"));
+            named.is_file().then_some(named)
+        })
+    }
 
-        let deadline = Instant::now() + TIMEOUT;
-        let mut buf = Vec::new();
-        let mut chunk = [0u8; 512];
-        while let Some(left) = deadline.checked_duration_since(Instant::now()) {
-            // Wait with a deadline rather than calling read() straight away: a
-            // terminal that does not implement this says nothing at all, and a
-            // blocking read would hang rav at startup rather than give up.
-            if !readable(input.as_raw_fd(), left) {
-                break;
-            }
-            match input.read(&mut chunk) {
-                Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    buf.extend_from_slice(&chunk[..n]);
-                    theme.absorb(&buf);
-                    if theme.is_complete() {
-                        break;
-                    }
+    /// Whether rendering this theme needs the terminal's palette read.
+    ///
+    /// Only a theme that both asks to darken *and* names a colour rather than
+    /// spelling it out: there is nothing to look up otherwise, and asking is not
+    /// free - it writes escape sequences and reads the replies off the terminal.
+    pub fn needs_terminal_palette(&self) -> bool {
+        self.darken.is_some() && self.grid.iter().any(|c| !matches!(c, Color::Rgb(..)))
+    }
+
+    /// Parse a theme file.
+    pub fn parse(text: &str) -> Result<Self> {
+        let file: File = toml::from_str(text).context("not a valid theme file")?;
+
+        // A ramp may be a single colour or a full ladder; a single one means
+        // "this colour all the way up", which is how `mono` is written.
+        let bars = file.colors.bars.expand(STOPS).context("colors.bars")?;
+        let grid = file.colors.grid.expand(STOPS).context("colors.grid")?;
+        let scope = file
+            .colors
+            .scope
+            .expand(SCOPE_LEVELS)
+            .context("colors.scope")?;
+        let peak = parse_color(&file.colors.peak).context("colors.peak")?;
+
+        let theme = Self {
+            name: file.name,
+            bars,
+            grid,
+            peak,
+            scope,
+            darken: file.darken.floor(),
+        };
+        Ok(theme)
+    }
+}
+
+/// The on-disk shape. `about` is documentation for humans and is not read back.
+#[derive(Deserialize)]
+struct File {
+    name: String,
+    #[allow(dead_code)]
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    darken: Darken,
+    #[serde(default)]
+    colors: Colors,
+}
+
+/// Deepen the shadow end of a theme's palette.
+///
+/// `true` for the default strength, or a number in `0.0..=1.0` for how far the
+/// darkest colour is pushed towards black - `0.25` means it keeps a quarter of
+/// its brightness. Themes written for a 16-pixel panel on a CRT tend to read too
+/// bright as full-height terminal columns, and their backdrop worst of all,
+/// because it is now a large area rather than a hairline of dots.
+#[derive(Deserialize, Clone, Copy, PartialEq)]
+#[serde(untagged)]
+enum Darken {
+    Off(bool),
+    By(f32),
+}
+
+impl Default for Darken {
+    fn default() -> Self {
+        Darken::Off(false)
+    }
+}
+
+/// How much brightness the darkest colour keeps when `darken = true`.
+const DEFAULT_DARKEN: f32 = 0.25;
+
+impl Darken {
+    /// The floor factor, or `None` when the theme is left alone.
+    fn floor(self) -> Option<f32> {
+        match self {
+            Darken::Off(false) => None,
+            Darken::Off(true) => Some(DEFAULT_DARKEN),
+            Darken::By(f) => Some(f.clamp(0.0, 1.0)),
+        }
+    }
+}
+
+#[derive(Deserialize, Default)]
+struct Colors {
+    bars: Ramp,
+    grid: Ramp,
+    peak: String,
+    scope: Ramp,
+}
+
+/// One colour, or a full ladder of them.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Ramp {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl Default for Ramp {
+    fn default() -> Self {
+        Ramp::Many(Vec::new())
+    }
+}
+
+impl Ramp {
+    /// Resolve to exactly `len` colours.
+    ///
+    /// A single colour repeats; a ladder must already be the right length. Silently
+    /// padding a short one would put an arbitrary colour at the top of the ramp,
+    /// which is exactly the sort of thing that looks like a rendering bug later.
+    fn expand(&self, len: usize) -> Result<Vec<Color>> {
+        match self {
+            Ramp::One(name) => Ok(vec![parse_color(name)?; len]),
+            Ramp::Many(names) => {
+                if names.len() != len {
+                    bail!("needs 1 or {len} colours, found {}", names.len());
                 }
-            }
-        }
-        theme
-    }
-
-    fn is_complete(&self) -> bool {
-        self.slots.iter().all(Option::is_some)
-    }
-
-    /// Pull every `4;n;rgb:…` reply out of whatever has arrived so far.
-    fn absorb(&mut self, bytes: &[u8]) {
-        let text = String::from_utf8_lossy(bytes);
-        for reply in text.split('\x1b') {
-            let Some(body) = reply.strip_prefix("]4;") else {
-                continue;
-            };
-            let body = body
-                .trim_end_matches(['\x07', '\\'])
-                .trim_end_matches('\x1b');
-            let Some((index, spec)) = body.split_once(';') else {
-                continue;
-            };
-            let Ok(index) = index.trim().parse::<usize>() else {
-                continue;
-            };
-            if index < 16
-                && let Some(rgb) = parse_rgb(spec)
-            {
-                self.slots[index] = Some(rgb);
+                names.iter().map(|n| parse_color(n)).collect()
             }
         }
     }
 }
 
-/// Whether `fd` has something to read within `within`.
-fn readable(fd: i32, within: Duration) -> bool {
-    let mut poll = libc::pollfd {
-        fd,
-        events: libc::POLLIN,
-        revents: 0,
-    };
-    let ms = within.as_millis().min(i32::MAX as u128) as i32;
-    // SAFETY: one initialised pollfd, and the count matches.
-    unsafe { libc::poll(&mut poll, 1, ms) > 0 }
-}
-
-/// `rgb:RRRR/GGGG/BBBB`, with each channel 1-4 hex digits.
-fn parse_rgb(spec: &str) -> Option<(u8, u8, u8)> {
-    let spec = spec.trim().strip_prefix("rgb:")?;
-    let mut parts = spec.split('/');
-    let mut channel = || -> Option<u8> {
-        let hex = parts.next()?.trim();
-        if hex.is_empty() || hex.len() > 4 {
-            return None;
+/// `#rrggbb`, or one of the sixteen ANSI names.
+fn parse_color(text: &str) -> Result<Color> {
+    let text = text.trim();
+    if let Some(hex) = text.strip_prefix('#') {
+        if hex.len() != 6 {
+            bail!("{text:?}: a hex colour is #rrggbb");
         }
-        let value = u32::from_str_radix(hex, 16).ok()?;
-        // Terminals answer in whatever width they please: `ff`, `ffff`, even
-        // `f`. Scale by the width rather than truncating, or `f` would read as 15
-        // instead of white.
-        let max = (1u32 << (4 * hex.len())) - 1;
-        Some((value * 255 / max) as u8)
-    };
-    let (r, g, b) = (channel()?, channel()?, channel()?);
-    parts.next().is_none().then_some((r, g, b))
-}
-
-/// The ANSI slot a named colour occupies.
-fn index_of(color: Color) -> Option<usize> {
-    Some(match color {
-        Color::Black => 0,
-        Color::Red => 1,
-        Color::Green => 2,
-        Color::Yellow => 3,
-        Color::Blue => 4,
-        Color::Magenta => 5,
-        Color::Cyan => 6,
-        Color::Gray => 7,
-        Color::DarkGray => 8,
-        Color::LightRed => 9,
-        Color::LightGreen => 10,
-        Color::LightYellow => 11,
-        Color::LightBlue => 12,
-        Color::LightMagenta => 13,
-        Color::LightCyan => 14,
-        Color::White => 15,
-        _ => return None,
+        let channel = |at: usize| u8::from_str_radix(&hex[at..at + 2], 16);
+        let (r, g, b) = (channel(0), channel(2), channel(4));
+        return match (r, g, b) {
+            (Ok(r), Ok(g), Ok(b)) => Ok(Color::Rgb(r, g, b)),
+            _ => bail!("{text:?}: a hex colour is #rrggbb"),
+        };
+    }
+    // `white`/`bright-black` rather than ratatui's `Gray`/`DarkGray`: the ANSI
+    // names are what a theme author is reading off their theme.
+    Ok(match text {
+        "black" => Color::Black,
+        "red" => Color::Red,
+        "green" => Color::Green,
+        "yellow" => Color::Yellow,
+        "blue" => Color::Blue,
+        "magenta" => Color::Magenta,
+        "cyan" => Color::Cyan,
+        "white" => Color::Gray,
+        "bright-black" => Color::DarkGray,
+        "bright-red" => Color::LightRed,
+        "bright-green" => Color::LightGreen,
+        "bright-yellow" => Color::LightYellow,
+        "bright-blue" => Color::LightBlue,
+        "bright-magenta" => Color::LightMagenta,
+        "bright-cyan" => Color::LightCyan,
+        "bright-white" => Color::White,
+        other => bail!("{other:?} is not a colour: use #rrggbb or an ANSI name"),
     })
 }
 
@@ -197,82 +277,183 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_reply_is_read_back_as_rgb() {
-        let mut theme = Theme::default();
-        theme.absorb(b"\x1b]4;2;rgb:2929/cece/1010\x07");
-        assert_eq!(theme.rgb(Color::Green), Some((41, 206, 16)));
-    }
-
-    #[test]
-    fn replies_arrive_together_and_in_any_order() {
-        // One write per index, but the terminal answers however it likes, and
-        // the whole lot usually lands in a single read.
-        let mut theme = Theme::default();
-        theme.absorb(b"\x1b]4;9;rgb:ffff/0000/0000\x07\x1b]4;1;rgb:8080/0000/0000\x07");
-        assert_eq!(theme.rgb(Color::LightRed), Some((255, 0, 0)));
-        assert_eq!(theme.rgb(Color::Red), Some((128, 0, 0)));
-    }
-
-    #[test]
-    fn a_partial_read_is_absorbed_once_the_rest_arrives() {
-        // `absorb` is called on the whole buffer each time, so a reply split
-        // across two reads is picked up when it completes rather than lost.
-        let mut theme = Theme::default();
-        let full = b"\x1b]4;2;rgb:2929/cece/1010\x07";
-        theme.absorb(&full[..12]);
-        assert_eq!(theme.rgb(Color::Green), None, "not yet");
-        theme.absorb(full);
-        assert_eq!(theme.rgb(Color::Green), Some((41, 206, 16)));
-    }
-
-    #[test]
-    fn channels_scale_by_their_width() {
-        // Terminals answer in 1 to 4 hex digits; `f` is white, not 15.
-        assert_eq!(parse_rgb("rgb:f/f/f"), Some((255, 255, 255)));
-        assert_eq!(parse_rgb("rgb:ff/ff/ff"), Some((255, 255, 255)));
-        assert_eq!(parse_rgb("rgb:ffff/ffff/ffff"), Some((255, 255, 255)));
-        // 0x8000/0xffff is a hair under a half, so this floors to 127.
-        assert_eq!(parse_rgb("rgb:0000/8000/ffff"), Some((0, 127, 255)));
-    }
-
-    #[test]
-    fn nonsense_is_ignored_rather_than_guessed_at() {
-        for bad in [
-            "",
-            "rgb:",
-            "rgb:zz/00/00",
-            "rgb:00/00",
-            "rgb:0/0/0/0",
-            "#ff0000",
-        ] {
-            assert_eq!(parse_rgb(bad), None, "{bad:?} should not parse");
+    fn every_built_in_skin_parses() {
+        for name in Theme::built_in_names() {
+            let theme = Theme::built_in(name)
+                .unwrap_or_else(|| panic!("{name} is not built in"))
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(theme.name, name, "the file's name field disagrees");
+            assert_eq!(theme.bars.len(), STOPS);
+            assert_eq!(theme.grid.len(), STOPS);
+            assert_eq!(theme.scope.len(), SCOPE_LEVELS);
         }
-        let mut theme = Theme::default();
-        theme.absorb(b"\x1b]4;99;rgb:ffff/ffff/ffff\x07");
-        assert_eq!(theme, Theme::default(), "an out-of-range index is dropped");
     }
 
     #[test]
-    fn an_unanswered_query_leaves_named_colours_alone() {
-        // The normal case on a terminal that does not implement OSC 4. Nothing
-        // is invented: the caller is told it has no RGB for that colour.
-        let theme = Theme::default();
-        assert_eq!(theme.rgb(Color::Green), None);
-        // A skin that named an exact colour never needed the terminal's help.
-        assert_eq!(theme.rgb(Color::Rgb(1, 2, 3)), Some((1, 2, 3)));
+    fn the_winamp_ramp_runs_green_to_red() {
+        // Asserted on the file rather than on `Theme::default()`, which has been
+        // through `darken`.
+        let theme = Theme::parse(&raw("winamp")).unwrap();
+        assert_eq!(theme.bars[0], Color::Rgb(24, 132, 8), "foot is dark green");
+        assert_eq!(theme.bars[STOPS - 1], Color::Rgb(239, 49, 16), "tip is red");
+        assert_eq!(theme.peak, Color::Rgb(150, 150, 150), "caps are grey");
+    }
+
+    /// A built-in theme's text with its `darken` line removed, for comparing
+    /// against the darkened result.
+    fn raw(name: &str) -> String {
+        BUILT_IN
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, text)| {
+                text.lines()
+                    .filter(|l| !l.trim_start().starts_with("darken"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .expect("built in")
     }
 
     #[test]
-    fn the_query_gives_up_rather_than_blocking() {
-        // A terminal that accepts the request and answers nothing must not hang
-        // rav at startup. /dev/null is readable-at-EOF, which is the closest
-        // stand-in for a terminal that will never reply.
-        let mut sink = Vec::new();
-        let mut null = std::fs::File::open("/dev/null").unwrap();
-        let start = Instant::now();
-        let theme = Theme::query_via(&mut sink, &mut null);
-        assert!(start.elapsed() < TIMEOUT * 2, "took too long to give up");
-        assert_eq!(theme, Theme::default());
-        assert!(!sink.is_empty(), "it should still have asked");
+    fn the_theme_following_skins_name_no_absolute_colours() {
+        // The whole point of them: the terminal decides what the colours are. An
+        // Rgb value anywhere would ignore the user's theme.
+        for name in ["terminal", "mono"] {
+            let theme = Theme::built_in(name).unwrap().unwrap();
+            let all = theme
+                .bars
+                .iter()
+                .chain(&theme.grid)
+                .chain(&theme.scope)
+                .chain(std::iter::once(&theme.peak));
+            for color in all {
+                assert!(!matches!(color, Color::Rgb(..)), "{name} used {color:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_backdrop_is_never_the_colour_of_the_bar_in_front_of_it() {
+        // A grid stop equal to its bar stop makes the unlit column invisible, and
+        // `g` a key that appears to do nothing.
+        //
+        // Checked against what is *drawn*, not what is parsed: `darken` is
+        // applied at render time, so a theme may legitimately name its backdrop as
+        // a copy of its bars and rely on the scaling to separate them.
+        for name in Theme::built_in_names() {
+            let theme = Theme::built_in(name).unwrap().unwrap();
+            let drawn = crate::ui::analyzer::grid_colors(
+                STOPS as u16,
+                &theme,
+                &crate::visual::Palette::default(),
+            );
+            for (i, (bar, grid)) in theme.bars.iter().zip(&drawn).enumerate() {
+                assert_ne!(bar, grid, "{name}: stop {i} is invisible");
+            }
+        }
+    }
+
+    #[test]
+    fn only_a_skin_that_needs_the_palette_asks_for_it() {
+        // Asking writes escape sequences to the terminal and reads the replies
+        // back, so the common case - a theme that spells its colours out - must
+        // not do it at all.
+        assert!(
+            !Theme::default().needs_terminal_palette(),
+            "the default theme is hex throughout"
+        );
+        assert!(
+            !Theme::built_in("winamp")
+                .unwrap()
+                .unwrap()
+                .needs_terminal_palette(),
+            "winamp is hex and does not darken"
+        );
+        assert!(
+            Theme::built_in("terminal")
+                .unwrap()
+                .unwrap()
+                .needs_terminal_palette(),
+            "terminal names its colours and darkens them"
+        );
+        assert!(
+            !Theme::built_in("mono")
+                .unwrap()
+                .unwrap()
+                .needs_terminal_palette(),
+            "mono names colours but does not darken them"
+        );
+    }
+
+    #[test]
+    fn darken_is_carried_as_data_not_applied_here() {
+        // Applying it needs the terminal's palette - a theme that named `green`
+        // has no number to scale until something asks the terminal what its green
+        // is. The parser records the intent and `grid_colors` carries it out.
+        let plain = Theme::parse(&raw("terminal")).unwrap();
+        assert_eq!(plain.darken, None);
+
+        let asked = Theme::built_in("terminal").unwrap().unwrap();
+        assert_eq!(asked.darken, Some(0.25), "terminal.toml asks for it");
+        assert_eq!(asked.grid, plain.grid, "and the values are untouched here");
+    }
+
+    #[test]
+    fn one_colour_stands_in_for_a_whole_ramp() {
+        let theme = Theme::parse(
+            r#"
+            name = "flat"
+            [colors]
+            bars = "green"
+            grid = "black"
+            peak = "white"
+            scope = "white"
+            "#,
+        )
+        .expect("should parse");
+        assert_eq!(theme.bars, vec![Color::Green; STOPS]);
+        assert_eq!(theme.scope, vec![Color::Gray; SCOPE_LEVELS]);
+    }
+
+    #[test]
+    fn a_ramp_of_the_wrong_length_is_an_error() {
+        // Padding it would put an arbitrary colour at the top of the ramp, which
+        // reads as a rendering bug rather than as a broken file.
+        let err = Theme::parse(
+            r#"
+            name = "short"
+            [colors]
+            bars = ["green", "red"]
+            grid = "black"
+            peak = "white"
+            scope = "white"
+            "#,
+        )
+        .expect_err("must not parse");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("bars"), "unhelpful error: {msg}");
+    }
+
+    #[test]
+    fn colours_are_hex_or_an_ansi_name() {
+        assert_eq!(parse_color("#ef3110").unwrap(), Color::Rgb(239, 49, 16));
+        assert_eq!(parse_color("bright-green").unwrap(), Color::LightGreen);
+        assert_eq!(parse_color(" white ").unwrap(), Color::Gray);
+        for bad in ["#fff", "#gggggg", "chartreuse", ""] {
+            assert!(parse_color(bad).is_err(), "{bad:?} should not parse");
+        }
+    }
+
+    #[test]
+    fn an_unknown_skin_says_what_it_looked_for() {
+        let err = Theme::load("no-such-theme").expect_err("must not resolve");
+        assert!(format!("{err}").contains("no-such-theme"));
+    }
+
+    #[test]
+    fn a_skin_loads_from_a_path() {
+        let from_disk = Theme::load("themes/winamp.toml").expect("by path");
+        let built_in = Theme::built_in("winamp").unwrap().unwrap();
+        assert_eq!(from_disk, built_in, "the compiled-in copy has drifted");
     }
 }

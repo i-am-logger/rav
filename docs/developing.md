@@ -57,7 +57,7 @@ github:i-am-logger/rav` is the install path in the README.
 `record-demo` screen-records the frontmost window and quantises it to a GIF, and
 it drives rav while filming rather than capturing one static view.
 `RAV_DEMO_TOUR` is a list of `seconds:key` steps — hold that long, then send that
-key, with `-` for "send nothing". The default walks the three skins, the
+key, with `-` for "send nothing". The default walks the three themes, the
 oscilloscope and the help overlay, then returns to the defaults so the loop is
 seamless.
 
@@ -104,9 +104,9 @@ the window geometry and the keystrokes; both are per-terminal. Linux uses
 |---|---|
 | `src/audio/` | cpal capture, and the macOS CoreAudio process tap — see [audio.md](audio.md) |
 | `src/signal/` | FFT front end, bin-to-bar mapping, bar and cap ballistics |
-| `src/visual/` | the skin format: parsing, colours, the built-ins |
+| `src/visual/` | the theme format: parsing, colours, the built-ins |
 | `src/ui/` | the `App` event loop and the analyser, scope and help widgets |
-| `skins/` | the bundled skins, TOML, compiled in — see [skins.md](skins.md) |
+| `themes/` | the bundled themes, TOML, compiled in — see [themes.md](themes.md) |
 
 Everything lives in the library — `src/main.rs` is argument parsing and wiring —
 so the binary and the tests compile one copy of the tree rather than two that can

@@ -1,7 +1,7 @@
 //! The oscilloscope view: the waveform itself, coloured by displacement.
 //!
 //! Drawn from the time domain rather than the FFT, and coloured
-//! from the skin's five `scope` colours by displacement from the centre. The
+//! from the theme's five `scope` colours by displacement from the centre. The
 //! first is the brightest, so the trace is brightest along the centre line and
 //! fades as it swings away: a quiet passage is a bright flat line, a loud one
 //! spreads into dimmer greys.
@@ -11,7 +11,7 @@
 //! which peaks nearer ±0.2, as a barely-moving line through the middle. The gain
 //! trim rides on top, so the same key that sizes the bars sizes the trace.
 
-use crate::visual::Skin;
+use crate::visual::Theme;
 use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
 /// The scope grid is 16 rows; the colour ladder is defined against it.
@@ -54,7 +54,7 @@ pub enum ScopeStyle {
 pub struct Scope<'a> {
     /// Time-domain samples in `-1.0..=1.0`, oldest first.
     pub samples: &'a [f32],
-    pub skin: &'a Skin,
+    pub theme: &'a Theme,
     pub style: ScopeStyle,
     /// Linear gain from the trim, applied on top of [`ZOOM`].
     pub gain: f32,
@@ -106,7 +106,7 @@ impl Widget for Scope<'_> {
                 let level = oscilloscope_level(virtual_row.min(VIRTUAL_ROWS - 1));
                 buf[(area.x + x, area.y + height - 1 - r)]
                     .set_symbol(LINE)
-                    .set_fg(self.skin.scope[level.min(self.skin.scope.len() - 1)]);
+                    .set_fg(self.theme.scope[level.min(self.theme.scope.len() - 1)]);
             }
         }
     }
@@ -119,10 +119,10 @@ mod tests {
     fn render(samples: &[f32], w: u16, h: u16, style: ScopeStyle) -> Buffer {
         let area = Rect::new(0, 0, w, h);
         let mut buf = Buffer::empty(area);
-        let skin = Skin::default();
+        let theme = Theme::default();
         Scope {
             samples,
-            skin: &skin,
+            theme: &theme,
             style,
             gain: 1.0,
         }
@@ -171,10 +171,10 @@ mod tests {
         let spread = |gain: f32| {
             let area = Rect::new(0, 0, 16, 16);
             let mut buf = Buffer::empty(area);
-            let skin = Skin::default();
+            let theme = Theme::default();
             Scope {
                 samples: &wave,
-                skin: &skin,
+                theme: &theme,
                 style: ScopeStyle::Dots,
                 gain,
             }
@@ -198,7 +198,7 @@ mod tests {
         assert_ne!(centre, extreme, "extremes must not match the centre colour");
         assert_eq!(
             centre,
-            Skin::default().scope[0],
+            Theme::default().scope[0],
             "centre uses the brightest level"
         );
     }

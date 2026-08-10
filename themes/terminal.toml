@@ -1,4 +1,4 @@
-# rav skin — see docs/skins.md for the format.
+# rav theme — see docs/themes.md for the format.
 
 name = "terminal"
 description = "Your terminal's own 16 colours, so rav follows whatever theme you run."
@@ -11,7 +11,7 @@ darken = 0.25
 
 [colors]
 # Named colours resolve to ANSI slots, which the terminal paints from its theme.
-# That is the whole point of this skin: it has no opinion about the actual hues.
+# That is the whole point of this theme: it has no opinion about the actual hues.
 #
 # 16 stops, foot of the bar first. Green-heavy like the Winamp ramp, so the foot
 # of a tall bar stays one colour and the top still sweeps through to red.
