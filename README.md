@@ -9,13 +9,17 @@ Terminal today, GUI next.
 
 ![rav](assets/demo.gif)
 
+[![crates.io](https://img.shields.io/crates/v/rav?logo=rust&logoColor=white)](https://crates.io/crates/rav)
+[![Downloads](https://img.shields.io/crates/d/rav?logo=rust&logoColor=white)](https://crates.io/crates/rav)
+[![MSRV](https://img.shields.io/crates/msrv/rav?logo=rust&logoColor=white&color=2b2b2b)](https://www.rust-lang.org)
 [![CI](https://img.shields.io/github/actions/workflow/status/i-am-logger/rav/ci.yml?branch=master&label=CI&logo=githubactions&logoColor=white)](https://github.com/i-am-logger/rav/actions/workflows/ci.yml)
-[![Rust](https://img.shields.io/badge/Rust-2b2b2b?logo=rust&logoColor=white)](https://www.rust-lang.org)
-[![Nix](https://img.shields.io/badge/Nix-2b2b2b?logo=nixos&logoColor=white)](https://nixos.org)
-[![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/CC%20BY--NC--SA%204.0-2b2b2b?logo=creativecommons&logoColor=white)](LICENSE)
+[![docs.rs](https://img.shields.io/docsrs/rav?logo=docsdotrs&logoColor=white)](https://docs.rs/rav)
 
+[![Nix](https://img.shields.io/badge/Nix-2b2b2b?logo=nixos&logoColor=white)](https://nixos.org)
+[![devenv](https://img.shields.io/badge/devenv-2b2b2b?logo=nixos&logoColor=white)](https://devenv.sh)
 [![Linux](https://img.shields.io/badge/Linux-2b2b2b?logo=linux&logoColor=white)](docs/audio.md)
 [![macOS](https://img.shields.io/badge/macOS-2b2b2b?logo=apple&logoColor=white)](docs/audio.md)
+[![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/CC%20BY--NC--SA%204.0-2b2b2b?logo=creativecommons&logoColor=white)](LICENSE)
 
 </div>
 
@@ -75,16 +79,6 @@ A skin is a TOML file, not code — `rav --skin ./sunset.toml`. See
 ## Capturing system audio
 
 Nothing to install — see **[docs/audio.md](docs/audio.md)**.
-
-## How it works
-
-```
-capture → mono → Hann-windowed 1024-sample FFT → per-bin tilt
-        → 91% log / 9% linear bar map → bar and cap ballistics
-        → one ratatui widget, written straight into the cell buffer
-```
-
-Each stage documents its own constants, in `src/signal/`.
 
 ## Building and hacking on it
 

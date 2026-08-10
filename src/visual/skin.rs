@@ -10,7 +10,7 @@
 //! skin can mix them freely: that choice is the difference between reproducing a
 //! specific look and following whatever the user already runs.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use ratatui::style::Color;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
