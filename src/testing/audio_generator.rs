@@ -41,14 +41,14 @@ impl AudioGenerator {
     /// Approximate rather than spectrally exact - the tests ask only that every
     /// part of the spectrum carries energy, not how much.
     pub fn pink_noise(&self, amplitude: f32, samples: usize) -> Vec<f32> {
-        use rand::{thread_rng, Rng};
+        use rand::{Rng, thread_rng};
         let mut rng = thread_rng();
 
         let mut signal = vec![0.0; samples];
         for octave in 0..8 {
             let amp_mult = 1.0 / 2.0_f32.powi(octave).sqrt();
             for sample in signal.iter_mut() {
-                *sample += amplitude * amp_mult * (rng.gen::<f32>() * 2.0 - 1.0);
+                *sample += amplitude * amp_mult * (rng.r#gen::<f32>() * 2.0 - 1.0);
             }
         }
 

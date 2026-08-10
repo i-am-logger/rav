@@ -9,7 +9,7 @@ use rav::{
     config::Config,
     signal::{
         mapping::{BarMap, DEFAULT_SCALE},
-        spectrum::{Spectrum, MAX_HEIGHT},
+        spectrum::{MAX_HEIGHT, Spectrum},
     },
 };
 use std::time::{Duration, Instant};

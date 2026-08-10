@@ -4,7 +4,10 @@ version = "1.0.0-beta.2"
 # There are two binaries, so `cargo run` cannot guess. Without this it errors
 # out and tells you to pass --bin, which is a poor first impression.
 default-run = "rav"
-edition = "2021"
+edition = "2024"
+# The floor the dependency graph imposes, not rav's own source: instability
+# (reached through ratatui) and the darling family all declare 1.88.
+rust-version = "1.88"
 authors = ["RAV Team <i-am-logger@users.noreply.github.com>"]
 description = "Rust audio visualiser: a real-time spectrum analyser with bars, peak caps and an oscilloscope, in truecolour"
 license-file = "LICENSE"

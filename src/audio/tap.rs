@@ -16,7 +16,7 @@
 
 #![cfg(target_os = "macos")]
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{class, msg_send};
@@ -101,7 +101,7 @@ mod dynamic {
     use std::ffi::{c_char, c_void};
     use std::sync::OnceLock;
 
-    extern "C" {
+    unsafe extern "C" {
         fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
     }
     /// `dlfcn.h:319` - `((void *) -2)`. Not NULL: passing NULL here silently
@@ -135,7 +135,7 @@ mod dynamic {
 }
 
 #[link(name = "CoreAudio", kind = "framework")]
-extern "C" {
+unsafe extern "C" {
 
     fn AudioHardwareCreateAggregateDevice(
         description: *const c_void,

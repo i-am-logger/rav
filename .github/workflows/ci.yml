@@ -94,6 +94,20 @@ jobs:
           path: target/release/rav
           if-no-files-found: error
 
+  nix:
+    name: Nix
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@v31.11.0
+      # A flake sees only git-tracked files, so this catches what cargo cannot.
+      - run: nix flake check --all-systems
+      - run: nix build .#default --print-build-logs
+      - run: ./result/bin/rav --version
+
   release:
     name: Release
     needs: [format, lint, test, build]

@@ -7,22 +7,22 @@ use crate::{
     audio::AudioData,
     config::Config,
     signal::{
-        ballistics::{Ballistics, BAR_FALL_SPEEDS, DEFAULT_PEAK_FALL},
+        ballistics::{BAR_FALL_SPEEDS, Ballistics, DEFAULT_PEAK_FALL},
         mapping::{
-            bin_for_hz, Bandwidth, BarMap, DEFAULT_LIMIT_INDEX, DEFAULT_SCALE, FREQUENCY_LIMITS,
+            Bandwidth, BarMap, DEFAULT_LIMIT_INDEX, DEFAULT_SCALE, FREQUENCY_LIMITS, bin_for_hz,
         },
-        spectrum::{Spectrum, MAX_HEIGHT},
+        spectrum::{MAX_HEIGHT, Spectrum},
     },
     visual::{Skin, Theme},
 };
-use analyzer::{grid_colors, row_colors, Analyzer, BarLayout, BarStyle, Peaks};
+use analyzer::{Analyzer, BarLayout, BarStyle, Peaks, grid_colors, row_colors};
 use anyhow::Result;
 use crossterm::event::KeyCode;
 #[cfg(not(test))]
 use crossterm::{
-    event::{self, Event, KeyEventKind},
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
+    event::{self, Event, KeyEventKind},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use flume::Receiver;
 use help::{Help, HelpRow};
@@ -30,7 +30,7 @@ use help::{Help, HelpRow};
 use ratatui::backend::CrosstermBackend;
 #[cfg(test)]
 use ratatui::backend::TestBackend;
-use ratatui::{style::Color, Terminal};
+use ratatui::{Terminal, style::Color};
 use scope::{Scope, ScopeStyle};
 #[cfg(not(test))]
 use std::io::{self, Stdout};
@@ -661,11 +661,11 @@ impl App {
         {
             // Drain the whole burst; a held key should not queue up frames.
             while event::poll(Duration::ZERO)? {
-                if let Event::Key(key) = event::read()? {
-                    if key.kind == KeyEventKind::Press {
-                        let action = map_key(key.code);
-                        self.apply(action);
-                    }
+                if let Event::Key(key) = event::read()?
+                    && key.kind == KeyEventKind::Press
+                {
+                    let action = map_key(key.code);
+                    self.apply(action);
                 }
             }
             Ok(())
@@ -804,11 +804,12 @@ mod tests {
         // frame's own peak and turn the noise floor into a full display.
         let mut a = app();
         a.resize(80, 24);
-        assert!(a
-            .spectrum
-            .analyse(&vec![0.0; 1024])
-            .iter()
-            .all(|&m| m == 0.0));
+        assert!(
+            a.spectrum
+                .analyse(&vec![0.0; 1024])
+                .iter()
+                .all(|&m| m == 0.0)
+        );
     }
 
     #[test]

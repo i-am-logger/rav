@@ -128,10 +128,10 @@ impl Theme {
             let Ok(index) = index.trim().parse::<usize>() else {
                 continue;
             };
-            if index < 16 {
-                if let Some(rgb) = parse_rgb(spec) {
-                    self.slots[index] = Some(rgb);
-                }
+            if index < 16
+                && let Some(rgb) = parse_rgb(spec)
+            {
+                self.slots[index] = Some(rgb);
             }
         }
     }

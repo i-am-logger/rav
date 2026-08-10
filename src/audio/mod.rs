@@ -3,8 +3,8 @@ pub mod tap;
 
 use anyhow::{Context, Result};
 use cpal::{
-    traits::{DeviceTrait, HostTrait, StreamTrait},
     Device, Host, Stream, StreamConfig,
+    traits::{DeviceTrait, HostTrait, StreamTrait},
 };
 use flume::{Receiver, Sender};
 use std::sync::Arc;
@@ -159,11 +159,11 @@ impl AudioCapture {
 
         // Then fall back to a substring match, so a partial name still works.
         for device in host.input_devices()? {
-            if let Ok(device_name) = device.name() {
-                if device_name.contains(name) {
-                    info!("Found device matching '{}': {}", name, device_name);
-                    return Ok(device);
-                }
+            if let Ok(device_name) = device.name()
+                && device_name.contains(name)
+            {
+                info!("Found device matching '{}': {}", name, device_name);
+                return Ok(device);
             }
         }
 
@@ -187,15 +187,14 @@ impl AudioCapture {
 
         // Second pass: monitor sources as exposed by PulseAudio/PipeWire on Linux.
         for device in host.input_devices()? {
-            if let Ok(device_name) = device.name() {
-                if device_name.contains(".monitor")
+            if let Ok(device_name) = device.name()
+                && (device_name.contains(".monitor")
                     || device_name.contains("Monitor of")
                     || device_name.to_lowercase().contains("loopback")
-                    || device_name.to_lowercase().contains("monitor")
-                {
-                    info!("Found monitor device: {}", device_name);
-                    return Ok(device);
-                }
+                    || device_name.to_lowercase().contains("monitor"))
+            {
+                info!("Found monitor device: {}", device_name);
+                return Ok(device);
             }
         }
 

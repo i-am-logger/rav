@@ -1,6 +1,6 @@
 //! The analyser view: bars, peak caps and the dotted background behind them.
 
-use crate::ui::scale::{bar_eighths, cap_position, ramp_index, segment_top, CAP_LOW, CAP_MID};
+use crate::ui::scale::{CAP_LOW, CAP_MID, bar_eighths, cap_position, ramp_index, segment_top};
 use crate::visual::{Skin, Theme};
 use ratatui::{buffer::Buffer, layout::Rect, style::Color, widgets::Widget};
 
