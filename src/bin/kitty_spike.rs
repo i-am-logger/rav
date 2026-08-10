@@ -286,7 +286,18 @@ fn measure(args: &Args) -> std::process::ExitCode {
         if took > target {
             late += 1;
         } else {
-            std::thread::sleep(target - took);
+            // Sleep most of it, then spin the last millisecond. `sleep` on macOS
+            // overshoots by milliseconds, which reported 50fps for a loop that
+            // was idle 90% of each frame - the granularity of the wait, not a
+            // ceiling of the terminal. A visualiser pacing itself for real would
+            // have the same problem.
+            let left = target - took;
+            if let Some(coarse) = left.checked_sub(Duration::from_millis(1)) {
+                std::thread::sleep(coarse);
+            }
+            while at.elapsed() < target {
+                std::hint::spin_loop();
+            }
         }
         sent += 1;
     }
@@ -340,7 +351,12 @@ fn transmit(
     // at 60fps floods stdin and collides with key handling - and rav reads keys
     // off the same descriptor.
     let head = format!(
-        "a=T,q=2,i={IMAGE_ID},f=32,s={},v={},z=-1",
+        // z=0, above the text, so the measurement is visible. A frame at z=-1
+        // sits below every cell's background, and a terminal running any theme
+        // gives every cell one - so the whole run showed a blank screen while
+        // reporting 502 successful transmits. Whether text can be laid *over*
+        // the image is the occlusion check's question, not this one's.
+        "a=T,q=2,i={IMAGE_ID},f=32,s={},v={},z=0",
         args.width, args.height
     );
     match args.transport {
