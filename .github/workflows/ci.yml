@@ -20,57 +20,167 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
 
+# Checks runs `devenv test`, the same command a developer runs locally, so the
+# two cannot drift. Add a check by adding a task to devenv.nix, never by adding
+# a step here.
 jobs:
-  format:
-    name: Format
+  checks:
+    name: Checks
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Cold, this builds the whole dev shell and evaluates nixpkgs for three
+    # systems. 30 was not enough for that.
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      # cache-nix-action's `purge` deletes superseded entries through the
+      # Actions cache API. Without this it silently cannot.
+      actions: write
+    env:
+      # CI never opens a debugger or reads a core dump, and debuginfo is most of
+      # the codegen time and most of target/ - which is also most of what
+      # rust-cache uploads and downloads every run. Measured on this repo,
+      # `cargo test --all-features --no-run`: 47s -> 15s cold, 22s -> 4s warm,
+      # 775MB -> 536MB of target/.
+      #
+      # Cargo.toml keeps `[profile.dev] opt-level = 1` so a locally built rav
+      # keeps up with realtime audio; setting it here rather than there is what
+      # leaves that local behaviour alone. If a wall-clock test ever flakes on a
+      # slow runner, drop OPT_LEVEL and keep DEBUG=0 alone (29s/11s/486MB).
+      # `line-tables-only` was measured and rejected: 30s/20s/631MB - worse than
+      # DEBUG=0 on both axes.
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_DEV_OPT_LEVEL: "0"
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - run: cargo fmt --all --check
 
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7
+      # Substituters go into nix.conf here rather than being requested at
+      # runtime by devenv, so they apply whatever the daemon's trusted-users
+      # list says. cache.nixos.org is already a default and nix-community serves
+      # rust-overlay/fenix, which this repo does not use - neither is listed, so
+      # a store-path miss costs one lookup instead of three.
+      - uses: DeterminateSystems/nix-installer-action@v22
         with:
-          persist-credentials: false
-      # cpal links ALSA on Linux; anything that compiles the audio module needs
-      # these headers.
-      - name: Install ALSA headers
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
-      - uses: dtolnay/rust-toolchain@stable
+          extra-conf: |
+            extra-substituters = https://devenv.cachix.org
+            extra-trusted-public-keys = devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw=
+            auto-optimise-store = false
+
+      # LAYER 1 - the nix store: devenv, the rust toolchain, alsa-lib, and every
+      # /nix/store path `nix build` produces.
+      - uses: nix-community/cache-nix-action@v7
         with:
-          components: clippy
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', 'devenv.lock', 'flake.lock', 'Cargo.lock') }}
+          # No lock hashes in the prefix, so a lockfile bump still restores the
+          # previous store and builds only the delta.
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          # Restore everywhere, save only on master. GitHub caches are
+          # ref-scoped: a PR can read master's entry but writes its own, so an
+          # ungated save spends ~2GB of a 10GB repo budget per open PR and
+          # evicts the cargo caches. That already happened here - PR #51 wrote
+          # 3.26GB of nix entries no other ref can read.
+          save: ${{ github.ref == 'refs/heads/master' }}
+          purge: ${{ github.ref == 'refs/heads/master' }}
+          # Keep exactly one nix entry on master. `never` exempts the entry this
+          # run just wrote.
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
+          purge-primary-key: never
+          # A safety valve, not a routine step. The measured store here is
+          # 6.78GB, so the old 2G cap ran GC on every save - and because GC roots
+          # protect most of the store it could only free 1.3GB, shredding flake
+          # inputs for nothing. Above the working set GC never fires, which costs
+          # about 0.4GB more in the saved entry (1.63GB -> ~2.0GB compressed).
+          gc-max-store-size-linux: 8G
+
+      # Pinned to the nixpkgs flake.lock already pins, for three reasons:
+      # `nixpkgs#devenv` resolves through the flake registry to a nixpkgs that
+      # moves daily, so it drifts outside the cache key below; this reuses the
+      # nixpkgs the flake steps evaluate anyway instead of dragging a third one
+      # into the store; and it is prebuilt on cache.nixos.org, where
+      # `github:cachix/devenv/<tag>` needs cabal2nix IFD to build its cachix
+      # dependency. Verified: nixpkgs f13ff45 gives devenv 2.2.1 and its
+      # x86_64-linux output is already in cache.nixos.org.
+      - name: Install devenv
+        run: |
+          rev=$(jq -r '.nodes.nixpkgs.locked.rev' flake.lock)
+          nix profile add "github:NixOS/nixpkgs/$rev#devenv"
+
+      # Build the shell in a step of its own, so a shell build failure reads as
+      # one - and so the two toolchain probes in the next step are instant.
+      - run: devenv shell true
+
+      # LAYER 2 - ~/.cargo/{registry,git} and ./target. devenv.nix pins
+      # CARGO_TARGET_DIR to ./target and leaves CARGO_HOME alone, so both are
+      # where this action looks.
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: linux
-      # --all-targets so the tests are linted too, not just the library.
-      - run: cargo clippy --all-targets --all-features -- -D warnings
+          # Two independent guards against keying on the wrong compiler.
+          # cmd-format (rust-cache >= 2.9.0) runs the `rustc -vV` and
+          # `cargo metadata` probes through devenv, so the key tracks the
+          # nixpkgs toolchain that actually compiles rather than the runner
+          # image's preinstalled rustup - which also stops a GitHub image bump
+          # invalidating the cache for nothing. It needs devenv to exist, so
+          # this step must stay after the install above.
+          cmd-format: "devenv shell -- {0}"
+          # And the lockfile hash, because the toolchain cannot move without
+          # devenv.lock moving - it pins cachix/devenv-nixpkgs, which is where
+          # rustc comes from. Note that `key:` is ignored whenever `shared-key:`
+          # is set, so the hash has to live here.
+          shared-key: devenv-${{ hashFiles('devenv.lock') }}
+          workspaces: ". -> target"
 
-  test:
-    name: Test
+      # fmt and the nix lints, then clippy, then the tests - ordered by task
+      # edges in devenv.nix so the cheap checks fail before anything compiles.
+      - run: devenv test
+
+      # --no-build because a Linux runner cannot build the darwin derivations
+      # this evaluates. It catches evaluation errors on every system, such as a
+      # platform nixpkgs has dropped.
+      - run: nix flake check --all-systems --no-build
+
+  # Its own job because it is the longest step and shares nothing with the
+  # checks. Running it alongside costs a second nix install and buys back its
+  # whole duration in wall-clock.
+  package:
+    name: Package
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: write
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - name: Install ALSA headers
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: DeterminateSystems/nix-installer-action@v22
         with:
-          shared-key: linux
-      - run: cargo test --all-features
+          extra-conf: |
+            auto-optimise-store = false
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-pkg-${{ runner.os }}-${{ hashFiles('**/*.nix', 'flake.lock', 'Cargo.lock') }}
+          restore-prefixes-first-match: nix-pkg-${{ runner.os }}-
+          save: ${{ github.ref == 'refs/heads/master' }}
+          purge: ${{ github.ref == 'refs/heads/master' }}
+          purge-prefixes: nix-pkg-${{ runner.os }}-
+          purge-created: 0
+          purge-primary-key: never
+          gc-max-store-size-linux: 8G
+      # A flake sees only git-tracked files, so this catches what cargo cannot:
+      # a source file that was never `git add`ed builds locally and fails here.
+      - run: nix build .#default --print-build-logs
+      - run: ./result/bin/rav --version
 
+  # Separate from the nix build because this binary is attached to the release
+  # and has to run on machines without nix: built here it links the runner's
+  # glibc, where a nix-built one resolves an interpreter under /nix/store.
+  #
+  # No `needs: [checks]`. Cheap-before-expensive is enforced inside the checks
+  # job, where the ordering is free; gating this one on it would serialise a
+  # ~90s release build behind a ~5min check suite on every green run to save
+  # runner minutes only on red ones. Release latency is worth more than that.
   build:
     name: Build
     runs-on: ubuntu-latest
@@ -79,14 +189,18 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      # cpal links ALSA on Linux.
       - name: Install ALSA headers
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
       - uses: dtolnay/rust-toolchain@stable
+      # A different toolchain (rustup, not nixpkgs) and a different profile from
+      # the checks job, so deliberately a separate cache. No cmd-format: plain
+      # cargo is the right cargo here. ~165MB an entry, so this one saves on
+      # every ref - PR iteration speed is worth that much budget.
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: linux
-      # No -C target-cpu=native: this binary is attached to the release and runs
-      # on machines other than the one that built it.
+          shared-key: release
+      # No -C target-cpu=native: this runs on machines other than the builder.
       - run: cargo build --release --bin rav
       - uses: actions/upload-artifact@v7
         with:
@@ -94,32 +208,17 @@ jobs:
           path: target/release/rav
           if-no-files-found: error
 
-  nix:
-    name: Nix
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: cachix/install-nix-action@v31.11.0
-      # A flake sees only git-tracked files, so this catches what cargo cannot.
-      - run: nix flake check --all-systems
-      - run: nix build .#default --print-build-logs
-      - run: ./result/bin/rav --version
-
   release:
     name: Release
-    needs: [format, lint, test, build]
+    needs: [checks, package, build]
     # Every gate is named: a job in needs: but absent from if: is not gated.
     # !cancelled() rather than always(), so a cancelled run cannot publish.
     if: |
       !cancelled() &&
       github.event_name == 'push' &&
       github.ref == 'refs/heads/master' &&
-      needs.format.result == 'success' &&
-      needs.lint.result == 'success' &&
-      needs.test.result == 'success' &&
+      needs.checks.result == 'success' &&
+      needs.package.result == 'success' &&
       needs.build.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -139,6 +238,12 @@ jobs:
       - name: Install ALSA headers
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
       - uses: dtolnay/rust-toolchain@stable
+      # Reads the entry the build job just wrote and never writes one: a pure
+      # consumer, spending none of the repo's cache budget.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release
+          save-if: false
       - uses: release-plz/action@v0.5.131
         id: release-plz
         with:
@@ -184,13 +289,18 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      # Credentials stay on the remote: this job pushes the release branch.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Install ALSA headers
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
       - uses: dtolnay/rust-toolchain@stable
+      # release-pr runs cargo to work out the next version, so it wants the same
+      # registry and target dir. Also a pure consumer.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release
+          save-if: false
       - uses: release-plz/action@v0.5.131
         with:
           command: release-pr

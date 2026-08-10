@@ -1,0 +1,6 @@
+# `scripts.<name>.exec = ...` is devenv's documented idiom, and repeated_keys
+# objects to it. Every other lint stays on.
+disabled = ["repeated_keys"]
+
+# Unpacked copies of previously packaged releases live here.
+ignore = ["target"]
