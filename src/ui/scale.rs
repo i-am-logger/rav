@@ -223,7 +223,7 @@ mod tests {
     }
 
     #[test]
-    fn a_tall_display_uses_the_ramp_exactly_as_the_skin_has_it() {
+    fn a_tall_display_uses_the_ramp_exactly_as_the_theme_has_it() {
         // No skew once there is a row per stop.
         let rows: Vec<usize> = (0..16).map(|r| ramp_index(r, 16, 16)).collect();
         assert_eq!(rows, (0..16).collect::<Vec<_>>());

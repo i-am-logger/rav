@@ -33,7 +33,7 @@ impl Palette {
     /// Ask the terminal for its palette, if `needed`.
     ///
     /// Asking is not free and it is not invisible: it writes escape sequences and
-    /// reads the replies straight off the terminal. Skins that spell their
+    /// reads the replies straight off the terminal. Themes that spell their
     /// colours out in hex never need it, so the common case says nothing at all.
     ///
     /// Must run before the alternate screen is entered and while nothing else is

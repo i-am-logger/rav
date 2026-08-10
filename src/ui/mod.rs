@@ -75,7 +75,7 @@ pub enum Action {
     CycleFrequencyLimit,
     ToggleHelp,
     CycleBarStyle,
-    CycleSkin,
+    CycleTheme,
     /// Trim in whole dB steps; kept an integer so `Action` stays `Eq`.
     Gain(i8),
     ResetGain,
@@ -91,7 +91,7 @@ pub fn map_key(code: KeyCode) -> Action {
         KeyCode::Char('g') | KeyCode::Char('G') => Action::ToggleGrid,
         KeyCode::Char('w') | KeyCode::Char('W') => Action::CycleBandwidth,
         KeyCode::Char('b') | KeyCode::Char('B') => Action::CycleBarStyle,
-        KeyCode::Char('s') | KeyCode::Char('S') => Action::CycleSkin,
+        KeyCode::Char('t') | KeyCode::Char('T') => Action::CycleTheme,
         KeyCode::Char('f') | KeyCode::Char('F') => Action::CycleBarFall,
         KeyCode::Char('r') | KeyCode::Char('R') => Action::CycleFrequencyLimit,
         KeyCode::Up => Action::Gain(1),
@@ -383,7 +383,7 @@ impl App {
                 self.bar_style = self.bar_style.next();
                 self.note(format!("bars {}", self.bar_style.label()));
             }
-            Action::CycleSkin => {
+            Action::CycleTheme => {
                 let next = self.next_theme();
                 self.set_theme(next);
                 self.note(format!("theme {}", self.theme.name));
@@ -462,7 +462,7 @@ impl App {
                 value: Some(self.peaks.label().to_string()),
             },
             HelpRow {
-                key: "s",
+                key: "t",
                 description: "theme",
                 value: Some(self.theme.name.clone()),
             },
@@ -979,7 +979,7 @@ mod tests {
 
     #[test]
     fn s_cycles_the_colours_and_b_the_bar_style() {
-        assert_eq!(map_key(KeyCode::Char('s')), Action::CycleSkin);
+        assert_eq!(map_key(KeyCode::Char('t')), Action::CycleTheme);
         assert_eq!(map_key(KeyCode::Char('b')), Action::CycleBarStyle);
     }
 
@@ -992,7 +992,7 @@ mod tests {
         // rav and winamp share a ramp and differ only in the backdrop, so that
         // is what has to change here - the bars deliberately do not.
         let before = a.grid_colors.clone();
-        a.apply(Action::CycleSkin);
+        a.apply(Action::CycleTheme);
         assert_eq!(a.theme.name, "winamp");
         assert_eq!(a.sized_for, (0, 0), "the ramp cache must be invalidated");
         a.resize(80, 24);
@@ -1001,7 +1001,7 @@ mod tests {
     }
 
     #[test]
-    fn a_loaded_skin_stays_in_the_cycle() {
+    fn a_loaded_theme_stays_in_the_cycle() {
         // --theme puts a fourth entry in the rotation; cycling all the way round
         // has to come back to it rather than dropping it after the first change.
         let mut a = app();
@@ -1012,7 +1012,7 @@ mod tests {
         let seen: Vec<String> = (0..4)
             .map(|_| {
                 let label = a.theme.name.clone();
-                a.apply(Action::CycleSkin);
+                a.apply(Action::CycleTheme);
                 label
             })
             .collect();

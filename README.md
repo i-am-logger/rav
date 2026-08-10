@@ -50,7 +50,7 @@ Everything else is a keypress, and `h` shows the lot with their current values:
 |---|---|
 | `q` / `Esc` | quit |
 | `Space` / `Tab` / `o` | switch analyser ↔ oscilloscope |
-| `s` | theme — rav, winamp, terminal, mono |
+| `t` | theme — rav, winamp, terminal, mono |
 | `b` | bar style — blocks, solid, thick, half, line, shade |
 | `p` | peak caps — fine, coarse, off |
 | `g` | grid behind the bars, on/off |
@@ -64,7 +64,7 @@ Logs go to `rav.log`, never to the display.
 
 ## Themes
 
-Four, cycled with `s` and all compiled in — the binary needs nothing on disk:
+Four, cycled with `t` and all compiled in — the binary needs nothing on disk:
 
 | | |
 |---|---|

@@ -184,9 +184,9 @@
     LEAD="''${RAV_DEMO_LEAD:-5}"
     # Every theme, then the oscilloscope, then the help overlay - and back to the
     # defaults, so the GIF loops from the same frame it started on. There is one
-    # `s` per theme: the last press is what returns to the first, and leaving it
+    # `t` per theme: the last press is what returns to the first, and leaving it
     # out is how the tour quietly stops ending where it began.
-    TOUR="''${RAV_DEMO_TOUR:-3:s 3:s 3:s 3:s 1:space 4:space 1:h 4:h 2:-}"
+    TOUR="''${RAV_DEMO_TOUR:-3:t 3:t 3:t 3:t 1:space 4:space 1:h 4:h 2:-}"
     # Total duration is the sum of the tour's holds, so the two never drift.
     # SETTLE covers the second avfoundation spends opening the capture device -
     # without it the first key lands before filming starts and that segment is

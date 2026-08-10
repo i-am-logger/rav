@@ -8,7 +8,7 @@ rav --theme ./sunset.toml     # a path
 rav --theme sunset            # a name, looked up in ./themes then ~/.config/rav/themes
 ```
 
-Press `s` in rav to cycle the built-ins; a theme loaded with `--theme` joins the
+Press `t` in rav to cycle the built-ins; a theme loaded with `--theme` joins the
 rotation.
 
 | built-in | |

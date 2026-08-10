@@ -54,7 +54,7 @@ pub struct Theme {
 
 impl Default for Theme {
     fn default() -> Self {
-        // Validated by `every_built_in_skin_parses`, so a failure here means the
+        // Validated by `every_built_in_theme_parses`, so a failure here means the
         // build embedded something unexpected.
         Self::built_in("rav")
             .expect("rav is built in")
@@ -277,7 +277,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_built_in_skin_parses() {
+    fn every_built_in_theme_parses() {
         for name in Theme::built_in_names() {
             let theme = Theme::built_in(name)
                 .unwrap_or_else(|| panic!("{name} is not built in"))
@@ -315,7 +315,7 @@ mod tests {
     }
 
     #[test]
-    fn the_theme_following_skins_name_no_absolute_colours() {
+    fn the_theme_following_themes_name_no_absolute_colours() {
         // The whole point of them: the terminal decides what the colours are. An
         // Rgb value anywhere would ignore the user's theme.
         for name in ["terminal", "mono"] {
@@ -354,7 +354,7 @@ mod tests {
     }
 
     #[test]
-    fn only_a_skin_that_needs_the_palette_asks_for_it() {
+    fn only_a_theme_that_needs_the_palette_asks_for_it() {
         // Asking writes escape sequences to the terminal and reads the replies
         // back, so the common case - a theme that spells its colours out - must
         // not do it at all.
@@ -445,13 +445,13 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_skin_says_what_it_looked_for() {
+    fn an_unknown_theme_says_what_it_looked_for() {
         let err = Theme::load("no-such-theme").expect_err("must not resolve");
         assert!(format!("{err}").contains("no-such-theme"));
     }
 
     #[test]
-    fn a_skin_loads_from_a_path() {
+    fn a_theme_loads_from_a_path() {
         let from_disk = Theme::load("themes/winamp.toml").expect("by path");
         let built_in = Theme::built_in("winamp").unwrap().unwrap();
         assert_eq!(from_disk, built_in, "the compiled-in copy has drifted");
