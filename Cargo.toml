@@ -1,6 +1,6 @@
 [package]
 name = "rav"
-version = "1.0.0-beta.4"
+version = "1.0.0-beta.5"
 # There are two binaries, so `cargo run` cannot guess. Without this it errors
 # out and tells you to pass --bin, which is a poor first impression.
 default-run = "rav"
