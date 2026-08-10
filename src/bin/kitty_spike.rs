@@ -56,6 +56,17 @@ fn main() -> std::process::ExitCode {
         return std::process::ExitCode::FAILURE;
     }
 
+    // A panic between entering the alternate screen and leaving it would hand
+    // back a terminal with no cursor and rav's images still painted over the
+    // shell. `panic = "abort"` still runs the hook, so this holds in release.
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let mut out = std::io::stdout();
+        let _ = write!(out, "\x1b_Ga=d,d=A\x1b\\\x1b[?25h\x1b[?1049l");
+        let _ = out.flush();
+        previous(info);
+    }));
+
     match probe() {
         Support::Yes => println!("kitty graphics: supported"),
         Support::No => {
@@ -184,6 +195,17 @@ fn frame_dir() -> &'static std::path::Path {
         std::env::temp_dir()
     })
     .as_path()
+}
+
+/// Stage `frame` where the terminal can read it, and hand back the base64 of the
+/// path that `t=t` carries.
+///
+/// The terminal unlinks the file as it reads it, so a name is good for exactly
+/// one placement.
+fn stage_frame(frame: &[u8], name: &str) -> std::io::Result<String> {
+    let path = frame_dir().join(name);
+    std::fs::write(&path, frame)?;
+    Ok(base64(path.to_string_lossy().as_bytes()))
 }
 
 // ── capability probe ────────────────────────────────────────────────────────
@@ -326,10 +348,17 @@ fn measure(args: &Args) -> std::process::ExitCode {
     let budget = Duration::from_secs(args.seconds);
     let target = Duration::from_micros(16_667);
 
+    // Draw on the alternate screen. The measurement scrolls the shell otherwise,
+    // and - the reason it matters here - a scrolled screen moves the cursor,
+    // which is where the terminal places the image.
+    let _ = write!(out, "\x1b[?1049h\x1b[?25l\x1b[2J");
+    let _ = out.flush();
+
     let started = Instant::now();
     let mut sent = 0u64;
     let mut late = 0u64;
     let mut worst = Duration::ZERO;
+    let mut failure = None;
 
     while started.elapsed() < budget {
         let at = Instant::now();
@@ -338,8 +367,11 @@ fn measure(args: &Args) -> std::process::ExitCode {
         // obvious rather than silent.
         paint(&mut frame, args.width, sent);
 
+        // Home the cursor first. A kitty image is placed at the cursor, so
+        // without this the frame lands wherever the last one left it.
+        let _ = write!(out, "\x1b[H");
         if let Err(e) = transmit(&mut out, &frame, args, sent) {
-            eprintln!("transmit failed after {sent} frames: {e}");
+            failure = Some(format!("transmit failed after {sent} frames: {e}"));
             break;
         }
 
@@ -365,6 +397,15 @@ fn measure(args: &Args) -> std::process::ExitCode {
     }
 
     let elapsed = started.elapsed().as_secs_f64();
+
+    // Take the images down and give the shell back before reporting, or the
+    // numbers are printed onto a screen that is about to be discarded.
+    let _ = write!(out, "\x1b_Ga=d,d=A\x1b\\\x1b[?25h\x1b[?1049l");
+    let _ = out.flush();
+    if let Some(e) = failure {
+        eprintln!("{e}");
+    }
+
     let fps = sent as f64 / elapsed;
     println!(
         "\n  frames      {sent}\n  \
@@ -462,7 +503,13 @@ fn transmit(
         // gives every cell one - so the whole run showed a blank screen while
         // reporting 502 successful transmits. Whether text can be laid *over*
         // the image is the occlusion check's question, not this one's.
-        "a=T,q=2,i={IMAGE_ID},f=32,s={},v={},z=0",
+        // `C=1` leaves the cursor where it was. Without it the terminal parks the
+        // cursor past the bottom-right of the image, so the next frame is placed
+        // from there and the picture walks off the screen - which is what put the
+        // bars in the bottom-right corner, clipped, rather than where they were
+        // sent. The caller homes the cursor each frame; `C=1` is what keeps that
+        // from being undone.
+        "a=T,q=2,i={IMAGE_ID},f=32,s={},v={},z=0,C=1",
         args.width, args.height
     );
     match args.transport {
@@ -708,18 +755,23 @@ fn diagnose() -> std::process::ExitCode {
 /// the status line and help overlay still real text on top. That works only if a
 /// cell whose background is the terminal default leaves the image visible.
 fn occlusion_check() -> std::process::ExitCode {
-    let (w, h) = (400u32, 120u32);
+    // A solid slab, not the bar pattern. Bars leave most of the frame
+    // transparent, so a hidden region and a region that simply had no bar in it
+    // look identical - the picture cannot distinguish the two answers it is here
+    // to tell apart. Tall enough that the text lands in the middle of the image
+    // rather than along its edge, for the same reason.
+    let (w, h) = (900u32, 360u32);
     let mut frame = vec![0u8; (w * h * 4) as usize];
-    paint(&mut frame, w, 0);
+    for (i, px) in frame.chunks_exact_mut(4).enumerate() {
+        // Banded rather than flat, so a partially drawn image is still obvious.
+        let row = i as u32 / w;
+        let light = (row / 30).is_multiple_of(2);
+        px[0] = if light { 0x20 } else { 0x10 };
+        px[1] = if light { 0xd0 } else { 0xa0 };
+        px[2] = if light { 0x40 } else { 0x30 };
+        px[3] = 0xff;
+    }
 
-    let name = match shm_write(&frame, 0) {
-        Ok(name) => name,
-        Err(e) => {
-            eprintln!("shm failed: {e}");
-            return std::process::ExitCode::FAILURE;
-        }
-    };
-    let encoded = base64(name.as_bytes());
     let mut out = std::io::stdout();
 
     // Two phases, because "nothing appeared" has two very different causes and
@@ -739,6 +791,21 @@ fn occlusion_check() -> std::process::ExitCode {
             "BELOW text (z=-1) - the question this is here to answer",
         ),
     ] {
+        // The file transport, not `t=s`. This check asked its question through
+        // the one transport that cannot answer on macOS, so both phases came
+        // back blank for the reason phase one exists to rule out - it was
+        // measuring the transport rather than occlusion.
+        //
+        // Staged per phase because the terminal unlinks a `t=t` file as it reads
+        // it, so one staging cannot serve two placements.
+        let encoded = match stage_frame(&frame, &format!("rav-occlusion-{phase}.rgba")) {
+            Ok(encoded) => encoded,
+            Err(e) => {
+                eprintln!("could not stage the frame: {e}");
+                return std::process::ExitCode::FAILURE;
+            }
+        };
+
         // Absolute positioning assumes a known screen, so clear it first.
         let _ = write!(out, "\x1b[2J\x1b[H");
         let _ = write!(out, "phase {phase}: {blurb}\r\n");
@@ -748,20 +815,23 @@ fn occlusion_check() -> std::process::ExitCode {
         let _ = write!(out, "\x1b[3;1H");
         let _ = write!(
             out,
-            "\x1b_Ga=T,i={IMAGE_ID},f=32,s={w},v={h},z={z},S={},t=s;{encoded}\x1b\\",
+            "\x1b_Ga=T,i={IMAGE_ID},f=32,s={w},v={h},z={z},C=1,S={},t=t;{encoded}\x1b\\",
             frame.len()
         );
         let _ = out.flush();
 
-        // Line one takes the terminal's default background, line two sets one
-        // explicitly. If only the second hides the image then ratatui's
-        // default-styled cells are safe and the overlay plan holds.
-        let _ = write!(out, "\x1b[4;3Hdefault background over the image");
+        // Three rows inside the image, each answering a different question.
+        // Row 5 is the one that decides the design: ratatui writes
+        // default-styled cells, so if those hide the image the overlay plan is
+        // dead regardless of what the other two do. Row 9 is left clear as a
+        // control - the image must be visible there in both phases, or the
+        // reading of the other rows means nothing.
+        let _ = write!(out, "\x1b[5;3H default background - THE QUESTION ");
         let _ = write!(
             out,
-            "\x1b[6;3H\x1b[48;2;0;0;0mexplicit background over the image\x1b[0m"
+            "\x1b[7;3H\x1b[48;2;0;0;0m explicit black background \x1b[0m"
         );
-        let _ = write!(out, "\x1b[10;1H");
+        let _ = write!(out, "\x1b[11;1H");
         let _ = out.flush();
 
         if let Some(reply) = read_reply() {
@@ -776,10 +846,18 @@ fn occlusion_check() -> std::process::ExitCode {
 
     let _ = write!(out, "\x1b[2J\x1b[H");
     let _ = out.flush();
-    println!("Phase 1 blank  -> the image never arrived; z is not the problem.");
-    println!("Phase 2 blank  -> text occludes it, and the overlay must become");
-    println!("                  scene geometry instead.");
-    println!("Phase 2 shows  -> bars as pixels with help and status as text works.");
+    println!("Read row 9 first - it carries no text and must be green in both");
+    println!("phases. If it is not, the image did not arrive and nothing else");
+    println!("on the screen means anything.\n");
+    println!("Then row 5, the default-background row, in phase 2:");
+    println!("  green around the letters -> ratatui's default cells let the image");
+    println!("                              through, and bars as pixels with help");
+    println!("                              and status as real text works.");
+    println!("  black around the letters -> a text cell blanks the image even at");
+    println!("                              the default background, so the overlay");
+    println!("                              has to be drawn into the frame instead.");
+    println!("\nRow 7 sets a background explicitly and is expected to hide the");
+    println!("image in both phases; it is the control for row 5, not a result.");
     println!("\nPress Enter to finish.");
     let mut line = String::new();
     let _ = std::io::stdin().read_line(&mut line);

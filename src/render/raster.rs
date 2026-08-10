@@ -1,0 +1,343 @@
+//! Turning geometry and colour into pixels.
+//!
+//! The one rule carried over from the terminal renderer: **colour is a function
+//! of height, never of a bar's own value**. A tall bar and a short one agree on
+//! the colour they share, and the unlit backdrop shows the colour a bar will
+//! reach when it gets there. In a cell grid that fell out of indexing a
+//! per-row table; here it is [`Ramp`], asked for the colour at a coordinate.
+//!
+//! Bands are placed to match what the terminal does rather than to look tidy.
+//! `ramp_index` rounds to the nearest stop, so the bottom and top bands come out
+//! half as tall as the rest - the first stop only holds until the fraction
+//! reaches half a band. Spacing the stops evenly instead would shift every
+//! colour boundary, which is precisely the difference the pixel release is not
+//! allowed to introduce.
+
+use crate::render::geometry::Rect;
+use crate::render::ink::Rgba;
+use tiny_skia::{Paint, Pixmap, Rect as SkRect, Transform};
+
+/// A colour ramp, bottom-up: `stops[0]` is the floor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ramp {
+    stops: Vec<Rgba>,
+}
+
+impl Ramp {
+    /// An empty ramp is not representable; a caller with no colours gets black
+    /// rather than a panic at the point of drawing.
+    pub fn new(stops: Vec<Rgba>) -> Self {
+        let stops = if stops.is_empty() {
+            vec![Rgba::opaque(0, 0, 0)]
+        } else {
+            stops
+        };
+        Self { stops }
+    }
+
+    pub fn len(&self) -> usize {
+        self.stops.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        false
+    }
+
+    /// The colour at `y`, in a viewport `height` tall.
+    ///
+    /// `y` is measured downward from the top, as everything in `geometry` is, so
+    /// the floor is `y == height` and the fraction is inverted here.
+    pub fn at(&self, y: f32, height: f32) -> Rgba {
+        let last = self.stops.len() - 1;
+        if last == 0 || height <= 0.0 {
+            return self.stops[0];
+        }
+        let t = ((height - y) / height).clamp(0.0, 1.0);
+        self.stops[((t * last as f32).round() as usize).min(last)]
+    }
+
+    /// Each band as `(top, bottom, colour)` in a viewport `height` tall.
+    ///
+    /// Half-height end bands are the point - see the module note. Returned
+    /// top-down so a caller can clip against a rectangle in the same order it
+    /// stores one.
+    pub fn bands(&self, height: f32) -> Vec<(f32, f32, Rgba)> {
+        let last = self.stops.len() - 1;
+        if last == 0 || height <= 0.0 {
+            return vec![(0.0, height.max(0.0), self.stops[0])];
+        }
+        let last_f = last as f32;
+        (0..=last)
+            .rev()
+            .map(|k| {
+                // The fractions at which rounding tips into and out of stop `k`.
+                let t_lo = ((k as f32 - 0.5) / last_f).clamp(0.0, 1.0);
+                let t_hi = ((k as f32 + 0.5) / last_f).clamp(0.0, 1.0);
+                (height * (1.0 - t_hi), height * (1.0 - t_lo), self.stops[k])
+            })
+            .collect()
+    }
+}
+
+/// An RGBA buffer that geometry is drawn into.
+///
+/// Owns a `tiny_skia::Pixmap` rather than exposing it, because the pixels leave
+/// here in straight alpha and tiny-skia stores them premultiplied - a caller
+/// handed the raw buffer would send subtly wrong edges to the terminal and have
+/// no reason to suspect it.
+pub struct Canvas {
+    pixmap: Pixmap,
+}
+
+impl Canvas {
+    /// `None` for a zero dimension, which is a terminal mid-resize rather than a
+    /// programming error and is the caller's to skip.
+    pub fn new(width: u32, height: u32) -> Option<Self> {
+        Pixmap::new(width, height).map(|pixmap| Self { pixmap })
+    }
+
+    pub fn width(&self) -> u32 {
+        self.pixmap.width()
+    }
+
+    pub fn height(&self) -> u32 {
+        self.pixmap.height()
+    }
+
+    /// Reset to fully transparent, so the terminal's own background shows
+    /// wherever rav has not drawn.
+    pub fn clear(&mut self) {
+        self.pixmap.fill(tiny_skia::Color::TRANSPARENT);
+    }
+
+    /// Paint `rect` in one colour.
+    ///
+    /// A rectangle with no area is skipped rather than refused: a bar at rest is
+    /// zero pixels tall, and every frame of silence would otherwise be an error
+    /// to handle.
+    pub fn fill(&mut self, rect: Rect, colour: Rgba) {
+        let Some(sk) = SkRect::from_xywh(rect.x, rect.y, rect.w, rect.h) else {
+            return;
+        };
+        let mut paint = Paint::default();
+        paint.set_color_rgba8(colour.r, colour.g, colour.b, colour.a);
+        // Antialiasing on, which is the whole argument for drawing pixels: a bar
+        // edge lands where the arithmetic puts it instead of being snapped to a
+        // boundary, and that snapping is the mechanism behind #63.
+        paint.anti_alias = true;
+        self.pixmap
+            .fill_rect(sk, &paint, Transform::identity(), None);
+    }
+
+    /// Paint `rect` with the colour the ramp gives at each height.
+    ///
+    /// Filled band by band rather than row by row, so the cost is the number of
+    /// stops and not the height of the rectangle.
+    pub fn fill_ramped(&mut self, rect: Rect, ramp: &Ramp, view_height: f32) {
+        for (top, bottom, colour) in ramp.bands(view_height) {
+            let y = top.max(rect.y);
+            let h = bottom.min(rect.bottom()) - y;
+            if h <= 0.0 {
+                continue;
+            }
+            self.fill(
+                Rect {
+                    x: rect.x,
+                    y,
+                    w: rect.w,
+                    h,
+                },
+                colour,
+            );
+        }
+    }
+
+    /// The frame in straight-alpha RGBA, which is what `f=32` means to a
+    /// terminal and what a window blit expects.
+    pub fn to_rgba(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(self.pixmap.data().len());
+        for px in self.pixmap.pixels() {
+            let c = px.demultiply();
+            out.extend_from_slice(&[c.red(), c.green(), c.blue(), c.alpha()]);
+        }
+        out
+    }
+
+    /// The premultiplied buffer, for a target that wants it that way.
+    pub fn premultiplied(&self) -> &[u8] {
+        self.pixmap.data()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::render::geometry::{Viewport, backdrop, bars, caps};
+
+    fn ramp() -> Ramp {
+        Ramp::new(vec![
+            Rgba::opaque(0x00, 0xff, 0x00),
+            Rgba::opaque(0xff, 0xff, 0x00),
+            Rgba::opaque(0xff, 0x00, 0x00),
+        ])
+    }
+
+    /// The pixel at `(x, y)` as straight RGBA.
+    fn at(canvas: &Canvas, x: u32, y: u32) -> Rgba {
+        let data = canvas.to_rgba();
+        let i = ((y * canvas.width() + x) * 4) as usize;
+        Rgba {
+            r: data[i],
+            g: data[i + 1],
+            b: data[i + 2],
+            a: data[i + 3],
+        }
+    }
+
+    #[test]
+    fn a_cap_composites_over_the_backdrop_instead_of_erasing_it() {
+        // The defect that cannot be fixed in a cell grid (#65): one cell holds
+        // one glyph, so writing the cap destroys the backdrop beneath it. Here
+        // both are drawn and the backdrop survives either side of the cap.
+        let view = Viewport::new(20.0, 60.0);
+        let layout = crate::render::Layout::new(10.0, 2.0);
+        let mut canvas = Canvas::new(20, 60).unwrap();
+        canvas.clear();
+
+        let grid = Rgba::opaque(0x00, 0x40, 0x00);
+        let cap = Rgba::opaque(0xff, 0xff, 0xff);
+        canvas.fill(backdrop(1, &layout, &view)[0], grid);
+        let cap_rect = caps(&[0.5], 4.0, &layout, &view)[0];
+        canvas.fill(cap_rect, cap);
+
+        let cap_y = cap_rect.y as u32 + 1;
+        assert_eq!(at(&canvas, 2, cap_y), cap, "the cap is drawn");
+        // Above and below it the backdrop is untouched, which is the whole point.
+        assert_eq!(at(&canvas, 2, cap_y.saturating_sub(6)), grid);
+        assert_eq!(at(&canvas, 2, cap_rect.bottom() as u32 + 4), grid);
+    }
+
+    #[test]
+    fn colour_follows_height_not_the_bar_value() {
+        // The invariant the terminal renderer is built on, restated in pixels:
+        // where a short bar and a tall one overlap they are the same colour.
+        let view = Viewport::new(10.0, 60.0);
+        let layout = crate::render::Layout::new(10.0, 0.0);
+        let r = ramp();
+
+        let mut short = Canvas::new(10, 60).unwrap();
+        short.clear();
+        short.fill_ramped(bars(&[0.3], &layout, &view)[0], &r, view.height);
+
+        let mut tall = Canvas::new(10, 60).unwrap();
+        tall.clear();
+        tall.fill_ramped(bars(&[0.9], &layout, &view)[0], &r, view.height);
+
+        // Every row the short bar reaches must match the tall one there.
+        for y in 43..60 {
+            assert_eq!(
+                at(&short, 5, y),
+                at(&tall, 5, y),
+                "row {y} disagrees between a short bar and a tall one"
+            );
+        }
+    }
+
+    #[test]
+    fn the_ramp_runs_bottom_up() {
+        let r = ramp();
+        assert_eq!(r.at(60.0, 60.0), Rgba::opaque(0x00, 0xff, 0x00), "floor");
+        assert_eq!(r.at(0.0, 60.0), Rgba::opaque(0xff, 0x00, 0x00), "ceiling");
+        assert_eq!(r.at(30.0, 60.0), Rgba::opaque(0xff, 0xff, 0x00), "middle");
+    }
+
+    #[test]
+    fn the_end_bands_are_half_height() {
+        // Not a quirk to tidy away: `ramp_index` rounds to the nearest stop, so
+        // the first stop holds only until the fraction reaches half a band.
+        // Evenly spaced stops would move every boundary in the picture.
+        let r = ramp();
+        let bands = r.bands(60.0);
+        assert_eq!(bands.len(), 3);
+        let height = |(top, bottom, _): &(f32, f32, Rgba)| bottom - top;
+        assert!((height(&bands[0]) - 15.0).abs() < 1e-4, "top band");
+        assert!((height(&bands[1]) - 30.0).abs() < 1e-4, "middle band");
+        assert!((height(&bands[2]) - 15.0).abs() < 1e-4, "bottom band");
+        // And they tile the viewport exactly, with no seam and no overlap.
+        let total: f32 = bands.iter().map(height).sum();
+        assert!((total - 60.0).abs() < 1e-4, "bands must tile the height");
+    }
+
+    #[test]
+    fn bands_agree_with_asking_for_a_single_point() {
+        // Two routes to the same answer, so filling by band cannot drift from
+        // what `at` reports without a test noticing.
+        let r = ramp();
+        for (top, bottom, colour) in r.bands(60.0) {
+            let middle = (top + bottom) / 2.0;
+            assert_eq!(r.at(middle, 60.0), colour, "band at y={middle}");
+        }
+    }
+
+    #[test]
+    fn a_bar_at_rest_draws_nothing_and_does_not_panic() {
+        let view = Viewport::new(10.0, 60.0);
+        let layout = crate::render::Layout::new(10.0, 0.0);
+        let mut canvas = Canvas::new(10, 60).unwrap();
+        canvas.clear();
+        canvas.fill_ramped(bars(&[0.0], &layout, &view)[0], &ramp(), view.height);
+        assert!(
+            canvas.to_rgba().chunks(4).all(|px| px[3] == 0),
+            "silence must leave the frame transparent"
+        );
+    }
+
+    #[test]
+    fn a_single_stop_ramp_is_flat() {
+        let r = Ramp::new(vec![Rgba::opaque(1, 2, 3)]);
+        assert_eq!(r.at(0.0, 60.0), Rgba::opaque(1, 2, 3));
+        assert_eq!(r.at(60.0, 60.0), Rgba::opaque(1, 2, 3));
+        assert_eq!(r.bands(60.0).len(), 1);
+    }
+
+    #[test]
+    fn an_empty_ramp_is_not_representable() {
+        let r = Ramp::new(vec![]);
+        assert_eq!(r.len(), 1);
+        assert_eq!(r.at(0.0, 60.0), Rgba::opaque(0, 0, 0));
+    }
+
+    #[test]
+    fn a_zero_height_viewport_produces_nothing_that_panics() {
+        let r = ramp();
+        assert_eq!(r.at(0.0, 0.0), Rgba::opaque(0x00, 0xff, 0x00));
+        assert_eq!(r.bands(0.0).len(), 1);
+        assert!(Canvas::new(0, 0).is_none());
+    }
+
+    #[test]
+    fn transparency_survives_the_round_trip_to_straight_alpha() {
+        // Premultiplied storage loses colour as alpha falls, so a half-alpha red
+        // is stored as (128,0,0,128) and must come back as (255,0,0,128) or
+        // every antialiased edge reaches the terminal too dark.
+        let mut canvas = Canvas::new(4, 4).unwrap();
+        canvas.clear();
+        canvas.fill(
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 4.0,
+                h: 4.0,
+            },
+            Rgba {
+                r: 0xff,
+                g: 0x00,
+                b: 0x00,
+                a: 0x80,
+            },
+        );
+        let px = at(&canvas, 2, 2);
+        assert_eq!(px.a, 0x80, "alpha is preserved");
+        assert!(px.r >= 0xfe, "red came back as {} not 0xff", px.r);
+    }
+}

@@ -6,6 +6,8 @@
 
 pub mod geometry;
 pub mod ink;
+pub mod raster;
 
 pub use geometry::{Layout, Rect, Viewport};
 pub use ink::{Ink, Rgba};
+pub use raster::{Canvas, Ramp};
