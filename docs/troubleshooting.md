@@ -36,6 +36,17 @@ as an uneven 2/1 cadence.
 
 ## Bars stay flat with no warning
 
-rav is capturing a device with no signal on it. `rav --list-devices` shows what
-it can see, and `rav -d "<name>"` selects one. On Linux the device you want is
-usually the one ending in `.monitor`.
+rav is capturing a device with no signal on it. The log settles it in one line —
+rav reports the level of the first audio that arrives:
+
+```
+Capture delivering audio (peak 0.500)
+```
+
+No such line at all means nothing is arriving; a peak near zero means the source
+is silent rather than absent.
+
+`rav --list-devices` shows what rav can see and `rav -d "<name>"` selects one.
+On Linux that list is ALSA PCMs only — a PipeWire/PulseAudio `.monitor` source
+is not in it and cannot be selected with `-d`. Route the capture from the
+PipeWire side instead; see [audio.md](audio.md).
