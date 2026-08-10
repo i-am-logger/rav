@@ -9,13 +9,16 @@ Terminal today, GUI next.
 
 ![rav](assets/demo.gif)
 
-[![CI](https://img.shields.io/github/actions/workflow/status/i-am-logger/rav/ci.yml?branch=master&label=CI&logo=githubactions&logoColor=white)](https://github.com/i-am-logger/rav/actions/workflows/ci.yml)
 [![Rust](https://img.shields.io/badge/Rust-2b2b2b?logo=rust&logoColor=white)](https://www.rust-lang.org)
 [![Nix](https://img.shields.io/badge/Nix-2b2b2b?logo=nixos&logoColor=white)](https://nixos.org)
-[![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/CC%20BY--NC--SA%204.0-2b2b2b?logo=creativecommons&logoColor=white)](LICENSE)
-
 [![Linux](https://img.shields.io/badge/Linux-2b2b2b?logo=linux&logoColor=white)](docs/audio.md)
 [![macOS](https://img.shields.io/badge/macOS-2b2b2b?logo=apple&logoColor=white)](docs/audio.md)
+[![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/CC%20BY--NC--SA%204.0-2b2b2b?logo=creativecommons&logoColor=white)](LICENSE)
+
+[![CI](https://img.shields.io/github/actions/workflow/status/i-am-logger/rav/ci.yml?branch=master&label=CI&logo=githubactions&logoColor=white)](https://github.com/i-am-logger/rav/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/rav?logo=rust&logoColor=white&color=2b2b2b)](https://crates.io/crates/rav)
+[![Downloads](https://img.shields.io/crates/d/rav?logo=rust&logoColor=white&color=2b2b2b)](https://crates.io/crates/rav)
+[![docs.rs](https://img.shields.io/docsrs/rav?logo=docsdotrs&logoColor=white&color=2b2b2b)](https://docs.rs/rav)
 
 </div>
 
