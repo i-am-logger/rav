@@ -169,6 +169,55 @@ impl Canvas {
     }
 }
 
+/// Everything a surface needs to draw one frame.
+///
+/// The seam between the analyser and whatever is drawing. Deliberately not a
+/// retained scene graph: the glyph renderer has to quantise to cells with its
+/// own rules - the fill-versus-glyph backdrop, cap lifting, partial blocks - and
+/// quantising a shared list of rectangles back into cells cannot reproduce them.
+/// Both surfaces take the same numbers and each is free to be itself.
+pub struct Scene<'a> {
+    /// Bar heights, 0..=1, already through the ballistics.
+    pub values: &'a [f32],
+    /// Peak positions, 0..=1. `None` when caps are switched off.
+    pub peaks: Option<&'a [f32]>,
+    pub layout: crate::render::Layout,
+    pub view: crate::render::Viewport,
+    /// Colour of a lit bar, by height.
+    pub ramp: &'a Ramp,
+    /// Colour of the unlit backdrop, by height. `None` leaves the terminal's own
+    /// background showing, which is what a theme without a grid asks for.
+    pub grid: Option<&'a Ramp>,
+    pub cap: Rgba,
+    pub cap_thickness: f32,
+}
+
+/// Draw `scene` into `canvas`, back to front.
+///
+/// Backdrop, then bars, then caps - the same order the glyph renderer uses, and
+/// the reason a cap can sit over the backdrop instead of replacing it.
+pub fn draw(scene: &Scene, canvas: &mut Canvas) {
+    use crate::render::geometry::{backdrop, bars, caps};
+
+    canvas.clear();
+
+    if let Some(grid) = scene.grid {
+        for rect in backdrop(scene.values.len(), &scene.layout, &scene.view) {
+            canvas.fill_ramped(rect, grid, scene.view.height);
+        }
+    }
+
+    for rect in bars(scene.values, &scene.layout, &scene.view) {
+        canvas.fill_ramped(rect, scene.ramp, scene.view.height);
+    }
+
+    if let Some(peaks) = scene.peaks {
+        for rect in caps(peaks, scene.cap_thickness, &scene.layout, &scene.view) {
+            canvas.fill(rect, scene.cap);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -313,6 +362,95 @@ mod tests {
         assert_eq!(r.at(0.0, 0.0), Rgba::opaque(0x00, 0xff, 0x00));
         assert_eq!(r.bands(0.0).len(), 1);
         assert!(Canvas::new(0, 0).is_none());
+    }
+
+    fn scene<'a>(
+        values: &'a [f32],
+        peaks: Option<&'a [f32]>,
+        ramp: &'a Ramp,
+        grid: Option<&'a Ramp>,
+        view: Viewport,
+    ) -> Scene<'a> {
+        Scene {
+            values,
+            peaks,
+            layout: crate::render::Layout::new(10.0, 0.0),
+            view,
+            ramp,
+            grid,
+            cap: Rgba::opaque(0xff, 0xff, 0xff),
+            cap_thickness: 3.0,
+        }
+    }
+
+    #[test]
+    fn a_whole_scene_layers_backdrop_then_bars_then_cap() {
+        let view = Viewport::new(10.0, 60.0);
+        let r = ramp();
+        let grid = Ramp::new(vec![Rgba::opaque(0x00, 0x20, 0x00)]);
+        let mut canvas = Canvas::new(10, 60).unwrap();
+        draw(
+            &scene(&[0.5], Some(&[0.5]), &r, Some(&grid), view),
+            &mut canvas,
+        );
+
+        // Above the cap: backdrop only, because nothing else reaches there.
+        assert_eq!(at(&canvas, 5, 5), Rgba::opaque(0x00, 0x20, 0x00));
+        // The bar sits on the floor and is lit, so it is not the backdrop.
+        assert_ne!(at(&canvas, 5, 58), Rgba::opaque(0x00, 0x20, 0x00));
+        // The cap is above the bar's top edge and is the cap colour.
+        let cap_rect = caps(&[0.5], 3.0, &crate::render::Layout::new(10.0, 0.0), &view)[0];
+        assert_eq!(
+            at(&canvas, 5, cap_rect.y as u32 + 1),
+            Rgba::opaque(0xff, 0xff, 0xff)
+        );
+    }
+
+    #[test]
+    fn caps_switched_off_draw_nothing() {
+        let view = Viewport::new(10.0, 60.0);
+        let r = ramp();
+        let grid = Ramp::new(vec![Rgba::opaque(0x00, 0x20, 0x00)]);
+
+        let mut with = Canvas::new(10, 60).unwrap();
+        draw(
+            &scene(&[0.5], Some(&[0.9]), &r, Some(&grid), view),
+            &mut with,
+        );
+        let mut without = Canvas::new(10, 60).unwrap();
+        draw(&scene(&[0.5], None, &r, Some(&grid), view), &mut without);
+
+        assert_ne!(with.to_rgba(), without.to_rgba(), "a cap must be visible");
+        // And with peaks off, the row the cap would occupy is plain backdrop.
+        assert_eq!(at(&without, 5, 8), Rgba::opaque(0x00, 0x20, 0x00));
+    }
+
+    #[test]
+    fn no_grid_leaves_the_terminal_background_showing() {
+        // A theme without a grid must not invent one - the terminal's own
+        // background is what shows through, so those pixels stay transparent.
+        let view = Viewport::new(10.0, 60.0);
+        let r = ramp();
+        let mut canvas = Canvas::new(10, 60).unwrap();
+        draw(&scene(&[0.25], None, &r, None, view), &mut canvas);
+        assert_eq!(at(&canvas, 5, 5).a, 0, "unlit rows must stay transparent");
+        assert_eq!(at(&canvas, 5, 58).a, 0xff, "the lit bar is still drawn");
+    }
+
+    #[test]
+    fn silence_leaves_the_backdrop_and_the_caps_on_the_floor() {
+        let view = Viewport::new(10.0, 60.0);
+        let r = ramp();
+        let grid = Ramp::new(vec![Rgba::opaque(0x00, 0x20, 0x00)]);
+        let mut canvas = Canvas::new(10, 60).unwrap();
+        draw(
+            &scene(&[0.0], Some(&[0.0]), &r, Some(&grid), view),
+            &mut canvas,
+        );
+        // The backdrop still shows the column.
+        assert_eq!(at(&canvas, 5, 5), Rgba::opaque(0x00, 0x20, 0x00));
+        // The cap rests on the floor rather than sinking out of sight.
+        assert_eq!(at(&canvas, 5, 58), Rgba::opaque(0xff, 0xff, 0xff));
     }
 
     #[test]
