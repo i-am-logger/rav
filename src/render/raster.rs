@@ -201,18 +201,32 @@ pub fn draw(scene: &Scene, canvas: &mut Canvas) {
 
     canvas.clear();
 
+    // Both counts are the glyph renderer's, taken verbatim: the backdrop fills
+    // every column that fits, and bars draw the lesser of what fits and what
+    // exists. Letting `values.len()` drive it instead would put rectangles past
+    // the viewport - which tiny-skia clips in silence, so the two surfaces would
+    // disagree on bar count for the same input and nothing would say so.
+    let columns = scene.layout.count(scene.view.width);
+    let drawable = columns.min(scene.values.len());
+
     if let Some(grid) = scene.grid {
-        for rect in backdrop(scene.values.len(), &scene.layout, &scene.view) {
+        for rect in backdrop(columns, &scene.layout, &scene.view) {
             canvas.fill_ramped(rect, grid, scene.view.height);
         }
     }
 
-    for rect in bars(scene.values, &scene.layout, &scene.view) {
+    for rect in bars(&scene.values[..drawable], &scene.layout, &scene.view) {
         canvas.fill_ramped(rect, scene.ramp, scene.view.height);
     }
 
     if let Some(peaks) = scene.peaks {
-        for rect in caps(peaks, scene.cap_thickness, &scene.layout, &scene.view) {
+        let capped = drawable.min(peaks.len());
+        for rect in caps(
+            &peaks[..capped],
+            scene.cap_thickness,
+            &scene.layout,
+            &scene.view,
+        ) {
             canvas.fill(rect, scene.cap);
         }
     }
@@ -451,6 +465,72 @@ mod tests {
         assert_eq!(at(&canvas, 5, 5), Rgba::opaque(0x00, 0x20, 0x00));
         // The cap rests on the floor rather than sinking out of sight.
         assert_eq!(at(&canvas, 5, 58), Rgba::opaque(0xff, 0xff, 0xff));
+    }
+
+    #[test]
+    fn an_antialiased_bar_edge_blends_into_the_backdrop() {
+        // Every layer being opaque makes source-over and replace-the-pixel look
+        // identical, so a whole-scene test cannot tell whether compositing works
+        // at all. A bar whose top edge lands mid-pixel is where it shows: that
+        // edge must be part bar and part backdrop, not part bar and part hole.
+        let view = Viewport::new(10.0, 60.0);
+        let r = Ramp::new(vec![Rgba::opaque(0xff, 0x00, 0x00)]);
+        let grid = Ramp::new(vec![Rgba::opaque(0x00, 0x00, 0xff)]);
+
+        // 0.333 * 60 = 19.98, so the top edge sits a hundredth of a pixel inside
+        // row 40 and that row is almost entirely backdrop.
+        let mut canvas = Canvas::new(10, 60).unwrap();
+        draw(&scene(&[0.333], None, &r, Some(&grid), view), &mut canvas);
+        let edge = at(&canvas, 5, 40);
+        assert_eq!(edge.a, 0xff, "the backdrop keeps the edge opaque");
+        assert!(
+            edge.r > 0 && edge.b > 0,
+            "the edge should carry both bar and backdrop, got {edge:?}"
+        );
+
+        // Without a backdrop the same edge reaches the terminal semi-transparent
+        // and the terminal composites it. Different pixels, deliberately.
+        let mut bare = Canvas::new(10, 60).unwrap();
+        draw(&scene(&[0.333], None, &r, None, view), &mut bare);
+        let bare_edge = at(&bare, 5, 40);
+        assert!(
+            bare_edge.a > 0 && bare_edge.a < 0xff,
+            "a bare edge stays partly transparent, got {bare_edge:?}"
+        );
+    }
+
+    #[test]
+    fn more_values_than_fit_do_not_draw_past_the_viewport() {
+        // The glyph renderer draws the lesser of what fits and what exists. A
+        // pixel surface that drew them all would have tiny-skia clip the excess
+        // in silence, so the two would disagree on bar count with nothing to say
+        // so - and "matches the glyph release" is the gate for shipping pixels.
+        let view = Viewport::new(30.0, 60.0);
+        let r = Ramp::new(vec![Rgba::opaque(0xff, 0x00, 0x00)]);
+        let layout = crate::render::Layout::new(10.0, 0.0);
+        assert_eq!(layout.count(view.width), 3, "three bars fit");
+
+        let mut three = Canvas::new(30, 60).unwrap();
+        draw(
+            &Scene {
+                values: &[1.0, 1.0, 1.0],
+                ..scene(&[], None, &r, None, view)
+            },
+            &mut three,
+        );
+        let mut ten = Canvas::new(30, 60).unwrap();
+        draw(
+            &Scene {
+                values: &[1.0; 10],
+                ..scene(&[], None, &r, None, view)
+            },
+            &mut ten,
+        );
+        assert_eq!(
+            three.to_rgba(),
+            ten.to_rgba(),
+            "bars past the viewport must not change the picture"
+        );
     }
 
     #[test]

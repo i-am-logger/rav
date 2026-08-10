@@ -10,7 +10,8 @@
 //! theme can mix them freely: that choice is the difference between reproducing a
 //! specific look and following whatever the user already runs.
 
-use crate::render::Ink;
+use crate::render::{Ink, Ramp, Rgba};
+use crate::visual::Palette;
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -66,6 +67,51 @@ impl Theme {
     /// Names of the compiled-in themes, in the order `s` cycles them.
     pub fn built_in_names() -> impl Iterator<Item = &'static str> {
         BUILT_IN.iter().map(|(name, _)| *name)
+    }
+
+    /// The lit ramp, for a surface that draws pixels.
+    ///
+    /// The conversion lives here rather than in `render` so that crate keeps
+    /// knowing nothing about terminals - a [`Palette`] is an OSC 4 reader, and
+    /// the renderer is meant to survive being made `no_std`.
+    pub fn bar_ramp(&self, palette: &Palette) -> Ramp {
+        Ramp::new(self.bars.iter().map(|&c| palette.resolve(c)).collect())
+    }
+
+    /// The backdrop ramp, with `darken` applied.
+    ///
+    /// Where this deliberately parts company with the glyph renderer: there,
+    /// `darken` is skipped for a name the terminal will not resolve, because
+    /// there is no value to scale and inventing one would replace the theme
+    /// rather than dim it. A pixel surface always has a value - the standard
+    /// one, if nothing better - so it can honour what the theme asked for.
+    ///
+    /// The two therefore differ only on a terminal that ignores OSC 4, and such
+    /// a terminal is drawing glyphs anyway: the pixel surfaces are chosen for
+    /// kitty-protocol terminals, all of which answer.
+    pub fn grid_ramp(&self, palette: &Palette) -> Ramp {
+        let scale = self.darken.unwrap_or(1.0);
+        Ramp::new(
+            self.grid
+                .iter()
+                .map(|&c| {
+                    let base = palette.resolve(c);
+                    // All three channels together, which keeps the hue. Per
+                    // channel drains a saturated colour to black by way of brown.
+                    Rgba {
+                        r: (base.r as f32 * scale).round() as u8,
+                        g: (base.g as f32 * scale).round() as u8,
+                        b: (base.b as f32 * scale).round() as u8,
+                        a: base.a,
+                    }
+                })
+                .collect(),
+        )
+    }
+
+    /// The peak cap's colour, for a surface that draws pixels.
+    pub fn cap_rgba(&self, palette: &Palette) -> Rgba {
+        palette.resolve(self.peak)
     }
 
     /// One of the compiled-in themes by name.
@@ -196,27 +242,27 @@ impl Darken {
 
 #[derive(Deserialize, Default)]
 struct Colors {
-    bars: Ramp,
-    grid: Ramp,
+    bars: Ladder,
+    grid: Ladder,
     peak: String,
-    scope: Ramp,
+    scope: Ladder,
 }
 
 /// One colour, or a full ladder of them.
 #[derive(Deserialize)]
 #[serde(untagged)]
-enum Ramp {
+enum Ladder {
     One(String),
     Many(Vec<String>),
 }
 
-impl Default for Ramp {
+impl Default for Ladder {
     fn default() -> Self {
-        Ramp::Many(Vec::new())
+        Ladder::Many(Vec::new())
     }
 }
 
-impl Ramp {
+impl Ladder {
     /// Resolve to exactly `len` colours.
     ///
     /// A single colour repeats; a ladder must already be the right length. Silently
@@ -224,8 +270,8 @@ impl Ramp {
     /// which is exactly the sort of thing that looks like a rendering bug later.
     fn expand(&self, len: usize) -> Result<Vec<Ink>> {
         match self {
-            Ramp::One(name) => Ok(vec![parse_color(name)?; len]),
-            Ramp::Many(names) => {
+            Ladder::One(name) => Ok(vec![parse_color(name)?; len]),
+            Ladder::Many(names) => {
                 if names.len() != len {
                     bail!("needs 1 or {len} colours, found {}", names.len());
                 }
@@ -259,6 +305,53 @@ fn parse_color(text: &str) -> Result<Ink> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A theme with `bars`, `grid` and `peak` set to what the test needs.
+    fn themed(grid: &str, darken: Option<f32>) -> Theme {
+        Theme {
+            grid: vec![parse_color(grid).expect("test colour"); STOPS],
+            darken,
+            ..Theme::default()
+        }
+    }
+
+    #[test]
+    fn a_pixel_ramp_carries_one_stop_per_theme_colour() {
+        let theme = Theme::default();
+        let palette = Palette::default();
+        assert_eq!(theme.bar_ramp(&palette).len(), STOPS);
+        assert_eq!(theme.grid_ramp(&palette).len(), STOPS);
+    }
+
+    #[test]
+    fn a_pixel_ramp_darkens_a_named_colour_the_terminal_never_answered() {
+        // The deliberate divergence from the glyph renderer. There, a name the
+        // terminal will not resolve is left alone because there is no value to
+        // scale. Here there is always a value, so the theme's request is
+        // honoured - and the two can only differ on a terminal that ignores
+        // OSC 4, which is drawing glyphs anyway.
+        let palette = Palette::default();
+        let plain = themed("green", None).grid_ramp(&palette);
+        let dimmed = themed("green", Some(0.25)).grid_ramp(&palette);
+        assert_ne!(plain, dimmed, "darken must reach a named colour");
+
+        // Scaled, not replaced: still green, just less of it.
+        let lit = plain.at(0.0, 1.0);
+        let dim = dimmed.at(0.0, 1.0);
+        assert!(dim.g < lit.g, "{dim:?} should be dimmer than {lit:?}");
+        assert_eq!(dim.r, 0, "the hue must survive darkening");
+        assert_eq!(dim.b, 0);
+    }
+
+    #[test]
+    fn a_theme_that_does_not_darken_keeps_its_backdrop_exactly() {
+        let palette = Palette::default();
+        let theme = themed("#40a060", None);
+        assert_eq!(
+            theme.grid_ramp(&palette).at(0.0, 1.0),
+            Rgba::opaque(0x40, 0xa0, 0x60)
+        );
+    }
 
     #[test]
     fn every_built_in_theme_parses() {
