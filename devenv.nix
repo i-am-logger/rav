@@ -17,8 +17,19 @@
     mdbook
 
     # Visual testing and monitoring
-    cargo-watch    # For continuous testing
+    cargo-watch # For continuous testing
+
+    # Nix linting, run by the test:nix task
+    deadnix
+    statix
+    nixpkgs-fmt
   ] ++ lib.optionals stdenv.isLinux [
+    # cpal links the ALSA backend on Linux, so nothing that compiles the audio
+    # module works in this shell without these. macOS uses CoreAudio from the
+    # SDK and needs nothing extra.
+    pkg-config
+    alsa-lib
+
     # Debugging and profiling (Linux only)
     gdb
     valgrind
@@ -157,13 +168,18 @@
     # sampling back down throws away real motion; grabbing below it cannot be
     # recovered by anything downstream. One variable, so they cannot drift.
     #
-    # 25 because that is what a terminal actually produces. Measured by per-frame
-    # checksums, Terminal.app repaints this content about 23 times a second, so
-    # 25 carries all of it - the committed GIF has 633 distinct frames out of 650.
-    # It is also exactly 4 centiseconds, and GIF stores delay in whole
-    # centiseconds: 60fps would be 1.67cs and comes out as an uneven 2/1 cadence.
-    # A GPU-accelerated terminal is worth raising this for - WezTerm measured 52
-    # distinct frames a second on the same build - up to 50, which is 2cs.
+    # Set this to what the terminal actually repaints at; anything higher stores
+    # duplicate frames. GIF holds delay in whole centiseconds, so the rates that
+    # divide evenly are 25 (4cs), 50 (2cs) and 100 (1cs) - 60 lands on 1.67 and
+    # comes out as an uneven 2/1 cadence.
+    #
+    # 25 is the macOS Terminal.app figure: measured by per-frame checksums it
+    # repaints this content about 23 times a second. GPU-accelerated terminals
+    # are far higher - WezTerm measured 52 on the same build - so on Linux set
+    # RAV_DEMO_FPS=50 or 100.
+    #
+    # assets/demo.gif is currently a Terminal.app recording at 25. A Linux
+    # re-record at a higher rate is pending.
     FPS="''${RAV_DEMO_FPS:-25}"
     LEAD="''${RAV_DEMO_LEAD:-5}"
     # Every skin, then the oscilloscope, then the help overlay - and back to the
@@ -315,11 +331,14 @@
     echo "✅ $OUT ($(du -h "$OUT" | cut -f1))"
   '';
 
-  # Git hooks for development
-  git-hooks.hooks = {
-    rustfmt.enable = true;
-    clippy.enable = true;
-  };
+  # There are deliberately no git-hooks. devenv wires `devenv:git-hooks:run`
+  # with `before = [ "devenv:enterTest" ]`, so a rustfmt or clippy hook runs
+  # inside `devenv test` too - under the hook's own default flags (no
+  # --all-targets, no --all-features, warnings not denied). That is a different
+  # cargo fingerprint from the test:clippy task below, so it compiles the crate
+  # under clippy a second time and cannot fail anything the task does not. The
+  # tasks are the check suite; a pre-commit gate costs that second compile on
+  # every run, locally and in CI.
 
   # Environment variables
   env = {
@@ -331,21 +350,64 @@
     BGM_DRIVER = "/Library/Audio/Plug-Ins/HAL/Background Music Device.driver";
   };
 
-  # Development shell setup
+  # Development shell setup.
+  #
+  # Everything the banner prints goes to stderr. `devenv shell -- <cmd>` runs
+  # this first, so anything on stdout is prepended to that command's output -
+  # and CI runs `devenv shell -- cargo metadata` (Swatinem/rust-cache's
+  # cmd-format probe), where a banner in front of the JSON is unparseable. The
+  # action swallows that error, keeps the step green and caches nothing.
   enterShell = ''
-    echo "⚡ RAV development environment loaded"
-    echo "Available scripts:"
-    echo "  • dev-test           - Run tests"
-    echo "  • dev-run            - Run the visualizer"  
-    echo "  • dev-profile        - Profile performance"
-    echo "  • check-audio        - Verify audio setup"
-    echo "  • install-background-music - Install macOS system-audio capture"
-    echo ""
-    echo "Visual Testing:"
-    echo "  • visual-watch       - Continuous testing with cargo watch"
-    echo "  • test-audio-pipeline - Test audio capture functionality"
-    echo "  • record-demo        - Screen-record the README demo GIF"
-    echo ""
-    check-audio
+    {
+      echo "⚡ RAV development environment loaded"
+      echo "Available scripts:"
+      echo "  • dev-test           - Run tests"
+      echo "  • dev-run            - Run the visualizer"
+      echo "  • dev-profile        - Profile performance"
+      echo "  • check-audio        - Verify audio setup"
+      echo "  • install-background-music - Install macOS system-audio capture"
+      echo ""
+      echo "Visual Testing:"
+      echo "  • visual-watch       - Continuous testing with cargo watch"
+      echo "  • test-audio-pipeline - Test audio capture functionality"
+      echo "  • record-demo        - Screen-record the README demo GIF"
+      echo ""
+      check-audio
+    } >&2
   '';
+
+  # These tasks are the check suite. `devenv test` runs them, and so does CI, so
+  # a local run and a CI run execute the same thing. Add a check by adding a
+  # task here, never by adding a step to the workflow.
+  #
+  # The `after` edges are load-bearing, not decoration: devenv runs tasks with
+  # no edge between them concurrently (measured - two independent sleep tasks
+  # start at the same instant), so without these, fmt, clippy and test all
+  # invoke cargo at once and block on the single lock over ./target. Serialised,
+  # they run cheapest-first - a formatting or nix-lint failure costs no
+  # compilation at all - and test:unit reuses the dependency artifacts clippy
+  # just built, since clippy goes through RUSTC_WORKSPACE_WRAPPER and only
+  # workspace crates take the clippy-driver path.
+  tasks = {
+    "test:fmt".exec = "cargo fmt --all --check";
+    # Tracked files only. `target/` holds unpacked copies of previously packaged
+    # releases, and linting those reports findings against an old release.
+    "test:nix".exec = ''
+      set -eu
+      files=$(git ls-files '*.nix')
+      deadnix --fail $files
+      nixpkgs-fmt --check $files
+      statix check .
+    '';
+    "test:clippy" = {
+      exec = "cargo clippy --all-targets --all-features -- -D warnings";
+      after = [ "test:fmt" "test:nix" ];
+    };
+    "test:unit" = {
+      exec = "cargo test --all-features";
+      after = [ "test:clippy" ];
+    };
+  };
+
+  enterTest = lib.mkForce "devenv tasks run test:fmt test:clippy test:nix test:unit";
 }

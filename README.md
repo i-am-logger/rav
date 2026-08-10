@@ -11,7 +11,7 @@ Terminal today, GUI next.
 
 [![crates.io](https://img.shields.io/crates/v/rav?logo=rust&logoColor=white)](https://crates.io/crates/rav)
 [![Downloads](https://img.shields.io/crates/d/rav?logo=rust&logoColor=white)](https://crates.io/crates/rav)
-[![MSRV](https://img.shields.io/crates/msrv/rav?logo=rust&logoColor=white&color=2b2b2b)](https://www.rust-lang.org)
+[![MSRV](https://img.shields.io/crates/msrv/rav?logo=rust&logoColor=white)](https://www.rust-lang.org)
 [![CI](https://img.shields.io/github/actions/workflow/status/i-am-logger/rav/ci.yml?branch=master&label=CI&logo=githubactions&logoColor=white)](https://github.com/i-am-logger/rav/actions/workflows/ci.yml)
 [![docs.rs](https://img.shields.io/docsrs/rav?logo=docsdotrs&logoColor=white)](https://docs.rs/rav)
 
@@ -78,7 +78,8 @@ A skin is a TOML file, not code — `rav --skin ./sunset.toml`. See
 
 ## Capturing system audio
 
-Nothing to install — see **[docs/audio.md](docs/audio.md)**.
+Nothing to install — see **[docs/audio.md](docs/audio.md)**. If it stays silent,
+**[docs/troubleshooting.md](docs/troubleshooting.md)**.
 
 ## Building and hacking on it
 
