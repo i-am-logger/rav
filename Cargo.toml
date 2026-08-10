@@ -29,7 +29,7 @@ unused = "deny"
 
 [dependencies]
 # Terminal User Interface
-ratatui = "0.28"
+ratatui = "0.30"
 crossterm = "0.28"
 
 # Audio capture and processing
