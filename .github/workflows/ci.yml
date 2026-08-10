@@ -5,8 +5,18 @@ name: CI
 on:
   push:
     branches: [ master ]
+  # A change that touches only prose cannot break a build, so it runs nothing.
+  # This filter is on pull_request alone. On master the release job needs the
+  # workflow to run whatever changed, and a release PR carries CHANGELOG.md -
+  # ignoring markdown there would leave the release unpublished.
   pull_request:
     branches: [ master ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'assets/**'
+      - 'LICENSE'
+      - '.github/FUNDING.yml'
 
 concurrency:
   group: ci-${{ github.head_ref || github.ref }}

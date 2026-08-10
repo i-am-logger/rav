@@ -20,6 +20,17 @@ semver_check = true
 # merge is the point.
 release_always = false
 
+# A release PR opens only when something a user of the crate would notice has
+# landed. Releasability is otherwise decided by changed files, so a README or
+# CI-config edit is enough to propose a version on its own.
+#
+# The changelog's commit_parsers below cannot do this: they filter after the
+# version is calculated, so a skipped commit still bumps.
+#
+# Matches feat, fix and perf in all four conventional forms - bare, scoped,
+# breaking, and scoped breaking.
+release_commits = '^(feat|fix|perf)(\([^)]*\))?!?:'
+
 pr_labels = ["release", "automated"]
 
 [changelog]
