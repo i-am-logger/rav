@@ -238,8 +238,8 @@ fn measure(args: &Args) -> std::process::ExitCode {
         // obvious rather than silent.
         paint(&mut frame, args.width, sent);
 
-        if transmit(&mut out, &frame, args, sent).is_err() {
-            eprintln!("transmit failed after {sent} frames");
+        if let Err(e) = transmit(&mut out, &frame, args, sent) {
+            eprintln!("transmit failed after {sent} frames: {e}");
             break;
         }
 
@@ -348,12 +348,20 @@ fn transmit(
 fn shm_write(frame: &[u8], tick: u64) -> std::io::Result<String> {
     let name = format!("/rav{}", tick % 4);
     let c_name = std::ffi::CString::new(name.clone())?;
+    // Unlink first. macOS refuses a second `ftruncate` on an shm object that has
+    // already been sized, so reusing a name fails once the rotation wraps -
+    // which it does on the fifth frame. The terminal is supposed to unlink after
+    // reading, but a dropped frame leaves the name behind and nothing else ever
+    // clears it. Ignoring the result is deliberate: not existing is the common
+    // case and is not an error.
+    // SAFETY: a valid NUL-terminated name.
+    unsafe { libc::shm_unlink(c_name.as_ptr()) };
     // SAFETY: a valid NUL-terminated name; the fd is checked before use and
     // closed on every path below.
     let fd = unsafe {
         libc::shm_open(
             c_name.as_ptr(),
-            libc::O_CREAT | libc::O_RDWR | libc::O_TRUNC,
+            libc::O_CREAT | libc::O_EXCL | libc::O_RDWR,
             0o600,
         )
     };
