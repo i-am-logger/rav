@@ -34,7 +34,7 @@ crossterm = "0.28"
 
 # Audio capture and processing
 # cpal is the only backend used; it selects ALSA on Linux and CoreAudio on macOS.
-cpal = "0.15"
+cpal = "0.18"
 
 # Signal processing and FFT
 rustfft = "6.2"
