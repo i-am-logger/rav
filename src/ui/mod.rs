@@ -79,6 +79,8 @@ pub enum Action {
     /// Trim in whole dB steps; kept an integer so `Action` stays `Eq`.
     Gain(i8),
     ResetGain,
+    /// Widen or narrow the bars. Integral for the same reason as `Gain`.
+    BarSize(i8),
 }
 
 pub fn map_key(code: KeyCode) -> Action {
@@ -97,6 +99,10 @@ pub fn map_key(code: KeyCode) -> Action {
         KeyCode::Up => Action::Gain(1),
         KeyCode::Down => Action::Gain(-1),
         KeyCode::Char('0') => Action::ResetGain,
+        // `=` as well as `+`: `+` needs Shift on most layouts, and every browser
+        // and terminal already takes `=` for zoom-in.
+        KeyCode::Char('+') | KeyCode::Char('=') => Action::BarSize(1),
+        KeyCode::Char('-') => Action::BarSize(-1),
         KeyCode::Char('h') | KeyCode::Char('H') | KeyCode::Char('?') | KeyCode::F(1) => {
             Action::ToggleHelp
         }
@@ -133,7 +139,7 @@ pub struct App {
     bands: Vec<f32>,
 
     theme: Theme,
-    /// A theme loaded from disk by `--theme`, kept so the `s` cycle returns to it.
+    /// A theme loaded from disk by `--theme`, kept so the `t` cycle returns to it.
     loaded_theme: Option<Theme>,
     row_colors: Vec<Color>,
     /// Backdrop colour per row, cached with `row_colors` and rebuilt with it.
@@ -396,6 +402,14 @@ impl App {
                 self.gain_db = 0.0;
                 self.note("gain +0 dB".to_string());
             }
+            Action::BarSize(delta) => {
+                self.layout.resize(delta);
+                // Bar width decides how many bands fit, so the mapping, the
+                // ballistics and both colour ramps are all stale now. Zeroing
+                // this is what forces the next frame through `resize`.
+                self.sized_for = (0, 0);
+                self.note(format!("bar size {}", self.layout.bar_width));
+            }
             Action::ToggleHelp => self.show_help = !self.show_help,
             Action::None => {}
         }
@@ -465,6 +479,11 @@ impl App {
                 key: "t",
                 description: "theme",
                 value: Some(self.theme.name.clone()),
+            },
+            HelpRow {
+                key: "+ / -",
+                description: "bar size",
+                value: Some(self.layout.bar_width.to_string()),
             },
             HelpRow {
                 key: "b",
@@ -998,6 +1017,62 @@ mod tests {
         a.resize(80, 24);
         assert_ne!(a.grid_colors, before, "colours did not change");
         assert_eq!(a.active_status(), Some("theme winamp"));
+    }
+
+    #[test]
+    fn bar_size_keys_widen_and_narrow() {
+        assert_eq!(map_key(KeyCode::Char('+')), Action::BarSize(1));
+        // `=` shares the key with `+` on most layouts, so it means the same.
+        assert_eq!(map_key(KeyCode::Char('=')), Action::BarSize(1));
+        assert_eq!(map_key(KeyCode::Char('-')), Action::BarSize(-1));
+
+        let mut a = app();
+        let started = a.layout.bar_width;
+        a.apply(Action::BarSize(1));
+        assert_eq!(a.layout.bar_width, started + 1);
+        a.apply(Action::BarSize(-1));
+        assert_eq!(a.layout.bar_width, started);
+    }
+
+    #[test]
+    fn bar_size_stops_at_both_ends() {
+        // Narrower than one column is not a bar, and past the maximum a normal
+        // terminal holds so few bands it stops being a spectrum.
+        let mut a = app();
+        for _ in 0..64 {
+            a.apply(Action::BarSize(-1));
+        }
+        assert_eq!(a.layout.bar_width, analyzer::MIN_BAR_WIDTH);
+        for _ in 0..64 {
+            a.apply(Action::BarSize(1));
+        }
+        assert_eq!(a.layout.bar_width, analyzer::MAX_BAR_WIDTH);
+    }
+
+    #[test]
+    fn resizing_the_bars_invalidates_the_cached_layout() {
+        // Bar width decides the band count, so the mapping, the ballistics and
+        // both colour ramps are stale afterwards. Forgetting this leaves the
+        // old ramp on screen until the terminal itself is resized, which is the
+        // kind of bug that only shows up on someone else's machine.
+        let mut a = app();
+        a.resize(80, 24);
+        assert_eq!(a.sized_for, (80, 24));
+        a.apply(Action::BarSize(1));
+        assert_eq!(a.sized_for, (0, 0), "the next frame must rebuild");
+    }
+
+    #[test]
+    fn a_wider_bar_means_fewer_of_them() {
+        // Against the layout rather than `bands`, which the frame loop fills.
+        let mut a = app();
+        let narrow = a.layout.bar_count(80);
+        a.apply(Action::BarSize(4));
+        let wide = a.layout.bar_count(80);
+        assert!(
+            wide < narrow,
+            "80 columns held {narrow} bars, then {wide} after widening"
+        );
     }
 
     #[test]

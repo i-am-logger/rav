@@ -58,6 +58,7 @@ Everything else is a keypress, and `h` shows the lot with their current values:
 | `f` | bar fall speed — 3, 6, 12, 16, 32 |
 | `r` | frequency range — 8/12/16/20 kHz or full |
 | `↑` / `↓` | gain trim, `0` resets |
+| `+` / `-` | bar size |
 | `h` / `?` | help |
 
 Logs go to `rav.log`, never to the display.

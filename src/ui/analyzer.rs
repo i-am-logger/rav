@@ -196,6 +196,28 @@ impl Default for BarLayout {
     }
 }
 
+/// Narrowest a bar may be shrunk to.
+///
+/// One column with the gap still beside it, so bars never merge into a solid
+/// block - the gap is what makes them read as separate bands.
+pub const MIN_BAR_WIDTH: u16 = 1;
+/// Widest a bar may be grown to.
+///
+/// Past this a terminal of ordinary width holds only a handful of bands, which
+/// is a spectrum analyser in name only.
+pub const MAX_BAR_WIDTH: u16 = 16;
+
+impl BarLayout {
+    /// Widen or narrow the bars, within the bounds above.
+    ///
+    /// Only the bar moves; the gap stays one column. The gap is what separates
+    /// the bands, and it does not need to grow for that to keep working.
+    pub fn resize(&mut self, delta: i8) {
+        let width = i32::from(self.bar_width) + i32::from(delta);
+        self.bar_width = width.clamp(i32::from(MIN_BAR_WIDTH), i32::from(MAX_BAR_WIDTH)) as u16;
+    }
+}
+
 impl BarLayout {
     /// How many bars fit in `width`. The final bar needs no trailing gap.
     pub fn bar_count(&self, width: u16) -> usize {
