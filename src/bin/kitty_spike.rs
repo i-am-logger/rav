@@ -390,12 +390,16 @@ fn transmit(
             let path = std::env::temp_dir().join(format!("rav-spike-{tick}.rgba"));
             std::fs::write(&path, frame)?;
             let encoded = base64(path.to_string_lossy().as_bytes());
-            write!(out, "\x1b_G{head},t=t;{encoded}\x1b\\")?;
+            // `S` is how many bytes to read. Direct transmission carries its own
+            // length in the payload; a file or a shared-memory object does not,
+            // so without this the terminal has nothing to read and quietly
+            // draws nothing.
+            write!(out, "\x1b_G{head},S={},t=t;{encoded}\x1b\\", frame.len())?;
         }
         Transport::SharedMemory => {
             let name = shm_write(frame, tick)?;
             let encoded = base64(name.as_bytes());
-            write!(out, "\x1b_G{head},t=s;{encoded}\x1b\\")?;
+            write!(out, "\x1b_G{head},S={},t=s;{encoded}\x1b\\", frame.len())?;
         }
     }
     out.flush()
@@ -521,12 +525,23 @@ fn diagnose() -> std::process::ExitCode {
                 .map(str::to_owned)
             {
                 Some(path) => std::fs::write(&path, &frame).and_then(|()| {
-                    write!(out, "\x1b_G{head},t=t;{}\x1b\\", base64(path.as_bytes()))
+                    write!(
+                        out,
+                        "\x1b_G{head},S={},t=t;{}\x1b\\",
+                        frame.len(),
+                        base64(path.as_bytes())
+                    )
                 }),
                 None => Ok(()),
             },
-            Transport::SharedMemory => shm_write(&frame, 0)
-                .and_then(|name| write!(out, "\x1b_G{head},t=s;{}\x1b\\", base64(name.as_bytes()))),
+            Transport::SharedMemory => shm_write(&frame, 0).and_then(|name| {
+                write!(
+                    out,
+                    "\x1b_G{head},S={},t=s;{}\x1b\\",
+                    frame.len(),
+                    base64(name.as_bytes())
+                )
+            }),
         };
         let _ = out.flush();
 
@@ -597,7 +612,8 @@ fn occlusion_check() -> std::process::ExitCode {
         let _ = write!(out, "\x1b[3;1H");
         let _ = write!(
             out,
-            "\x1b_Ga=T,i={IMAGE_ID},f=32,s={w},v={h},z={z},t=s;{encoded}\x1b\\"
+            "\x1b_Ga=T,i={IMAGE_ID},f=32,s={w},v={h},z={z},S={},t=s;{encoded}\x1b\\",
+            frame.len()
         );
         let _ = out.flush();
 
