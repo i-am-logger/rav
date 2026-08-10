@@ -35,7 +35,7 @@ use scope::{Scope, ScopeStyle};
 #[cfg(not(test))]
 use std::io::{self, Stdout};
 use std::time::{Duration, Instant};
-use tokio::time::interval;
+use tokio::time::{MissedTickBehavior, interval};
 use tracing::info;
 
 #[cfg(test)]
@@ -514,6 +514,13 @@ impl App {
 
         let fps = self.config.display.refresh_rate.clamp(1, 240) as f64;
         let mut frame_interval = interval(Duration::from_secs_f64(1.0 / fps));
+        // A frame that overruns is a frame that is already stale. tokio's
+        // default is `Burst`, which fires every missed tick back to back with
+        // no delay to catch up - so a terminal that cannot hold the rate gets a
+        // long step followed by a cluster of near-zero ones. The ballistics are
+        // dt-correct either way, but the display is not: catching up only
+        // renders states nobody was ever going to see, as fast as possible.
+        frame_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         loop {
             self.handle_events().await?;
