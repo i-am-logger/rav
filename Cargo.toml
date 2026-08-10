@@ -70,6 +70,12 @@ path = "src/main.rs"
 name = "test_audio_pipeline"
 path = "src/bin/test_audio_pipeline.rs"
 
+# Measures whether a terminal can carry rav's frames as pixels, ahead of the
+# renderer that would depend on it. See issue #65.
+[[bin]]
+name = "kitty_spike"
+path = "src/bin/kitty_spike.rs"
+
 [profile.release]
 lto = true
 codegen-units = 1
