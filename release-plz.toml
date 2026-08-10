@@ -20,6 +20,15 @@ semver_check = true
 # merge is the point.
 release_always = false
 
+# There is deliberately no release_commits filter. What is releasable is decided
+# by which packaged files changed, which is already the rule this crate wants:
+# README.md, docs/*.md, LICENSE, skins/ and src/ all ship inside the crate, so
+# editing any of them requires a new version before crates.io shows it. Files
+# under .github/ are not packaged, so CI changes release nothing.
+#
+# A commit-message filter would break that, since it cannot see which files a
+# commit touched.
+
 pr_labels = ["release", "automated"]
 
 [changelog]

@@ -5,6 +5,8 @@ name: CI
 on:
   push:
     branches: [ master ]
+  # No paths-ignore: README.md, docs/ and LICENSE ship inside the crate, so a
+  # change to any of them is released and earns the same checks as code.
   pull_request:
     branches: [ master ]
 
