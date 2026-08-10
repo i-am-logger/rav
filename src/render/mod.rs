@@ -4,6 +4,8 @@
 //! same geometry has to serve a terminal that draws glyphs, a terminal that
 //! carries pixels, and a window - see issue #65.
 
+pub mod geometry;
 pub mod ink;
 
+pub use geometry::{Layout, Rect, Viewport};
 pub use ink::{Ink, Rgba};

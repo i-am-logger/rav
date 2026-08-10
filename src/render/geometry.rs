@@ -121,12 +121,16 @@ pub fn bars(values: &[f32], layout: &Layout, view: &Viewport) -> Vec<Rect> {
 /// rest it would sit half below the floor.
 pub fn caps(peaks: &[f32], thickness: f32, layout: &Layout, view: &Viewport) -> Vec<Rect> {
     let thickness = thickness.clamp(1.0, view.height.max(1.0));
+    // A viewport shorter than the cap leaves nowhere to put it, and `clamp`
+    // panics outright when its lower bound exceeds its upper - so the range is
+    // collapsed to zero rather than inverted.
+    let lowest = (view.height - thickness).max(0.0);
     peaks
         .iter()
         .enumerate()
         .map(|(i, &p)| {
             let level = p.clamp(0.0, 1.0) * view.height;
-            let y = (view.height - level - thickness).clamp(0.0, view.height - thickness);
+            let y = (view.height - level - thickness).clamp(0.0, lowest);
             Rect {
                 x: layout.x_of(i),
                 y,
@@ -197,22 +201,31 @@ mod tests {
     }
 
     #[test]
-    fn a_cap_never_covers_the_bar_it_marks() {
+    fn a_cap_never_sinks_below_the_bar_it_marks() {
         // In a cell grid the cap and the bar contend for the same row, and the
         // fix is a fudge that lifts the cap when the top cell is partly filled.
-        // Above the level it marks, there is nothing to resolve.
+        // Here the cap simply starts at or above the bar's top edge.
+        //
+        // At full scale it rests *on* the bar rather than above it - there is no
+        // room above - which is the terminal renderer's behaviour too, and the
+        // reason this asserts the top edge rather than the bottom.
         let v = view(100.0, 60.0);
         let l = Layout::new(3.0, 1.0);
         for value in [0.0f32, 0.13, 0.5, 0.87, 1.0] {
             let bar = bars(&[value], &l, &v)[0];
             let cap = caps(&[value], 2.0, &l, &v)[0];
             assert!(
-                cap.bottom() <= bar.y + 1e-4,
-                "value {value}: cap bottom {} overlapped bar top {}",
-                cap.bottom(),
+                cap.y <= bar.y + 1e-4,
+                "value {value}: cap top {} sank below bar top {}",
+                cap.y,
                 bar.y
             );
         }
+        // Below full scale it clears the bar entirely, so the two never merge
+        // into one block.
+        let bar = bars(&[0.5], &l, &v)[0];
+        let cap = caps(&[0.5], 2.0, &l, &v)[0];
+        assert!(cap.bottom() <= bar.y + 1e-4, "a mid bar must show its cap");
     }
 
     #[test]
@@ -238,7 +251,10 @@ mod tests {
         let l = Layout::new(3.0, 1.0);
         let grid = backdrop(1, &l, &v)[0];
         let cap = caps(&[0.5], 2.0, &l, &v)[0];
-        assert!(cap.intersects(&grid), "the cap should sit over the backdrop");
+        assert!(
+            cap.intersects(&grid),
+            "the cap should sit over the backdrop"
+        );
         assert_eq!(grid.h, 60.0, "the backdrop is still the whole column");
         assert_eq!(grid.y, 0.0);
     }
@@ -250,12 +266,7 @@ mod tests {
         let values: Vec<f32> = (0..=100).map(|i| i as f32 / 100.0).collect();
         let rects = bars(&values, &l, &v);
         for pair in rects.windows(2) {
-            assert!(
-                pair[1].h >= pair[0].h,
-                "{} then {}",
-                pair[0].h,
-                pair[1].h
-            );
+            assert!(pair[1].h >= pair[0].h, "{} then {}", pair[0].h, pair[1].h);
         }
     }
 
