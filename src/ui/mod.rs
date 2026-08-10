@@ -18,11 +18,12 @@ use crate::{
 };
 use analyzer::{Analyzer, BarLayout, BarStyle, Peaks, grid_colors, row_colors};
 use anyhow::Result;
-use crossterm::event::KeyCode;
+// The event types are named by the render loop whichever backend it is driving,
+// so only the parts that touch a real terminal are gated.
+use crossterm::event::{Event, KeyCode, KeyEventKind};
 #[cfg(not(test))]
 use crossterm::{
-    ExecutableCommand,
-    event::{self, Event, KeyEventKind},
+    ExecutableCommand, event,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use flume::Receiver;
@@ -37,7 +38,7 @@ use scope::{Scope, ScopeStyle};
 use std::io::{self, Stdout};
 use std::time::{Duration, Instant};
 use tokio::time::{MissedTickBehavior, interval};
-use tracing::info;
+use tracing::{debug, info};
 
 #[cfg(test)]
 type AppTerminal = Terminal<TestBackend>;
@@ -567,29 +568,108 @@ impl App {
         self.terminal.clear()?;
         info!("🎨 Starting analyser");
 
+        // The audio device is the clock. Every wake below is something actually
+        // happening - a buffer arriving, a key, or the watchdog - so the loop
+        // never renders a frame nobody asked for, and a buffer is drawn as it
+        // lands rather than waiting out the remainder of a tick.
+        let keys = key_reader();
+
+        // A ceiling, not a cadence. A device with very small buffers could
+        // deliver faster than the terminal can usefully repaint; audio is still
+        // ingested on every wake, only the drawing is coalesced.
+        //
+        // Kept as a moving deadline rather than "has `min_frame` passed since
+        // the last frame", because that form quantises to the wake interval and
+        // loses whatever does not divide it: buffers arriving every 5.2ms take
+        // four to clear a 16.7ms gap, which turns a 60fps ceiling into 48. The
+        // deadline carries the remainder instead, so the average comes out at
+        // the rate that was asked for.
         let fps = self.config.display.refresh_rate.clamp(1, 240) as f64;
-        let mut frame_interval = interval(Duration::from_secs_f64(1.0 / fps));
-        // A frame that overruns is a frame that is already stale. tokio's
-        // default is `Burst`, which fires every missed tick back to back with
-        // no delay to catch up - so a terminal that cannot hold the rate gets a
-        // long step followed by a cluster of near-zero ones. The ballistics are
-        // dt-correct either way, but the display is not: catching up only
-        // renders states nobody was ever going to see, as fast as possible.
-        frame_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        let min_frame = Duration::from_secs_f64(1.0 / fps);
+        let mut next_frame = Instant::now();
+
+        // Only for a device that stops delivering *entirely*. A running device
+        // sends silent buffers while nothing is playing, so the ballistics keep
+        // falling on their own; this is what stops the display freezing
+        // mid-decay if the stream dies, and it is deliberately slow because in
+        // every healthy case it never fires.
+        let mut watchdog = interval(WATCHDOG);
+        watchdog.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        watchdog.tick().await; // the first tick is immediate
+
+        #[cfg(target_os = "macos")]
+        let tapped = self.tap.is_some();
+        #[cfg(not(target_os = "macos"))]
+        let tapped = false;
+
+        // Wakes and frames a second, at debug level. They differ on purpose - a
+        // wake landing inside the frame ceiling is coalesced - and the gap
+        // between them is the only way to see the ceiling doing its job. The
+        // frame count is also the audio device's buffer rate, so this answers
+        // "why is it running at that speed" without a profiler.
+        let mut wakes = 0u64;
+        let mut frames = 0u64;
+        let mut counted_from = Instant::now();
 
         loop {
-            self.handle_events().await?;
             if self.should_quit {
                 break;
             }
 
-            // Drain every pending buffer so the window holds the newest audio. A
-            // backlog is absorbed rather than rendered late.
-            #[cfg(target_os = "macos")]
-            let tapped = self.tap.is_some();
-            #[cfg(not(target_os = "macos"))]
-            let tapped = false;
+            if counted_from.elapsed() >= Duration::from_secs(1) {
+                debug!("{frames} frames from {wakes} wakes");
+                wakes = 0;
+                frames = 0;
+                counted_from = Instant::now();
+            }
+            wakes += 1;
 
+            // Wait for something to happen. No sleep, no polling: each arm is a
+            // source that wakes the loop when it has something, and the OS does
+            // the waiting.
+            #[cfg(target_os = "macos")]
+            let tap_ready = async {
+                match &self.tap {
+                    Some(tap) => tap.ready().await,
+                    // A pending future, so this arm simply never fires when
+                    // there is no tap rather than spinning on a ready `()`.
+                    None => std::future::pending().await,
+                }
+            };
+            #[cfg(not(target_os = "macos"))]
+            let tap_ready = std::future::pending::<()>();
+
+            tokio::select! {
+                // Biased so a quit key is not left waiting behind a backlog of
+                // audio on a loaded machine.
+                biased;
+                Ok(event) = keys.recv_async() => {
+                    if let Event::Key(key) = event
+                        && key.kind == KeyEventKind::Press
+                    {
+                        self.apply(map_key(key.code));
+                    }
+                }
+                () = tap_ready => {}
+                Ok(data) = audio_receiver.recv_async(), if !tapped => {
+                    self.push_samples(&data.samples);
+                }
+                _ = watchdog.tick() => {}
+            }
+
+            // Drain the rest of the burst. A held key repeats faster than the
+            // display needs to change, and taking one per pass would spend a
+            // frame on each instead of settling and drawing the result once.
+            while let Ok(event) = keys.try_recv() {
+                if let Event::Key(key) = event
+                    && key.kind == KeyEventKind::Press
+                {
+                    self.apply(map_key(key.code));
+                }
+            }
+
+            // Drain whatever else is queued, so a backlog is absorbed into the
+            // window rather than rendered one stale frame at a time.
             #[cfg(target_os = "macos")]
             if let Some(tap) = &self.tap {
                 let mut scratch = std::mem::take(&mut self.tap_scratch);
@@ -613,7 +693,22 @@ impl App {
                 }
             }
 
-            frame_interval.tick().await;
+            if self.should_quit {
+                break;
+            }
+            let now = Instant::now();
+            if now < next_frame {
+                continue;
+            }
+            next_frame += min_frame;
+            // A device slower than the ceiling, or a stall, would otherwise
+            // leave the deadline in the past and owing frames it would then take
+            // back to back. There is no debt worth paying here: the next frame
+            // shows the current state either way.
+            if next_frame < now {
+                next_frame = now + min_frame;
+            }
+            frames += 1;
 
             let area = self.terminal.size()?;
             if (area.width, area.height) != self.sized_for {
@@ -713,26 +808,39 @@ impl App {
         info!("👋 Analyser shut down");
         Ok(())
     }
+}
 
-    async fn handle_events(&mut self) -> Result<()> {
-        #[cfg(test)]
-        {
-            Ok(())
-        }
-        #[cfg(not(test))]
-        {
-            // Drain the whole burst; a held key should not queue up frames.
-            while event::poll(Duration::ZERO)? {
-                if let Event::Key(key) = event::read()?
-                    && key.kind == KeyEventKind::Press
-                {
-                    let action = map_key(key.code);
-                    self.apply(action);
-                }
+/// How long the display may go without an audio buffer before it redraws anyway.
+///
+/// Long on purpose. A running device delivers silent buffers when nothing is
+/// playing, so this never fires in a healthy session - it exists so a stream
+/// that dies outright leaves the bars resting on the floor rather than frozen
+/// part-way down.
+const WATCHDOG: Duration = Duration::from_millis(250);
+
+/// Terminal events, on a channel the render loop can wait on.
+///
+/// A thread rather than a poll: `event::read` blocks until there is genuinely a
+/// key, so the OS does the waiting and no cadence has to be guessed. crossterm's
+/// own `EventStream` is this same thread with a `Stream` around it, and would
+/// cost a futures dependency to await.
+///
+/// Never joined. It is parked in a read on a terminal that outlives the loop,
+/// and there is nothing to clean up: the channel closes when the receiver drops
+/// and the thread ends at the next keystroke, or with the process.
+fn key_reader() -> flume::Receiver<Event> {
+    let (tx, rx) = flume::unbounded();
+    #[cfg(not(test))]
+    std::thread::spawn(move || {
+        while let Ok(event) = event::read() {
+            if tx.send(event).is_err() {
+                break;
             }
-            Ok(())
         }
-    }
+    });
+    #[cfg(test)]
+    drop(tx);
+    rx
 }
 
 /// Draw a short message in the top-left corner.
