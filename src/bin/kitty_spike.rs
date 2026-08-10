@@ -10,8 +10,8 @@
 //!
 //! 1. Does the terminal support the kitty graphics protocol at all?
 //! 2. Can it retire 60 new images a second, sustained, without its own memory
-//!    growing? Bandwidth is not the risk - `t=s` is a memcpy into a mapped
-//!    region - the terminal's image pipeline is.
+//!    growing? Bandwidth is not the risk - a frame staged in tmpfs never reaches
+//!    a disk - the terminal's image pipeline is.
 //! 3. Does text drawn over an image at `z=-1` occlude it? rav wants bars as
 //!    pixels with the help overlay and status line still real text. If a cell
 //!    with a default background paints over the image, that plan does not work.
@@ -126,22 +126,25 @@ impl Args {
 
 /// How the pixels reach the terminal.
 ///
-/// Measured against WezTerm on macOS: `Direct` and `File` both draw, `SharedMemory`
-/// does not - the transmit is accepted and nothing appears. WezTerm implements it
-/// (its binary carries `shm_open` and "Unable to unlink kitty image protocol shm
-/// file"), so this is a disagreement about the name or the mapping rather than a
-/// missing feature, and it is not worth chasing: `File` costs a write into the
-/// page cache, which the measurements show is nowhere near the frame budget.
+/// Measured against WezTerm: `Direct` and `File` draw, `SharedMemory` draws on
+/// Linux and cannot draw on macOS. WezTerm reads an shm segment with
+/// `File::read_exact` on the descriptor `shm_open` returns, which is a tmpfs file
+/// on Linux and mmap-only on macOS - there `read(2)` gives `ENXIO` and `lseek`
+/// gives `ESPIPE`. No sequence of bytes from this end changes that.
+///
+/// `File` closes the gap anyway: the path it sends may point into `/dev/shm`,
+/// which WezTerm's `looks_like_temp_path` accepts explicitly. That is tmpfs, so
+/// the frame is a shared-memory handoff that happens to be named by a path.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Transport {
     /// Base64 in the escape sequence itself. Every byte crosses the pty, and
     /// base64 adds a third on top, so this is the arm that should lose.
     Direct,
-    /// A temp file the terminal reads and unlinks. Portable, and the one that
-    /// works everywhere it has been tried.
+    /// A file the terminal reads and unlinks, staged in `/dev/shm` where that
+    /// exists. Portable, and the one that works everywhere it has been tried.
     File,
-    /// POSIX shared memory. The bytes never cross the pty at all - in theory the
-    /// cheapest, in practice invisible on WezTerm/macOS.
+    /// POSIX shared memory by name. The bytes never cross the pty at all -
+    /// cheapest where the terminal can read it, and macOS is not such a place.
     SharedMemory,
 }
 
@@ -149,10 +152,38 @@ impl Transport {
     fn name(self) -> &'static str {
         match self {
             Self::Direct => "direct (t=d)",
-            Self::File => "file (t=f)",
+            Self::File => "file (t=t)",
             Self::SharedMemory => "shared memory (t=s)",
         }
     }
+}
+
+/// Where a frame is staged for the terminal to read.
+///
+/// `/dev/shm` is tmpfs, so the bytes are written into RAM and never queued for a
+/// disk - the same memory the `t=s` transport would have mapped, reached through
+/// the transport that terminals actually implement. WezTerm names the directory
+/// in `looks_like_temp_path`, so it still unlinks the frame after reading it.
+///
+/// macOS has no tmpfs and falls back to `$TMPDIR`. A frame there is created,
+/// read and unlinked inside one frame interval, so it lives and dies in the page
+/// cache and no write-back is ever issued for it.
+fn frame_dir() -> &'static std::path::Path {
+    static DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let shm = std::path::Path::new("/dev/shm");
+        // Existence is not permission: a container can mount it read-only, and a
+        // frame that fails to write is worse than one written to $TMPDIR.
+        if shm.is_dir() {
+            let probe = shm.join(format!("rav-probe-{}", std::process::id()));
+            if std::fs::write(&probe, b"x").is_ok() {
+                let _ = std::fs::remove_file(&probe);
+                return shm.to_path_buf();
+            }
+        }
+        std::env::temp_dir()
+    })
+    .as_path()
 }
 
 // ── capability probe ────────────────────────────────────────────────────────
@@ -277,6 +308,18 @@ fn measure(args: &Args) -> std::process::ExitCode {
         args.transport.name(),
         args.seconds,
     );
+    if args.transport == Transport::File {
+        let dir = frame_dir();
+        println!(
+            "staged in {} ({})",
+            dir.display(),
+            if dir == std::path::Path::new("/dev/shm") {
+                "tmpfs - the frame never leaves RAM"
+            } else {
+                "no tmpfs here; page cache, unlinked within the frame"
+            }
+        );
+    }
 
     let mut frame = vec![0u8; frame_bytes];
     let mut out = std::io::stdout();
@@ -443,7 +486,12 @@ fn transmit(
             }
         }
         Transport::File => {
-            let path = std::env::temp_dir().join(format!("rav-spike-{tick}.rgba"));
+            // A name per frame, never reused. Reusing a slot would let this
+            // truncate and rewrite a path a still-pending escape sequence names,
+            // so the terminal would read a half-written frame or find the file
+            // already unlinked - the one transport that works would start
+            // dropping frames under exactly the lag it is meant to tolerate.
+            let path = frame_dir().join(format!("rav-spike-{tick}.rgba"));
             std::fs::write(&path, frame)?;
             let encoded = base64(path.to_string_lossy().as_bytes());
             // `S` is how many bytes to read. Direct transmission carries its own
@@ -451,6 +499,14 @@ fn transmit(
             // so without this the terminal has nothing to read and quietly
             // draws nothing.
             write!(out, "\x1b_G{head},S={},t=t;{encoded}\x1b\\", frame.len())?;
+            // Reclaim the frame from eight ticks back. The terminal unlinks what
+            // it reads, so this normally finds nothing and the error is dropped;
+            // it matters when the terminal skipped that frame, because in
+            // `/dev/shm` an abandoned frame is resident memory rather than a file
+            // on a disk. Eight is 133ms of tolerated lag at 60fps.
+            if let Some(stale) = tick.checked_sub(8) {
+                let _ = std::fs::remove_file(frame_dir().join(format!("rav-spike-{stale}.rgba")));
+            }
         }
         Transport::SharedMemory => {
             let name = shm_write(frame, tick)?;
@@ -463,9 +519,14 @@ fn transmit(
 
 /// Publish `frame` in POSIX shared memory and hand back the name.
 ///
-/// `/dev/shm` does not exist on macOS, so this is `shm_open(3)` rather than a
-/// path. The name has a leading slash and must fit in 31 bytes there, which is
+/// `shm_open(3)` rather than a path, because macOS has no `/dev/shm` to write
+/// into. The name has a leading slash and must fit in 31 bytes there, which is
 /// why it is short.
+///
+/// The segment this creates is readable only by `mmap` on macOS, and WezTerm
+/// reads it with `read(2)` - so this succeeds and the frame is still never drawn.
+/// It stays because the question is the terminal's to answer, and on Linux the
+/// same call produces a tmpfs file that WezTerm reads without complaint.
 fn shm_write(frame: &[u8], tick: u64) -> std::io::Result<String> {
     let name = format!("/rav{}", tick % 4);
     let c_name = std::ffi::CString::new(name.clone())?;
@@ -575,7 +636,7 @@ fn diagnose() -> std::process::ExitCode {
                 }
                 result
             }
-            Transport::File => match std::env::temp_dir()
+            Transport::File => match frame_dir()
                 .join("rav-diagnose.rgba")
                 .to_str()
                 .map(str::to_owned)
@@ -590,11 +651,15 @@ fn diagnose() -> std::process::ExitCode {
                 }),
                 None => Ok(()),
             },
-            // POSIX requires the leading slash when *creating* the object, but
-            // the protocol never says whether the name sent to the terminal
-            // carries it. Both forms are tried, since a terminal that prepends
-            // its own would be looking for `//rav0` and find nothing - which
-            // looks exactly like an accepted transmit that draws nothing.
+            // Both name forms are sent because the protocol never says whether
+            // the leading slash POSIX wants at creation belongs in the name the
+            // terminal receives, and a terminal looking for `//rav0` finds
+            // nothing in a way that looks exactly like a silent failure.
+            //
+            // On macOS neither form can work: WezTerm reads the segment with
+            // `read(2)`, which a Darwin shm object answers with `ENXIO`. Kept as
+            // a probe because the answer is the terminal's, not this platform's,
+            // and Linux stages the same object on tmpfs where reading it is fine.
             Transport::SharedMemory => shm_write(&frame, 0).and_then(|name| {
                 let bare = name.trim_start_matches('/');
                 write!(
