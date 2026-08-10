@@ -26,6 +26,7 @@
 //! cargo run --bin kitty_spike -- --occlusion
 //! ```
 
+use rav::render::geometry::{Layout, Rect, Viewport, backdrop, bars, caps};
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::time::{Duration, Instant};
@@ -94,7 +95,8 @@ impl Args {
             width: 941,
             height: 249,
             seconds: 10,
-            transport: Transport::SharedMemory,
+            // Measured: the only transport that both works and stays cheap.
+            transport: Transport::File,
             occlusion: false,
             diagnose: false,
         };
@@ -109,7 +111,8 @@ impl Args {
                     args.transport = match value().as_str() {
                         "direct" => Transport::Direct,
                         "file" => Transport::File,
-                        _ => Transport::SharedMemory,
+                        "shm" => Transport::SharedMemory,
+                        _ => Transport::File,
                     }
                 }
                 "--occlusion" => args.occlusion = true,
@@ -122,14 +125,23 @@ impl Args {
 }
 
 /// How the pixels reach the terminal.
+///
+/// Measured against WezTerm on macOS: `Direct` and `File` both draw, `SharedMemory`
+/// does not - the transmit is accepted and nothing appears. WezTerm implements it
+/// (its binary carries `shm_open` and "Unable to unlink kitty image protocol shm
+/// file"), so this is a disagreement about the name or the mapping rather than a
+/// missing feature, and it is not worth chasing: `File` costs a write into the
+/// page cache, which the measurements show is nowhere near the frame budget.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Transport {
     /// Base64 in the escape sequence itself. Every byte crosses the pty, and
     /// base64 adds a third on top, so this is the arm that should lose.
     Direct,
-    /// A temp file the terminal reads and unlinks. Portable everywhere.
+    /// A temp file the terminal reads and unlinks. Portable, and the one that
+    /// works everywhere it has been tried.
     File,
-    /// POSIX shared memory. The bytes never cross the pty at all.
+    /// POSIX shared memory. The bytes never cross the pty at all - in theory the
+    /// cheapest, in practice invisible on WezTerm/macOS.
     SharedMemory,
 }
 
@@ -337,14 +349,58 @@ fn measure(args: &Args) -> std::process::ExitCode {
 
 /// A moving band, so a stalled pipeline is visible rather than silent.
 fn paint(frame: &mut [u8], width: u32, tick: u64) {
-    let band = (tick % u64::from(width)) as usize;
-    for (i, px) in frame.chunks_exact_mut(4).enumerate() {
-        let x = i % width as usize;
-        let lit = x.abs_diff(band) < 24;
-        px[0] = if lit { 0x29 } else { 0x03 };
-        px[1] = if lit { 0xce } else { 0x10 };
-        px[2] = if lit { 0x10 } else { 0x01 };
+    let height = (frame.len() / 4) as u32 / width.max(1);
+    let view = Viewport::new(width as f32, height as f32);
+    let layout = Layout::new(12.0, 4.0);
+    let count = layout.count(view.width);
+
+    // A travelling wave rather than a still frame, so a stalled pipeline is
+    // obvious rather than silent - and it moves slowly enough to read.
+    let phase = tick as f32 * 0.08;
+    let values: Vec<f32> = (0..count)
+        .map(|i| {
+            let t = phase + i as f32 * 0.4;
+            (t.sin() * 0.5 + 0.5).clamp(0.05, 1.0)
+        })
+        .collect();
+    // Caps ride above the bars, which is what makes the compositing visible:
+    // in a terminal they would have to erase the backdrop to be drawn at all.
+    let peaks: Vec<f32> = values.iter().map(|v| (v + 0.08).min(1.0)).collect();
+
+    frame.fill(0);
+    for px in frame.chunks_exact_mut(4) {
         px[3] = 0xff;
+    }
+    for rect in backdrop(count, &layout, &view) {
+        fill(frame, width, height, &rect, [0x22, 0x04, 0x04]);
+    }
+    for rect in bars(&values, &layout, &view) {
+        fill(frame, width, height, &rect, [0xe0, 0x22, 0x18]);
+    }
+    for rect in caps(&peaks, 3.0, &layout, &view) {
+        fill(frame, width, height, &rect, [0xff, 0xc0, 0xb0]);
+    }
+}
+
+/// Paint one rectangle into the frame, opaque.
+///
+/// Nothing antialiases here - the rasteriser is Stage 4's job, and a spike that
+/// blurred its edges would make a transport problem look like a drawing one.
+fn fill(frame: &mut [u8], width: u32, height: u32, rect: &Rect, rgb: [u8; 3]) {
+    let x0 = rect.x.max(0.0) as u32;
+    let y0 = rect.y.max(0.0) as u32;
+    let x1 = ((rect.x + rect.w) as u32).min(width);
+    let y1 = ((rect.y + rect.h) as u32).min(height);
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let at = ((y * width + x) * 4) as usize;
+            if let Some(px) = frame.get_mut(at..at + 4) {
+                px[0] = rgb[0];
+                px[1] = rgb[1];
+                px[2] = rgb[2];
+                px[3] = 0xff;
+            }
+        }
     }
 }
 
@@ -534,13 +590,28 @@ fn diagnose() -> std::process::ExitCode {
                 }),
                 None => Ok(()),
             },
+            // POSIX requires the leading slash when *creating* the object, but
+            // the protocol never says whether the name sent to the terminal
+            // carries it. Both forms are tried, since a terminal that prepends
+            // its own would be looking for `//rav0` and find nothing - which
+            // looks exactly like an accepted transmit that draws nothing.
             Transport::SharedMemory => shm_write(&frame, 0).and_then(|name| {
+                let bare = name.trim_start_matches('/');
                 write!(
                     out,
                     "\x1b_G{head},S={},t=s;{}\x1b\\",
                     frame.len(),
                     base64(name.as_bytes())
                 )
+                .and_then(|()| {
+                    write!(out, "\r\n  and again without the leading slash\r\n")?;
+                    write!(
+                        out,
+                        "\x1b_G{head},S={},t=s;{}\x1b\\",
+                        frame.len(),
+                        base64(bare.as_bytes())
+                    )
+                })
             }),
         };
         let _ = out.flush();
@@ -776,8 +847,11 @@ mod tests {
     }
 
     #[test]
-    fn the_band_moves_with_the_tick() {
-        let (w, h) = (64u32, 2u32);
+    fn the_bars_move_with_the_tick() {
+        // Tall enough for the bars to differ. At two pixels the caps alone fill
+        // the frame and every tick looks the same, which says nothing about the
+        // animation and everything about the viewport.
+        let (w, h) = (200u32, 60u32);
         let mut first = vec![0u8; (w * h * 4) as usize];
         let mut later = first.clone();
         paint(&mut first, w, 0);
