@@ -40,6 +40,15 @@ cpal = "0.15"
 rustfft = "6.2"
 realfft = "3.3"
 
+# Rasterising, for the surfaces that draw pixels rather than glyphs.
+#
+# CPU rather than a GPU crate: every surface needs the frame in main memory
+# anyway - the terminal writes it to a file the terminal reads, and a window can
+# blit it - so rendering on the GPU would mean a readback stall on the path that
+# matters most. It also pairs with resvg for the SVG skins later, and works with
+# no device or surface, which is what makes a frame testable at all.
+tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }
+
 # Configuration and serialization
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
