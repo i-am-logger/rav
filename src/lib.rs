@@ -1,6 +1,7 @@
 // RAV Audio Visualizer Library
 pub mod audio;
 pub mod config;
+pub mod render;
 pub mod signal;
 pub mod testing;
 pub mod ui;

@@ -1,6 +1,8 @@
 //! The analyser view: bars, peak caps and the dotted background behind them.
 
+use crate::render::Ink;
 use crate::ui::scale::{CAP_LOW, CAP_MID, bar_eighths, cap_position, ramp_index, segment_top};
+use crate::ui::to_color;
 use crate::visual::{Palette, Theme};
 use ratatui::{buffer::Buffer, layout::Rect, style::Color, widgets::Widget};
 
@@ -237,11 +239,11 @@ pub struct Analyzer<'a> {
     pub bars: &'a [f32],
     pub peaks: &'a [f32],
     /// Foreground colour per screen row, bottom-up. Cached by the caller.
-    pub row_colors: &'a [Color],
-    pub cap_color: Color,
+    pub row_colors: &'a [Ink],
+    pub cap_color: Ink,
     /// Backdrop colour per screen row, bottom-up, or `None` to hide it. Cached
     /// by the caller alongside `row_colors`.
-    pub grid: Option<&'a [Color]>,
+    pub grid: Option<&'a [Ink]>,
     pub bar_style: BarStyle,
     pub layout: BarLayout,
     pub peaks_style: Peaks,
@@ -257,8 +259,9 @@ impl Widget for Analyzer<'_> {
         // between the caller measuring and this running leaves `row_colors`
         // shorter than the area. Indexing it directly panicked, and the unwind
         // skipped the raw-mode teardown, leaving the terminal unusable.
-        let row_color =
-            |r: u16| -> Color { self.row_colors[(r as usize).min(self.row_colors.len() - 1)] };
+        let row_color = |r: u16| -> Color {
+            to_color(self.row_colors[(r as usize).min(self.row_colors.len() - 1)])
+        };
 
         // The terminal's own background is left alone deliberately. The
         // original painted its own across the whole panel, but a terminal
@@ -281,7 +284,7 @@ impl Widget for Analyzer<'_> {
         //
         let fill = self.bar_style.fills_cell();
         if let Some(grid) = self.grid {
-            let grid_color = |r: u16| -> Color { grid[(r as usize).min(grid.len() - 1)] };
+            let grid_color = |r: u16| -> Color { to_color(grid[(r as usize).min(grid.len() - 1)]) };
             let columns = self.layout.bar_count(area.width);
             for i in 0..columns {
                 let left = self.layout.x_of(i);
@@ -351,7 +354,7 @@ impl Widget for Analyzer<'_> {
                     // pass established for this column stays and a cap or a
                     // partial block never differs from the cells around it.
                     if let Some((_, glyph)) = cap.filter(|(a, _)| *a == r) {
-                        buf[at].set_symbol(glyph).set_fg(self.cap_color);
+                        buf[at].set_symbol(glyph).set_fg(to_color(self.cap_color));
                     } else if lit {
                         let glyph = if r < full {
                             self.bar_style.glyph()
@@ -371,7 +374,7 @@ impl Widget for Analyzer<'_> {
 /// Colour is a function of the row, never of the bar's own value — that is what
 /// makes a tall bar and a short one agree on colour where they overlap, which is
 /// the look this reproduces. Recomputed only when the height or theme changes.
-pub fn row_colors(height: u16, theme: &Theme) -> Vec<Color> {
+pub fn row_colors(height: u16, theme: &Theme) -> Vec<Ink> {
     stretch(&theme.bars, height)
 }
 
@@ -386,8 +389,8 @@ pub fn row_colors(height: u16, theme: &Theme) -> Vec<Color> {
 /// green, scaled - still the user's theme, just further down. A terminal that
 /// will not say what its green is leaves the colour alone; there is nothing to
 /// scale, and inventing one would replace the theme rather than dim it.
-pub fn grid_colors(height: u16, theme: &Theme, palette: &Palette) -> Vec<Color> {
-    let stops: Vec<Color> = match theme.darken {
+pub fn grid_colors(height: u16, theme: &Theme, palette: &Palette) -> Vec<Ink> {
+    let stops: Vec<Ink> = match theme.darken {
         None => theme.grid.clone(),
         Some(floor) => theme
             .grid
@@ -396,7 +399,7 @@ pub fn grid_colors(height: u16, theme: &Theme, palette: &Palette) -> Vec<Color> 
                 // All three channels scale together, which keeps the hue.
                 // Scaling per channel drains a saturated colour towards black by
                 // way of brown.
-                Some((r, g, b)) => Color::Rgb(
+                Some((r, g, b)) => Ink::Rgb(
                     (r as f32 * floor).round() as u8,
                     (g as f32 * floor).round() as u8,
                     (b as f32 * floor).round() as u8,
@@ -408,7 +411,7 @@ pub fn grid_colors(height: u16, theme: &Theme, palette: &Palette) -> Vec<Color> 
     stretch(&stops, height)
 }
 
-fn stretch(stops: &[Color], height: u16) -> Vec<Color> {
+fn stretch(stops: &[Ink], height: u16) -> Vec<Ink> {
     (0..height)
         .map(|r| stops[ramp_index(r, height, stops.len())])
         .collect()
@@ -426,12 +429,12 @@ mod tests {
     /// not one flat colour, so the row matters.
     fn fill_color_at(y: u16, height: u16) -> Color {
         let colors = grid_colors(height, &Theme::default(), &Palette::default());
-        colors[(height - 1 - y) as usize]
+        to_color(colors[(height - 1 - y) as usize])
     }
 
     /// The default theme's cap colour.
     fn cap_color() -> Color {
-        Theme::default().peak
+        to_color(Theme::default().peak)
     }
 
     /// For tests about the bars themselves. Caps rest on the bottom row now, so
@@ -527,10 +530,14 @@ mod tests {
     #[test]
     fn the_ramp_runs_green_at_the_bottom_to_red_at_the_top() {
         let buf = render_bars(&[1.0], 1, 16, false);
-        assert_eq!(buf[(0, 15)].fg, Theme::default().bars[0], "bottom is green");
+        assert_eq!(
+            buf[(0, 15)].fg,
+            to_color(Theme::default().bars[0]),
+            "bottom is green"
+        );
         assert_eq!(
             buf[(0, 0)].fg,
-            *Theme::default().bars.last().unwrap(),
+            to_color(*Theme::default().bars.last().unwrap()),
             "top is red"
         );
     }
@@ -598,7 +605,7 @@ mod tests {
             bars: &[1.0],
             peaks: &[1.0],
             row_colors: &colors,
-            cap_color: cap_color(),
+            cap_color: Theme::default().peak,
             grid: None,
             bar_style: BarStyle::Blocks,
             layout: BarLayout {
@@ -860,16 +867,12 @@ mod tests {
         // All three channels together, never per channel: a saturated colour has
         // to stay itself on the way down, not drift towards brown.
         let theme = Theme {
-            grid: vec![Color::Rgb(240, 48, 16); 16],
+            grid: vec![Ink::Rgb(240, 48, 16); 16],
             darken: Some(0.25),
             ..Theme::default()
         };
         let colors = grid_colors(16, &theme, &Palette::default());
-        assert_eq!(
-            colors[0],
-            Color::Rgb(60, 12, 4),
-            "each channel by the floor"
-        );
+        assert_eq!(colors[0], Ink::Rgb(60, 12, 4), "each channel by the floor");
     }
 
     #[test]
@@ -877,7 +880,7 @@ mod tests {
         // The theme said `green`, so the answer has to be *this* terminal's green
         // taken down - not a green rav picked.
         let theme = Theme {
-            grid: vec![Color::Green; 16],
+            grid: vec![Ink::from_name("green").unwrap(); 16],
             darken: Some(0.5),
             ..Theme::default()
         };
@@ -885,7 +888,7 @@ mod tests {
         // A terminal that will not say leaves the colour alone; inventing one
         // would replace the theme rather than dim it.
         let silent = grid_colors(16, &theme, &Palette::default());
-        assert_eq!(silent[0], Color::Green);
+        assert_eq!(silent[0], Ink::from_name("green").unwrap());
     }
 
     #[test]
@@ -902,8 +905,8 @@ mod tests {
                 bars: &[0.0],
                 peaks: &[0.0],
                 row_colors: &colors,
-                cap_color: cap_color(),
-                grid: Some(&[Color::Rgb(24, 33, 41); 4]),
+                cap_color: Theme::default().peak,
+                grid: Some(&[Ink::Rgb(24, 33, 41); 4]),
                 bar_style: style,
                 layout: BarLayout {
                     bar_width: 1,

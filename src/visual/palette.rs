@@ -14,7 +14,7 @@
 //! Terminals that do not answer are the normal case, not an error: rav waits a
 //! moment, gives up, and leaves those colours alone.
 
-use ratatui::style::Color;
+use crate::render::{Ink, Rgba};
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::time::{Duration, Instant};
@@ -66,10 +66,25 @@ impl Palette {
     /// Resolve a colour to RGB, if it is one this palette can speak for.
     ///
     /// `Rgb` passes through - the theme already said exactly what it wanted.
-    pub fn rgb(&self, color: Color) -> Option<(u8, u8, u8)> {
-        match color {
-            Color::Rgb(r, g, b) => Some((r, g, b)),
-            other => index_of(other).and_then(|i| self.slots[i]),
+    /// A name resolves only when the terminal answered; `None` means the caller
+    /// should leave the colour alone rather than invent one.
+    pub fn rgb(&self, ink: Ink) -> Option<(u8, u8, u8)> {
+        match ink {
+            Ink::Rgb(r, g, b) => Some((r, g, b)),
+            Ink::Ansi(i) => self.slots[usize::from(i) & 0x0f],
+        }
+    }
+
+    /// Resolve a colour, falling back to the standard value for a name.
+    ///
+    /// For a surface with no terminal to ask, where `None` is not an answer -
+    /// it would mean not drawing. Anything with a terminal should use
+    /// [`rgb`](Self::rgb) and leave an unanswered name alone, so the theme
+    /// still follows the palette the user runs.
+    pub fn resolve(&self, ink: Ink) -> Rgba {
+        match self.rgb(ink) {
+            Some((r, g, b)) => Rgba::opaque(r, g, b),
+            None => ink.resolved(),
         }
     }
 
@@ -169,29 +184,6 @@ fn parse_rgb(spec: &str) -> Option<(u8, u8, u8)> {
     parts.next().is_none().then_some((r, g, b))
 }
 
-/// The ANSI slot a named colour occupies.
-fn index_of(color: Color) -> Option<usize> {
-    Some(match color {
-        Color::Black => 0,
-        Color::Red => 1,
-        Color::Green => 2,
-        Color::Yellow => 3,
-        Color::Blue => 4,
-        Color::Magenta => 5,
-        Color::Cyan => 6,
-        Color::Gray => 7,
-        Color::DarkGray => 8,
-        Color::LightRed => 9,
-        Color::LightGreen => 10,
-        Color::LightYellow => 11,
-        Color::LightBlue => 12,
-        Color::LightMagenta => 13,
-        Color::LightCyan => 14,
-        Color::White => 15,
-        _ => return None,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -200,7 +192,10 @@ mod tests {
     fn a_reply_is_read_back_as_rgb() {
         let mut palette = Palette::default();
         palette.absorb(b"\x1b]4;2;rgb:2929/cece/1010\x07");
-        assert_eq!(palette.rgb(Color::Green), Some((41, 206, 16)));
+        assert_eq!(
+            palette.rgb(Ink::from_name("green").unwrap()),
+            Some((41, 206, 16))
+        );
     }
 
     #[test]
@@ -209,8 +204,14 @@ mod tests {
         // the whole lot usually lands in a single read.
         let mut palette = Palette::default();
         palette.absorb(b"\x1b]4;9;rgb:ffff/0000/0000\x07\x1b]4;1;rgb:8080/0000/0000\x07");
-        assert_eq!(palette.rgb(Color::LightRed), Some((255, 0, 0)));
-        assert_eq!(palette.rgb(Color::Red), Some((128, 0, 0)));
+        assert_eq!(
+            palette.rgb(Ink::from_name("bright-red").unwrap()),
+            Some((255, 0, 0))
+        );
+        assert_eq!(
+            palette.rgb(Ink::from_name("red").unwrap()),
+            Some((128, 0, 0))
+        );
     }
 
     #[test]
@@ -220,9 +221,16 @@ mod tests {
         let mut palette = Palette::default();
         let full = b"\x1b]4;2;rgb:2929/cece/1010\x07";
         palette.absorb(&full[..12]);
-        assert_eq!(palette.rgb(Color::Green), None, "not yet");
+        assert_eq!(
+            palette.rgb(Ink::from_name("green").unwrap()),
+            None,
+            "not yet"
+        );
         palette.absorb(full);
-        assert_eq!(palette.rgb(Color::Green), Some((41, 206, 16)));
+        assert_eq!(
+            palette.rgb(Ink::from_name("green").unwrap()),
+            Some((41, 206, 16))
+        );
     }
 
     #[test]
@@ -261,9 +269,9 @@ mod tests {
         // The normal case on a terminal that does not implement OSC 4. Nothing
         // is invented: the caller is told it has no RGB for that colour.
         let palette = Palette::default();
-        assert_eq!(palette.rgb(Color::Green), None);
+        assert_eq!(palette.rgb(Ink::from_name("green").unwrap()), None);
         // A theme that named an exact colour never needed the terminal's help.
-        assert_eq!(palette.rgb(Color::Rgb(1, 2, 3)), Some((1, 2, 3)));
+        assert_eq!(palette.rgb(Ink::Rgb(1, 2, 3)), Some((1, 2, 3)));
     }
 
     #[test]

@@ -106,7 +106,9 @@ impl Widget for Scope<'_> {
                 let level = oscilloscope_level(virtual_row.min(VIRTUAL_ROWS - 1));
                 buf[(area.x + x, area.y + height - 1 - r)]
                     .set_symbol(LINE)
-                    .set_fg(self.theme.scope[level.min(self.theme.scope.len() - 1)]);
+                    .set_fg(crate::ui::to_color(
+                        self.theme.scope[level.min(self.theme.scope.len() - 1)],
+                    ));
             }
         }
     }
@@ -198,7 +200,7 @@ mod tests {
         assert_ne!(centre, extreme, "extremes must not match the centre colour");
         assert_eq!(
             centre,
-            Theme::default().scope[0],
+            crate::ui::to_color(Theme::default().scope[0]),
             "centre uses the brightest level"
         );
     }

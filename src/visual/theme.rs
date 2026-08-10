@@ -10,8 +10,8 @@
 //! theme can mix them freely: that choice is the difference between reproducing a
 //! specific look and following whatever the user already runs.
 
+use crate::render::Ink;
 use anyhow::{Context, Result, bail};
-use ratatui::style::Color;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
@@ -38,12 +38,12 @@ const BUILT_IN: [(&str, &str); 4] = [
 pub struct Theme {
     pub name: String,
     /// Analyser ramp, foot of the bar first.
-    pub bars: Vec<Color>,
+    pub bars: Vec<Ink>,
     /// Backdrop per stop, aligned with `bars`.
-    pub grid: Vec<Color>,
-    pub peak: Color,
+    pub grid: Vec<Ink>,
+    pub peak: Ink,
     /// Oscilloscope ladder, centre of the trace first.
-    pub scope: Vec<Color>,
+    pub scope: Vec<Ink>,
     /// How much brightness the backdrop keeps, when the theme asked to darken it.
     ///
     /// Applied at render time rather than here, because darkening a colour the
@@ -117,7 +117,7 @@ impl Theme {
     /// spelling it out: there is nothing to look up otherwise, and asking is not
     /// free - it writes escape sequences and reads the replies off the terminal.
     pub fn needs_terminal_palette(&self) -> bool {
-        self.darken.is_some() && self.grid.iter().any(|c| !matches!(c, Color::Rgb(..)))
+        self.darken.is_some() && self.grid.iter().any(|c| !c.is_exact())
     }
 
     /// Parse a theme file.
@@ -222,7 +222,7 @@ impl Ramp {
     /// A single colour repeats; a ladder must already be the right length. Silently
     /// padding a short one would put an arbitrary colour at the top of the ramp,
     /// which is exactly the sort of thing that looks like a rendering bug later.
-    fn expand(&self, len: usize) -> Result<Vec<Color>> {
+    fn expand(&self, len: usize) -> Result<Vec<Ink>> {
         match self {
             Ramp::One(name) => Ok(vec![parse_color(name)?; len]),
             Ramp::Many(names) => {
@@ -236,7 +236,7 @@ impl Ramp {
 }
 
 /// `#rrggbb`, or one of the sixteen ANSI names.
-fn parse_color(text: &str) -> Result<Color> {
+fn parse_color(text: &str) -> Result<Ink> {
     let text = text.trim();
     if let Some(hex) = text.strip_prefix('#') {
         if hex.len() != 6 {
@@ -245,31 +245,15 @@ fn parse_color(text: &str) -> Result<Color> {
         let channel = |at: usize| u8::from_str_radix(&hex[at..at + 2], 16);
         let (r, g, b) = (channel(0), channel(2), channel(4));
         return match (r, g, b) {
-            (Ok(r), Ok(g), Ok(b)) => Ok(Color::Rgb(r, g, b)),
+            (Ok(r), Ok(g), Ok(b)) => Ok(Ink::Rgb(r, g, b)),
             _ => bail!("{text:?}: a hex colour is #rrggbb"),
         };
     }
-    // `white`/`bright-black` rather than ratatui's `Gray`/`DarkGray`: the ANSI
-    // names are what a theme author is reading off their theme.
-    Ok(match text {
-        "black" => Color::Black,
-        "red" => Color::Red,
-        "green" => Color::Green,
-        "yellow" => Color::Yellow,
-        "blue" => Color::Blue,
-        "magenta" => Color::Magenta,
-        "cyan" => Color::Cyan,
-        "white" => Color::Gray,
-        "bright-black" => Color::DarkGray,
-        "bright-red" => Color::LightRed,
-        "bright-green" => Color::LightGreen,
-        "bright-yellow" => Color::LightYellow,
-        "bright-blue" => Color::LightBlue,
-        "bright-magenta" => Color::LightMagenta,
-        "bright-cyan" => Color::LightCyan,
-        "bright-white" => Color::White,
-        other => bail!("{other:?} is not a colour: use #rrggbb or an ANSI name"),
-    })
+    // A name stays a name. Resolving it here would replace the user's green
+    // with one rav picked, which is the opposite of what the `terminal` theme
+    // is for - each surface settles it in the way that surface can.
+    Ink::from_name(text)
+        .ok_or_else(|| anyhow::anyhow!("{text:?} is not a colour: use #rrggbb or an ANSI name"))
 }
 
 #[cfg(test)]
@@ -294,9 +278,9 @@ mod tests {
         // Asserted on the file rather than on `Theme::default()`, which has been
         // through `darken`.
         let theme = Theme::parse(&raw("winamp")).unwrap();
-        assert_eq!(theme.bars[0], Color::Rgb(24, 132, 8), "foot is dark green");
-        assert_eq!(theme.bars[STOPS - 1], Color::Rgb(239, 49, 16), "tip is red");
-        assert_eq!(theme.peak, Color::Rgb(150, 150, 150), "caps are grey");
+        assert_eq!(theme.bars[0], Ink::Rgb(24, 132, 8), "foot is dark green");
+        assert_eq!(theme.bars[STOPS - 1], Ink::Rgb(239, 49, 16), "tip is red");
+        assert_eq!(theme.peak, Ink::Rgb(150, 150, 150), "caps are grey");
     }
 
     /// A built-in theme's text with its `darken` line removed, for comparing
@@ -327,7 +311,7 @@ mod tests {
                 .chain(&theme.scope)
                 .chain(std::iter::once(&theme.peak));
             for color in all {
-                assert!(!matches!(color, Color::Rgb(..)), "{name} used {color:?}");
+                assert!(!matches!(color, Ink::Rgb(..)), "{name} used {color:?}");
             }
         }
     }
@@ -411,8 +395,11 @@ mod tests {
             "#,
         )
         .expect("should parse");
-        assert_eq!(theme.bars, vec![Color::Green; STOPS]);
-        assert_eq!(theme.scope, vec![Color::Gray; SCOPE_LEVELS]);
+        assert_eq!(theme.bars, vec![Ink::from_name("green").unwrap(); STOPS]);
+        assert_eq!(
+            theme.scope,
+            vec![Ink::from_name("white").unwrap(); SCOPE_LEVELS]
+        );
     }
 
     #[test]
@@ -436,9 +423,15 @@ mod tests {
 
     #[test]
     fn colours_are_hex_or_an_ansi_name() {
-        assert_eq!(parse_color("#ef3110").unwrap(), Color::Rgb(239, 49, 16));
-        assert_eq!(parse_color("bright-green").unwrap(), Color::LightGreen);
-        assert_eq!(parse_color(" white ").unwrap(), Color::Gray);
+        assert_eq!(parse_color("#ef3110").unwrap(), Ink::Rgb(239, 49, 16));
+        assert_eq!(
+            parse_color("bright-green").unwrap(),
+            Ink::from_name("bright-green").unwrap()
+        );
+        assert_eq!(
+            parse_color(" white ").unwrap(),
+            Ink::from_name("white").unwrap()
+        );
         for bad in ["#fff", "#gggggg", "chartreuse", ""] {
             assert!(parse_color(bad).is_err(), "{bad:?} should not parse");
         }

@@ -1,0 +1,176 @@
+//! Colour, as a theme states it and as a surface needs it.
+//!
+//! A theme says either an exact colour or the *name* of one, and the difference
+//! is load-bearing rather than a convenience. `#188408` is a promise about the
+//! hue; `green` is a deferral - it means "whatever green is here", which is what
+//! lets the `terminal` and `mono` themes follow the palette the user already
+//! runs.
+//!
+//! So [`Ink`] keeps the two apart all the way to the surface, and each surface
+//! settles it in the way that surface can. A terminal hands the name straight
+//! back and lets the terminal paint it. A pixel renderer has nobody to ask, so
+//! it resolves through a [`Palette`] and falls back to the standard values.
+//!
+//! [`Palette`]: crate::visual::Palette
+
+/// A colour as a theme wrote it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ink {
+    /// An exact colour, `#rrggbb`.
+    Rgb(u8, u8, u8),
+    /// One of the sixteen ANSI slots, by index. `0..=7` are the normal colours
+    /// and `8..=15` their bright twins, which is the order every terminal uses
+    /// and the order a theme author reads off their own configuration.
+    Ansi(u8),
+}
+
+/// A resolved colour, with the alpha a compositing surface needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rgba {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: u8,
+}
+
+impl Rgba {
+    pub const fn opaque(r: u8, g: u8, b: u8) -> Self {
+        Self { r, g, b, a: 0xff }
+    }
+}
+
+/// The sixteen ANSI colours as a terminal that will not say paints them.
+///
+/// The standard values, so a pixel surface has an answer at all: it has no
+/// terminal to interrogate, and leaving a named colour unresolved there would
+/// mean not drawing it. A terminal that *does* answer overrides every one of
+/// these - this is the floor, not the intent.
+pub const DEFAULT_ANSI: [Rgba; 16] = [
+    Rgba::opaque(0x00, 0x00, 0x00), // black
+    Rgba::opaque(0x80, 0x00, 0x00), // red
+    Rgba::opaque(0x00, 0x80, 0x00), // green
+    Rgba::opaque(0x80, 0x80, 0x00), // yellow
+    Rgba::opaque(0x00, 0x00, 0x80), // blue
+    Rgba::opaque(0x80, 0x00, 0x80), // magenta
+    Rgba::opaque(0x00, 0x80, 0x80), // cyan
+    Rgba::opaque(0xc0, 0xc0, 0xc0), // white
+    Rgba::opaque(0x80, 0x80, 0x80), // bright-black
+    Rgba::opaque(0xff, 0x00, 0x00), // bright-red
+    Rgba::opaque(0x00, 0xff, 0x00), // bright-green
+    Rgba::opaque(0xff, 0xff, 0x00), // bright-yellow
+    Rgba::opaque(0x00, 0x00, 0xff), // bright-blue
+    Rgba::opaque(0xff, 0x00, 0xff), // bright-magenta
+    Rgba::opaque(0x00, 0xff, 0xff), // bright-cyan
+    Rgba::opaque(0xff, 0xff, 0xff), // bright-white
+];
+
+/// The ANSI names a theme may use, in slot order.
+///
+/// The names rather than a terminal library's own spelling: `white` is slot 7
+/// and `bright-white` is slot 15, which is what a theme author sees in their
+/// configuration. A library that calls those `Gray` and `White` is describing
+/// its own type, not the terminal.
+pub const ANSI_NAMES: [&str; 16] = [
+    "black",
+    "red",
+    "green",
+    "yellow",
+    "blue",
+    "magenta",
+    "cyan",
+    "white",
+    "bright-black",
+    "bright-red",
+    "bright-green",
+    "bright-yellow",
+    "bright-blue",
+    "bright-magenta",
+    "bright-cyan",
+    "bright-white",
+];
+
+impl Ink {
+    /// The slot an ANSI name refers to.
+    pub fn from_name(name: &str) -> Option<Self> {
+        ANSI_NAMES
+            .iter()
+            .position(|&n| n == name)
+            .map(|i| Self::Ansi(i as u8))
+    }
+
+    /// This colour without asking anyone - the standard value for a name.
+    ///
+    /// Only for a surface with no terminal to ask. Anything that *can* ask
+    /// should, or the `terminal` theme stops following the user's colours,
+    /// which is the whole reason that theme exists.
+    pub fn resolved(self) -> Rgba {
+        match self {
+            Self::Rgb(r, g, b) => Rgba::opaque(r, g, b),
+            Self::Ansi(i) => DEFAULT_ANSI[usize::from(i) & 0x0f],
+        }
+    }
+
+    /// Whether this colour is exact, rather than deferred to the terminal.
+    pub fn is_exact(self) -> bool {
+        matches!(self, Self::Rgb(..))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_name_round_trips_through_its_slot() {
+        for (i, name) in ANSI_NAMES.iter().enumerate() {
+            assert_eq!(
+                Ink::from_name(name),
+                Some(Ink::Ansi(i as u8)),
+                "{name} should be slot {i}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_bright_twins_sit_eight_slots_above_their_own_colour() {
+        // Every terminal lays the sixteen out this way, and a theme's `grid`
+        // ladder relies on it: the dark twin of the colour a row lights up in
+        // is the same index minus eight.
+        for slot in 0..8u8 {
+            let name = ANSI_NAMES[usize::from(slot)];
+            let bright = format!("bright-{name}");
+            assert_eq!(Ink::from_name(&bright), Some(Ink::Ansi(slot + 8)));
+        }
+    }
+
+    #[test]
+    fn an_unknown_name_is_not_a_colour() {
+        assert_eq!(Ink::from_name("puce"), None);
+        assert_eq!(Ink::from_name("bright-puce"), None);
+        // Case matters: themes are written in lower case and a near miss should
+        // say so rather than silently pick something.
+        assert_eq!(Ink::from_name("Green"), None);
+    }
+
+    #[test]
+    fn an_exact_colour_resolves_to_itself() {
+        assert_eq!(
+            Ink::Rgb(0x18, 0x84, 0x08).resolved(),
+            Rgba::opaque(0x18, 0x84, 0x08)
+        );
+        assert!(Ink::Rgb(0, 0, 0).is_exact());
+        assert!(!Ink::Ansi(2).is_exact());
+    }
+
+    #[test]
+    fn every_slot_has_a_fallback() {
+        // A pixel surface has no terminal to ask, so a name with no answer
+        // would mean not drawing at all.
+        for slot in 0..16u8 {
+            assert_eq!(Ink::Ansi(slot).resolved(), DEFAULT_ANSI[usize::from(slot)]);
+        }
+        // The index is masked rather than trusted, so a malformed slot cannot
+        // panic in the middle of a frame.
+        assert_eq!(Ink::Ansi(200).resolved(), DEFAULT_ANSI[8]);
+    }
+}

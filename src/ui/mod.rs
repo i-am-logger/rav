@@ -6,6 +6,7 @@ pub mod scope;
 use crate::{
     audio::AudioData,
     config::Config,
+    render::Ink,
     signal::{
         ballistics::{BAR_FALL_SPEEDS, Ballistics, DEFAULT_PEAK_FALL},
         mapping::{
@@ -42,6 +43,41 @@ use tracing::info;
 type AppTerminal = Terminal<TestBackend>;
 #[cfg(not(test))]
 type AppTerminal = Terminal<CrosstermBackend<Stdout>>;
+
+/// The only place a theme's colour meets the terminal's idea of one.
+///
+/// A named colour stays named all the way here and is handed over as a *slot*,
+/// so the terminal paints it from whatever palette the user runs - which is the
+/// whole reason the `terminal` and `mono` themes exist. Resolving it to RGB
+/// earlier would replace their colours with ones rav chose.
+///
+/// ratatui spells slot 7 `Gray` and slot 15 `White`; a theme calls them `white`
+/// and `bright-white`, which is what the author reads off their configuration.
+/// The disagreement is about naming, not about which colour, and it is confined
+/// to this table.
+pub fn to_color(ink: Ink) -> Color {
+    match ink {
+        Ink::Rgb(r, g, b) => Color::Rgb(r, g, b),
+        Ink::Ansi(slot) => match slot & 0x0f {
+            0 => Color::Black,
+            1 => Color::Red,
+            2 => Color::Green,
+            3 => Color::Yellow,
+            4 => Color::Blue,
+            5 => Color::Magenta,
+            6 => Color::Cyan,
+            7 => Color::Gray,
+            8 => Color::DarkGray,
+            9 => Color::LightRed,
+            10 => Color::LightGreen,
+            11 => Color::LightYellow,
+            12 => Color::LightBlue,
+            13 => Color::LightMagenta,
+            14 => Color::LightCyan,
+            _ => Color::White,
+        },
+    }
+}
 
 /// Which visualisation is on screen. The original showed one at a time, full area,
 /// switched by clicking the panel.
@@ -141,9 +177,9 @@ pub struct App {
     theme: Theme,
     /// A theme loaded from disk by `--theme`, kept so the `t` cycle returns to it.
     loaded_theme: Option<Theme>,
-    row_colors: Vec<Color>,
+    row_colors: Vec<Ink>,
     /// Backdrop colour per row, cached with `row_colors` and rebuilt with it.
-    grid_colors: Vec<Color>,
+    grid_colors: Vec<Ink>,
     /// The terminal's own palette, read once at startup. A theme that names a
     /// colour rather than spelling it out needs this to be adjustable at all.
     palette: Palette,
@@ -717,7 +753,7 @@ fn draw_status(buf: &mut ratatui::buffer::Buffer, area: ratatui::layout::Rect, t
         buf[(x, area.y)]
             .set_symbol(&ch.to_string())
             .set_fg(Color::Rgb(222, 222, 222))
-            .set_bg(Theme::default().grid[0]);
+            .set_bg(to_color(Theme::default().grid[0]));
     }
 }
 
@@ -1017,6 +1053,37 @@ mod tests {
         a.resize(80, 24);
         assert_ne!(a.grid_colors, before, "colours did not change");
         assert_eq!(a.active_status(), Some("theme winamp"));
+    }
+
+    #[test]
+    fn a_named_colour_reaches_the_terminal_still_named() {
+        // The whole reason the `terminal` and `mono` themes work. A name is a
+        // deferral - "whatever green is here" - so it has to arrive at ratatui
+        // as a slot the terminal paints, not as an RGB value rav chose. Resolve
+        // it anywhere earlier and those themes quietly stop following the
+        // user's colours while still looking plausible.
+        assert_eq!(to_color(Ink::from_name("green").unwrap()), Color::Green);
+        assert_eq!(
+            to_color(Ink::from_name("bright-white").unwrap()),
+            Color::White
+        );
+        // ratatui calls slot 7 `Gray`; a theme calls it `white`. Same slot.
+        assert_eq!(to_color(Ink::from_name("white").unwrap()), Color::Gray);
+        assert_eq!(to_color(Ink::Rgb(1, 2, 3)), Color::Rgb(1, 2, 3));
+    }
+
+    #[test]
+    fn an_unanswered_palette_leaves_a_named_backdrop_named() {
+        // `Palette::default()` is a terminal that said nothing, which is the
+        // common case. Darkening has no number to work with, so the colour must
+        // pass through untouched rather than being replaced by a guess.
+        let theme = Theme::load("terminal").expect("built in");
+        assert!(theme.needs_terminal_palette());
+        let grid = grid_colors(16, &theme, &Palette::default());
+        assert!(
+            grid.iter().all(|c| !c.is_exact()),
+            "an unanswered palette must not turn names into RGB"
+        );
     }
 
     #[test]
