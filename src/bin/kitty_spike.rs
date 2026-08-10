@@ -194,6 +194,44 @@ fn probe_via<W: Write, R: Read + AsRawFd>(out: &mut W, input: &mut R) -> Support
     Support::No
 }
 
+/// Whatever the terminal said back, if it said anything.
+///
+/// Without `q=2` a transmit is acknowledged or refused, and the refusal carries
+/// the reason. Suppressing it is right in the measurement loop - a reply per
+/// frame at 60fps floods stdin - and wrong here, where the reason is the point.
+fn read_reply() -> Option<String> {
+    let was_raw = crossterm::terminal::is_raw_mode_enabled().unwrap_or(false);
+    if !was_raw && crossterm::terminal::enable_raw_mode().is_err() {
+        return None;
+    }
+    let mut input = std::io::stdin();
+    let mut seen = Vec::new();
+    let mut chunk = [0u8; 256];
+    let deadline = Instant::now() + PROBE_TIMEOUT;
+    while let Some(left) = deadline.checked_duration_since(Instant::now()) {
+        if !readable(input.as_raw_fd(), left) {
+            break;
+        }
+        match input.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => seen.extend_from_slice(&chunk[..n]),
+        }
+    }
+    if !was_raw {
+        let _ = crossterm::terminal::disable_raw_mode();
+    }
+    if seen.is_empty() {
+        return None;
+    }
+    // The escape framing is noise in a printed message; the body is the answer.
+    Some(
+        String::from_utf8_lossy(&seen)
+            .replace(['\x1b', '\\'], "")
+            .trim()
+            .to_string(),
+    )
+}
+
 /// Whether `fd` has something to read within `within`.
 fn readable(fd: i32, within: Duration) -> bool {
     let mut poll = libc::pollfd {
@@ -419,8 +457,6 @@ fn occlusion_check() -> std::process::ExitCode {
     let mut frame = vec![0u8; (w * h * 4) as usize];
     paint(&mut frame, w, 0);
 
-    let mut out = std::io::stdout();
-    println!("\nAn image with two lines of text over it.\n");
     let name = match shm_write(&frame, 0) {
         Ok(name) => name,
         Err(e) => {
@@ -429,28 +465,66 @@ fn occlusion_check() -> std::process::ExitCode {
         }
     };
     let encoded = base64(name.as_bytes());
-    let _ = write!(
-        out,
-        "\x1b_Ga=T,q=2,i={IMAGE_ID},f=32,s={w},v={h},z=-1,t=s;{encoded}\x1b\\"
-    );
-    // Line one inherits the terminal's default background; line two sets one
-    // explicitly. If only the second hides the image, ratatui's default-styled
-    // cells are safe and the overlay plan holds.
-    let _ = write!(
-        out,
-        "\x1b[2;3Hdefault background - image should show through"
-    );
-    let _ = write!(
-        out,
-        "\x1b[4;3H\x1b[48;2;0;0;0mexplicit background - expected to hide it\x1b[0m"
-    );
-    let _ = write!(out, "\x1b[8;1H");
-    let _ = out.flush();
+    let mut out = std::io::stdout();
 
-    println!("\n\nIf line one is readable AND the bars still show behind it, the");
-    println!("overlay plan works. If line one blanks the image, status and help");
-    println!("have to become scene geometry instead.\n");
-    println!("Press Enter to clear.");
+    // Two phases, because "nothing appeared" has two very different causes and
+    // only one of them is about occlusion. Phase one puts the image above the
+    // text: if that is invisible the transmit failed and z has nothing to do
+    // with it. Errors are reported rather than suppressed - `q=2` would hide
+    // exactly the message that explains a blank screen.
+    for (phase, z, blurb) in [
+        (
+            1,
+            0i32,
+            "ABOVE text (z=0) - proves the image arrives at all",
+        ),
+        (
+            2,
+            -1i32,
+            "BELOW text (z=-1) - the question this is here to answer",
+        ),
+    ] {
+        // Absolute positioning assumes a known screen, so clear it first.
+        let _ = write!(out, "\x1b[2J\x1b[H");
+        let _ = write!(out, "phase {phase}: {blurb}\r\n");
+        let _ = out.flush();
+
+        // Place it from a known row rather than wherever the cursor drifted to.
+        let _ = write!(out, "\x1b[3;1H");
+        let _ = write!(
+            out,
+            "\x1b_Ga=T,i={IMAGE_ID},f=32,s={w},v={h},z={z},t=s;{encoded}\x1b\\"
+        );
+        let _ = out.flush();
+
+        // Line one takes the terminal's default background, line two sets one
+        // explicitly. If only the second hides the image then ratatui's
+        // default-styled cells are safe and the overlay plan holds.
+        let _ = write!(out, "\x1b[4;3Hdefault background over the image");
+        let _ = write!(
+            out,
+            "\x1b[6;3H\x1b[48;2;0;0;0mexplicit background over the image\x1b[0m"
+        );
+        let _ = write!(out, "\x1b[10;1H");
+        let _ = out.flush();
+
+        if let Some(reply) = read_reply() {
+            println!("terminal replied: {reply}");
+        }
+        println!("Press Enter for the next phase.");
+        let mut line = String::new();
+        let _ = std::io::stdin().read_line(&mut line);
+        let _ = write!(out, "\x1b_Ga=d,d=A\x1b\\");
+        let _ = out.flush();
+    }
+
+    let _ = write!(out, "\x1b[2J\x1b[H");
+    let _ = out.flush();
+    println!("Phase 1 blank  -> the image never arrived; z is not the problem.");
+    println!("Phase 2 blank  -> text occludes it, and the overlay must become");
+    println!("                  scene geometry instead.");
+    println!("Phase 2 shows  -> bars as pixels with help and status as text works.");
+    println!("\nPress Enter to finish.");
     let mut line = String::new();
     let _ = std::io::stdin().read_line(&mut line);
     let _ = write!(out, "\x1b_Ga=d,d=A\x1b\\");
