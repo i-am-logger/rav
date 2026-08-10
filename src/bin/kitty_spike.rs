@@ -65,6 +65,10 @@ fn main() -> std::process::ExitCode {
 
     report_window_pixels();
 
+    if args.diagnose {
+        return diagnose();
+    }
+
     if args.occlusion {
         return occlusion_check();
     }
@@ -80,6 +84,7 @@ struct Args {
     seconds: u64,
     transport: Transport,
     occlusion: bool,
+    diagnose: bool,
 }
 
 impl Args {
@@ -91,6 +96,7 @@ impl Args {
             seconds: 10,
             transport: Transport::SharedMemory,
             occlusion: false,
+            diagnose: false,
         };
         let mut argv = std::env::args().skip(1);
         while let Some(flag) = argv.next() {
@@ -107,6 +113,7 @@ impl Args {
                     }
                 }
                 "--occlusion" => args.occlusion = true,
+                "--diagnose" => args.diagnose = true,
                 _ => {}
             }
         }
@@ -459,6 +466,87 @@ fn shm_write(frame: &[u8], tick: u64) -> std::io::Result<String> {
     // The terminal unlinks it once read; the rotation above keeps a dropped
     // frame from leaving a name behind forever.
     Ok(name)
+}
+
+// ── which transport actually works ──────────────────────────────────────────
+
+/// Try each transport in turn and report what the terminal says about it.
+///
+/// Every arm draws the same small image at `z=0`, one at a time, and asks for a
+/// reply rather than suppressing it. A terminal can accept a transmit and still
+/// display nothing - the reply is what separates "refused, and here is why" from
+/// "accepted but invisible", and those have completely different fixes.
+fn diagnose() -> std::process::ExitCode {
+    let (w, h) = (200u32, 60u32);
+    let mut frame = vec![0u8; (w * h * 4) as usize];
+    paint(&mut frame, w, 0);
+    let mut out = std::io::stdout();
+
+    println!("\nEach transport draws the same 200x60 band. Watch for it.\n");
+
+    for (label, arm) in [
+        ("t=d  direct, base64 through the pty", Transport::Direct),
+        ("t=t  temporary file", Transport::File),
+        ("t=s  POSIX shared memory", Transport::SharedMemory),
+    ] {
+        let _ = write!(out, "\r\n{label}\r\n");
+        let _ = out.flush();
+
+        let head = format!("a=T,i={IMAGE_ID},f=32,s={w},v={h},z=0");
+        let sent = match arm {
+            Transport::Direct => {
+                let payload = base64(&frame);
+                let mut rest = payload.as_bytes();
+                let mut first = true;
+                let mut result = Ok(());
+                while !rest.is_empty() && result.is_ok() {
+                    let take = rest.len().min(CHUNK);
+                    let (now, later) = rest.split_at(take);
+                    let more = u8::from(!later.is_empty());
+                    result = if first {
+                        write!(out, "\x1b_G{head},t=d,m={more};")
+                    } else {
+                        write!(out, "\x1b_Gm={more};")
+                    }
+                    .and_then(|()| out.write_all(now))
+                    .and_then(|()| write!(out, "\x1b\\"));
+                    rest = later;
+                    first = false;
+                }
+                result
+            }
+            Transport::File => match std::env::temp_dir()
+                .join("rav-diagnose.rgba")
+                .to_str()
+                .map(str::to_owned)
+            {
+                Some(path) => std::fs::write(&path, &frame).and_then(|()| {
+                    write!(out, "\x1b_G{head},t=t;{}\x1b\\", base64(path.as_bytes()))
+                }),
+                None => Ok(()),
+            },
+            Transport::SharedMemory => shm_write(&frame, 0)
+                .and_then(|name| write!(out, "\x1b_G{head},t=s;{}\x1b\\", base64(name.as_bytes()))),
+        };
+        let _ = out.flush();
+
+        match sent {
+            Err(e) => println!("  local error: {e}"),
+            Ok(()) => match read_reply() {
+                Some(reply) if reply.contains("OK") => println!("  terminal: {reply}"),
+                Some(reply) => println!("  terminal REFUSED: {reply}"),
+                None => println!("  terminal said nothing (it may still have drawn it)"),
+            },
+        }
+        println!("  Press Enter for the next transport.");
+        let mut line = String::new();
+        let _ = std::io::stdin().read_line(&mut line);
+        let _ = write!(out, "\x1b_Ga=d,d=A\x1b\\");
+        let _ = out.flush();
+    }
+
+    println!("\nWhichever arm showed a green band is the transport to build on.");
+    std::process::ExitCode::SUCCESS
 }
 
 // ── the occlusion question ──────────────────────────────────────────────────
