@@ -331,14 +331,16 @@
     echo "✅ $OUT ($(du -h "$OUT" | cut -f1))"
   '';
 
-  # There are deliberately no git-hooks. devenv wires `devenv:git-hooks:run`
-  # with `before = [ "devenv:enterTest" ]`, so a rustfmt or clippy hook runs
-  # inside `devenv test` too - under the hook's own default flags (no
-  # --all-targets, no --all-features, warnings not denied). That is a different
-  # cargo fingerprint from the test:clippy task below, so it compiles the crate
-  # under clippy a second time and cannot fail anything the task does not. The
-  # tasks are the check suite; a pre-commit gate costs that second compile on
-  # every run, locally and in CI.
+  # rustfmt only. devenv wires `devenv:git-hooks:run` before
+  # `devenv:enterTest`, so every hook also runs inside `devenv test` and
+  # therefore in CI. A clippy hook there would use its own default flags - no
+  # --all-targets, no --all-features, warnings not denied - which is a different
+  # cargo fingerprint from the test:clippy task, so it compiles the crate under
+  # clippy a second time and cannot fail anything that task does not.
+  # Formatting is the part worth catching before the commit rather than after.
+  git-hooks.hooks = {
+    rustfmt.enable = true;
+  };
 
   # Environment variables
   env = {
