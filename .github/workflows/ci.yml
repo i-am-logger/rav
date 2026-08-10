@@ -9,7 +9,7 @@ on:
     branches: [ master ]
 
 concurrency:
-  group: ci-${{ github.head_ref || github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   # master is exempt: it publishes to an immutable registry, then tags and
   # releases as separate steps. A cancel between them cannot be undone.
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
@@ -160,7 +160,10 @@ jobs:
             auto-optimise-store = false
       - uses: nix-community/cache-nix-action@v7
         with:
-          primary-key: nix-pkg-${{ runner.os }}-${{ hashFiles('**/*.nix', 'flake.lock', 'Cargo.lock') }}
+          # flake.nix, not **/*.nix: this job never reads devenv.nix, and
+          # including it means every dev-shell edit throws away the dependency
+          # artifacts crane just cached.
+          primary-key: nix-pkg-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock', 'Cargo.lock') }}
           restore-prefixes-first-match: nix-pkg-${{ runner.os }}-
           save: ${{ github.ref == 'refs/heads/master' }}
           purge: ${{ github.ref == 'refs/heads/master' }}
