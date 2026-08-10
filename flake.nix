@@ -146,7 +146,7 @@
                 echo "🎵 Audio backend: CoreAudio (system audio via Background Music)"
                 system_profiler SPAudioDataType 2>/dev/null | grep -E '^        [A-Za-z]' || echo "Could not query CoreAudio"
               else
-                echo "🎵 Audio backend: ALSA (system audio via a PulseAudio/PipeWire monitor source)"
+                echo "🎵 Audio backend: ALSA (a PipeWire/PulseAudio monitor is not an ALSA PCM - see docs/audio.md)"
                 aplay -l 2>/dev/null || echo "No audio playback devices found"
               fi
               echo ""

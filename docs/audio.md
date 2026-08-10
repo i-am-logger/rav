@@ -5,17 +5,45 @@ playing — rather than the room — that playback has to be looped back to an i
 
 ## Linux
 
-Nothing to install. PulseAudio and PipeWire both expose a `.monitor` source for
-every output, and rav picks one up automatically:
+Nothing to install, but rav cannot pick the source on its own, and it is worth
+knowing why before reaching for `--list-devices`.
+
+rav captures through cpal, which on Linux uses **ALSA**. ALSA enumerates PCM
+names — `default`, `pipewire`, `front:CARD=…`. A PulseAudio or PipeWire monitor
+is a **source**, not an ALSA PCM, so it has no name in that list: rav cannot find
+one by searching, and `-d "<sink>.monitor"` cannot select one either, because it
+searches the same list. rav says so in the log on every run:
 
 ```
-rav                   # finds a monitor source on its own
-rav --list-devices    # everything rav can see
-rav -d "<name>"       # pick one explicitly
+No monitor/loopback device found - capturing from default input 'default'
 ```
 
-If it chose the wrong one, `--list-devices` shows the names and `-d` pins it. The
-log says which device was opened, every run.
+What rav opens is the ALSA `default` PCM, and on a PipeWire system that is a
+PipeWire stream like any other. So the routing is set from the PipeWire side,
+not from rav:
+
+```
+PIPEWIRE_NODE=<sink>.monitor rav    # point this capture at a sink's monitor
+wpctl status                        # the sink names to choose from
+```
+
+A patchbay does the same thing by hand and survives a restart: run `qpwgraph` or
+`helvum`, find rav's capture node, and connect its inputs to the monitor ports of
+the sink you are playing to. `pw-link -l` shows what it ended up connected to.
+
+`rav --list-devices` and `-d` still work, and are the right tools for a real
+capture device — an `snd-aloop` loopback (`…CARD=Loopback`) is found
+automatically, as is a USB interface you name explicitly.
+
+The log says which device was opened, every run, and reports the level of the
+first audio to arrive:
+
+```
+Capture delivering audio (peak 0.500)
+```
+
+A peak near zero means the routing is wrong; that number is the quickest way to
+tell "rav is broken" from "rav is looking at a silent source".
 
 ## macOS
 

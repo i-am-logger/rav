@@ -13,6 +13,16 @@ use tracing::{debug, error, info, warn};
 pub type AudioSample = f32;
 pub type AudioBuffer = Vec<AudioSample>;
 
+/// Blocks the capture queue holds before it starts discarding.
+///
+/// Bounded rather than unbounded on purpose. The analyser only ever draws the
+/// newest block, so a queue is a shock absorber for a late frame and nothing
+/// more; an unbounded one silently becomes a delay line that grows for as long
+/// as rav runs, which is exactly what it used to do. Eight blocks of 1024 is
+/// ~185 ms at 44.1 kHz - room for a stalled frame or two, short enough that a
+/// full queue is not audible as lag.
+const QUEUE_BLOCKS: usize = 8;
+
 /// Identifies a virtual device that loops system output back as an input.
 ///
 /// On macOS, system audio is captured through Background Music
@@ -22,6 +32,37 @@ pub type AudioBuffer = Vec<AudioSample>;
 /// selecting that one would look like a silent source, so it is excluded here.
 fn is_system_audio_loopback(device_name: &str) -> bool {
     device_name.contains("Background Music") && !device_name.contains("UI Sounds")
+}
+
+/// What to do when no loopback was found, for the platform saying so.
+///
+/// Split by platform because the advice is entirely different, and the wrong
+/// one is worse than none: on Linux the search cannot succeed at all - see
+/// [`is_loopback_capture`] - so telling a Linux user to install a macOS virtual
+/// device reads as "rav is broken" and sends them looking in the wrong place.
+#[cfg(target_os = "macos")]
+const NO_LOOPBACK_REMEDY: &str = "Install Background Music and set it as the output device.";
+#[cfg(not(target_os = "macos"))]
+const NO_LOOPBACK_REMEDY: &str = "A PipeWire/PulseAudio monitor source is not an ALSA device, so rav cannot find one by \
+     name and -d cannot reach one either. Route this capture at your sink's monitor instead: \
+     PIPEWIRE_NODE=<sink>.monitor rav, or a patchbay such as qpwgraph. See docs/audio.md.";
+
+/// Identifies a capture that carries system output back in, by name.
+///
+/// Deliberately narrower than a bare `contains("monitor")`. A studio-monitor
+/// interface and an HDMI display both put that word in their device name, and
+/// choosing one of those over the real source fails *silently*: the display
+/// still moves, so nothing looks broken, it is just showing the wrong thing.
+/// The three forms below each belong to a loopback and to nothing else.
+///
+/// This is also the pass that cannot succeed on a stock Linux box. `.monitor`
+/// and "Monitor of" are PulseAudio *source* names, which the ALSA backend cpal
+/// uses on Linux never enumerates; what remains is `snd-aloop`, whose PCMs do
+/// appear as `…CARD=Loopback`.
+fn is_loopback_capture(device_name: &str) -> bool {
+    device_name.contains(".monitor")
+        || device_name.contains("Monitor of")
+        || device_name.to_lowercase().contains("loopback")
 }
 
 /// One block of interleaved samples, as the capture callback hands it over.
@@ -63,9 +104,9 @@ impl AudioCapture {
                 // running, so say which happened instead of falling back quietly.
                 warn!(
                     "No monitor/loopback device found - capturing from default input '{}'. \
-                     System audio will not be visualized, only what this input hears. \
-                     On macOS, install Background Music and set it as the output device.",
-                    device.name().unwrap_or_else(|_| "unknown".to_string())
+                     System audio will not be visualized, only what this input hears. {}",
+                    device.name().unwrap_or_else(|_| "unknown".to_string()),
+                    NO_LOOPBACK_REMEDY
                 );
                 Ok(device)
             })?
@@ -142,60 +183,77 @@ impl AudioCapture {
         self.config.channels
     }
 
+    /// Every input device with its name, enumerated **once**.
+    ///
+    /// Worth its own function because enumeration is not cheap: cpal's ALSA
+    /// backend opens every PCM its hint list names to answer this -
+    /// `surround51:CARD=…`, `iec958:…`, `dmix` and the rest, most of which
+    /// cannot be opened at all - which costs a quarter of a second per pass and
+    /// a screenful of libasound complaints on stderr. The searches below want
+    /// to walk the same list more than once, so pay for it once and scan
+    /// strings after that.
+    fn input_devices(host: &Host) -> Result<Vec<(Device, String)>> {
+        let mut devices = Vec::new();
+        for device in host.input_devices()? {
+            // A device that will not say what it is called cannot be matched by
+            // any of the searches below, so it is dropped here rather than
+            // carried as an unnameable entry.
+            if let Ok(name) = device.name() {
+                debug!("Checking device: {}", name);
+                devices.push((device, name));
+            }
+        }
+        Ok(devices)
+    }
+
     fn find_device_by_name(host: &Host, name: &str) -> Result<Device> {
+        let devices = Self::input_devices(host)?;
+
         // An explicitly requested device wins outright, so match its exact name
         // ahead of any heuristic. Run the monitor/loopback preference first and
         // an unrelated device merely containing "monitor" shadows the one that
         // was actually asked for.
-        for device in host.input_devices()? {
-            if let Ok(device_name) = device.name() {
-                debug!("Checking device: {}", device_name);
-                if device_name == name {
-                    info!("Found requested device: {}", device_name);
-                    return Ok(device);
-                }
-            }
+        if let Some((device, device_name)) = devices.iter().find(|(_, n)| n == name) {
+            info!("Found requested device: {}", device_name);
+            return Ok(device.clone());
         }
 
         // Then fall back to a substring match, so a partial name still works.
-        for device in host.input_devices()? {
-            if let Ok(device_name) = device.name()
-                && device_name.contains(name)
-            {
-                info!("Found device matching '{}': {}", name, device_name);
-                return Ok(device);
-            }
+        if let Some((device, device_name)) = devices.iter().find(|(_, n)| n.contains(name)) {
+            info!("Found device matching '{}': {}", name, device_name);
+            return Ok(device.clone());
         }
 
         Err(anyhow::anyhow!("Audio device '{}' not found", name))
     }
 
     fn find_monitor_device(host: &Host) -> Result<Device> {
+        let devices = Self::input_devices(host)?;
+
         // First pass: virtual loopback devices that carry system audio. cpal
         // enumerates devices in an unspecified order, so this has to be its own
         // pass rather than one more arm of the heuristics below - otherwise a
         // device that merely matches "monitor" could win over the real source.
-        for device in host.input_devices()? {
-            if let Ok(device_name) = device.name() {
-                debug!("Checking device: {}", device_name);
-                if is_system_audio_loopback(&device_name) {
-                    info!("Found system audio loopback device: {}", device_name);
-                    return Ok(device);
-                }
-            }
+        // Now that the list is enumerated once, a pass costs a string scan, so
+        // there is nothing to gain by narrowing it to the platform that has the
+        // device.
+        if let Some((device, name)) = devices.iter().find(|(_, n)| is_system_audio_loopback(n)) {
+            info!("Found system audio loopback device: {}", name);
+            return Ok(device.clone());
         }
 
-        // Second pass: monitor sources as exposed by PulseAudio/PipeWire on Linux.
-        for device in host.input_devices()? {
-            if let Ok(device_name) = device.name()
-                && (device_name.contains(".monitor")
-                    || device_name.contains("Monitor of")
-                    || device_name.to_lowercase().contains("loopback")
-                    || device_name.to_lowercase().contains("monitor"))
-            {
-                info!("Found monitor device: {}", device_name);
-                return Ok(device);
-            }
+        // Second pass: a capture that carries system output back in, under
+        // whatever name the backend gives it.
+        //
+        // Note what this cannot do. On Linux cpal uses ALSA, which enumerates
+        // ALSA PCM names - `default`, `pipewire`, `front:CARD=…`. A PulseAudio
+        // or PipeWire monitor *source* is not an ALSA PCM, so it has no name
+        // here to match and never will: on a stock PipeWire box this pass finds
+        // nothing, and `-d` cannot reach one either, because it searches the
+        // same list. docs/audio.md says what to do instead.
+        if let Some((device, name)) = devices.iter().find(|(_, n)| is_loopback_capture(n)) {
+            info!("Found monitor device: {}", name);
+            return Ok(device.clone());
         }
 
         Err(anyhow::anyhow!("No monitor/loopback device found"))
@@ -235,7 +293,7 @@ impl AudioCapture {
     }
 
     pub async fn start(&mut self) -> Result<Receiver<AudioData>> {
-        let (tx, rx) = flume::unbounded();
+        let (tx, rx) = flume::bounded(QUEUE_BLOCKS);
         self.sender = Some(tx.clone());
 
         let buffer_size = self.buffer_size;
@@ -252,24 +310,58 @@ impl AudioCapture {
         // build_input_stream, and the retry below needs a second one.
         let make_data_fn = || {
             let tx = tx.clone();
+            // Only ever used to discard, so the queue can drop its oldest block
+            // rather than refuse the newest. flume is MPMC, so a second handle
+            // costs nothing and the consumer keeps the one `start` returns.
+            let spill = rx.clone();
             let sync_buffer_clone = Arc::clone(&sync_buffer);
+            // A capture stream that is running but delivering silence is
+            // indistinguishable from a quiet room, and on Linux the device is
+            // whatever the ALSA `default` PCM happens to be routed to - so say
+            // once what level is actually arriving. The same report the macOS
+            // tap makes, for the same reason.
+            let mut reported = false;
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                let tx = tx.clone();
+                if !reported {
+                    let peak = data.iter().fold(0.0f32, |a, s| a.max(s.abs()));
+                    if peak > 0.0 {
+                        info!("Capture delivering audio (peak {peak:.3})");
+                        reported = true;
+                    }
+                }
 
                 // Use synchronous operations in the audio callback
-                if let Ok(mut buf) = sync_buffer_clone.lock() {
-                    buf.extend_from_slice(data);
+                let Ok(mut buf) = sync_buffer_clone.lock() else {
+                    return;
+                };
+                buf.extend_from_slice(data);
 
-                    // Send data when buffer is full enough
-                    if buf.len() >= buffer_size {
-                        let audio_data = AudioData {
-                            samples: buf.drain(..buffer_size).collect(),
-                        };
+                // A `while`, not an `if`. The period the device hands over is
+                // not rav's block size and need not be smaller than it: through
+                // PipeWire's ALSA plugin it is 1102 frames against a block of
+                // 1024. Emitting one block per callback then leaves a remainder
+                // that nothing ever catches up on - the display advances slower
+                // than real time, drifts further behind with every callback, and
+                // the buffer grows for as long as rav runs. macOS never saw it,
+                // because the process tap replaces this stream entirely.
+                while buf.len() >= buffer_size {
+                    let block = AudioData {
+                        samples: buf.drain(..buffer_size).collect(),
+                    };
 
-                        // Use try_send to avoid blocking in the audio callback
-                        if tx.try_send(audio_data).is_err() {
-                            // Buffer full, skip this frame to avoid blocking audio
+                    // Drop the *oldest* queued block to make room, as the macOS
+                    // tap does. Discarding the newest instead turns a full queue
+                    // into a permanent delay line; dropping the oldest costs
+                    // latency once and then recovers.
+                    match tx.try_send(block) {
+                        Ok(()) => {}
+                        Err(flume::TrySendError::Full(block)) => {
+                            let _ = spill.try_recv();
+                            if tx.try_send(block).is_err() {
+                                return;
+                            }
                         }
+                        Err(flume::TrySendError::Disconnected(_)) => return,
                     }
                 }
             }
@@ -341,7 +433,7 @@ impl Drop for AudioCapture {
 
 #[cfg(test)]
 mod tests {
-    use super::is_system_audio_loopback;
+    use super::{is_loopback_capture, is_system_audio_loopback};
 
     #[test]
     fn matches_background_music_device() {
@@ -363,6 +455,32 @@ mod tests {
             "Logger Microphone",
         ] {
             assert!(!is_system_audio_loopback(name), "{name} should not match");
+        }
+    }
+
+    #[test]
+    fn matches_the_loopback_forms_that_carry_system_output() {
+        for name in [
+            "alsa_output.pci-0000_00_1f.3.analog-stereo.monitor",
+            "Monitor of Built-in Audio Analog Stereo",
+            "sysdefault:CARD=Loopback",
+            "hw:Loopback,1,0",
+        ] {
+            assert!(is_loopback_capture(name), "{name} should match");
+        }
+    }
+
+    #[test]
+    fn a_device_merely_named_monitor_is_not_a_loopback() {
+        // The reason this predicate is not `contains("monitor")`. Both of these
+        // are ordinary inputs, and picking one fails silently: the bars still
+        // move, they are just showing the wrong source.
+        for name in [
+            "Studio Monitor Controller",
+            "HDMI Monitor Audio",
+            "sysdefault:CARD=Monitor",
+        ] {
+            assert!(!is_loopback_capture(name), "{name} should not match");
         }
     }
 }

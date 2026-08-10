@@ -61,6 +61,24 @@ async fn main() -> Result<()> {
         .open("rav.log")
         .expect("Failed to create log file");
 
+    // Not everything that writes to this terminal goes through `tracing`.
+    // libasound reports from C straight to stderr, and merely enumerating the
+    // ALSA PCMs produces a dozen `pcm_route.c`/`pcm_dmix.c` lines that land on
+    // top of the alternate screen - it has no error handler to install through
+    // cpal, so the only place to intercept it is the file descriptor. Point
+    // fd 2 at the log before anything touches cpal.
+    //
+    // Panic output follows it there, which is where it is legible anyway: a
+    // backtrace painted over a raw-mode TUI is not.
+    #[cfg(unix)]
+    {
+        use std::os::unix::io::AsRawFd;
+        // SAFETY: `log_file` is open for writing and outlives the call, and
+        // STDERR_FILENO is a valid descriptor to replace. A failure here only
+        // means stderr stays where it was, which is why the result is ignored.
+        let _ = unsafe { libc::dup2(log_file.as_raw_fd(), libc::STDERR_FILENO) };
+    }
+
     if args.clean {
         // Clean mode: minimal logging to file only
         tracing_subscriber::registry()
