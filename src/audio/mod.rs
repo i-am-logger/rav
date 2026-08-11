@@ -224,7 +224,17 @@ impl AudioCapture {
             return Ok(device.clone());
         }
 
-        Err(anyhow::anyhow!("Audio device '{}' not found", name))
+        // Naming what is there rather than only what is not: the names carry
+        // punctuation and capitals nobody guesses, and a partial one matches, so
+        // the list is usually the whole answer.
+        Err(anyhow::anyhow!(
+            "no capture device matching '{name}'. rav can see: {}",
+            devices
+                .iter()
+                .map(|(_, n)| n.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))
     }
 
     fn find_monitor_device(host: &Host) -> Result<Device> {
