@@ -13,7 +13,7 @@ use std::path::Path;
 /// change. Requiring the whole shape means someone who writes three lines to
 /// slow the redraw is told their file is missing a section they had no reason
 /// to know about, and rav does not start.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub audio: AudioConfig,
@@ -39,25 +39,16 @@ pub struct DisplayConfig {
 
 impl Default for AudioConfig {
     fn default() -> Self {
-        Config::default().audio
+        Self {
+            sample_rate: 44100,
+            buffer_size: 1024,
+        }
     }
 }
 
 impl Default for DisplayConfig {
     fn default() -> Self {
-        Config::default().display
-    }
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            audio: AudioConfig {
-                sample_rate: 44100,
-                buffer_size: 1024,
-            },
-            display: DisplayConfig { refresh_rate: 60 },
-        }
+        Self { refresh_rate: 60 }
     }
 }
 
