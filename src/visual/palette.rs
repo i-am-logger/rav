@@ -35,6 +35,13 @@ const TIMEOUT: Duration = Duration::from_millis(120);
 ///
 /// A free function rather than a constructor, because [`Palette`] itself is
 /// portable and this is the one part that requires a terminal to exist.
+///
+/// **No test reaches this body.** The `cfg(test)` arm below replaces the whole
+/// function, because exercising it needs a pty - so the raw-mode handling and
+/// the restore are checked by running rav and by nothing else. `query_via` is
+/// where the testable part lives, and it is tested; everything between here and
+/// there is not. A rewrite of this function once dropped raw mode entirely and
+/// every test still passed.
 #[cfg(not(test))]
 pub fn query(needed: bool) -> Palette {
     if !needed {
