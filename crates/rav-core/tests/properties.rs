@@ -150,6 +150,29 @@ proptest! {
     }
 }
 
+/// A screen too narrow for a single bar still reports one, which does not fit.
+///
+/// The case `every_bar_that_is_counted_has_room` has to skip, so it is pinned
+/// here instead of living only in a `prop_assume!`. Reporting zero would mean a
+/// terminal dragged narrow shows nothing at all, which reads as a crash; a bar
+/// wider than its screen reads as a bar. The surface clips it - which is what
+/// the surface does with every bar anyway, so this costs it nothing.
+#[test]
+fn a_screen_too_narrow_for_a_bar_still_gets_one_to_clip() {
+    let layout = BarLayout::new(Length(20.0), Length(2.0));
+    let slit = Screen::new(Length(6.0), Length(100.0));
+    assert_eq!(layout.fitting_across(&slit), 1, "something has to be drawn");
+    assert!(
+        layout.column(0).right() > slit.width(),
+        "and the caller has to clip it",
+    );
+
+    // No screen at all is different: nothing is being drawn, so nothing is
+    // counted. A terminal mid-resize passes through this every time.
+    let nothing = Screen::new(Length::NONE, Length::NONE);
+    assert_eq!(layout.fitting_across(&nothing), 0);
+}
+
 /// A skin with one step rescales to the dimmest, not the brightest.
 ///
 /// `Step::new(0, 1)` is both the first step and the last, so there is no answer

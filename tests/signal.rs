@@ -20,6 +20,15 @@ use rav::signal::mapping::BarMap;
 /// quarter of a second - which is where `step` stops believing the clock.
 const FRAME: core::ops::RangeInclusive<f32> = 0.004..=0.25;
 
+/// How far a linear interpolation may land outside the pair it interpolates,
+/// relative to the larger of them.
+///
+/// Four epsilons: `a * (1 - f) + b * f` rounds four times, and each rounding
+/// costs at most half an ULP of its own result. Measured rather than reasoned
+/// at by [`sampling_overshoots_by_at_most_a_rounding_step`], which sweeps the
+/// arithmetic and reports what it actually reaches.
+const ROUNDING_SLACK: f32 = 4.0 * f32::EPSILON;
+
 prop_compose! {
     /// A run of frames: what each band read, and how long the frame took.
     fn a_run(bands: usize)(
@@ -157,17 +166,22 @@ proptest! {
     ///
     /// Within a rounding step, because `v * (1 - f) + v * f` is not exactly `v`
     /// - three rounded operations, and the first case this found was a single
-    /// bin reading `0.030617569` where it held `0.030617567`. `f32::EPSILON` is
-    /// a whole ULP at 1.0 and generous below it, so this is an overshoot bound
-    /// rather than a tuned tolerance: magnitudes are a fraction of full scale
-    /// and cannot be larger. Nothing downstream cares either way - `step`
-    /// clamps its input - but the direction is worth knowing, because a bar that
-    /// could read *materially* louder than the spectrum would be a gain bug.
+    /// bin reading `0.030617569` where it held `0.030617567`. The bound is
+    /// *relative*: an FFT magnitude is not a fraction of full scale and is
+    /// routinely well above 1.0 (`Spectrum::analyse` returns `norm() *
+    /// equalize`, normalised by nothing), so an absolute epsilon would be a
+    /// bound that only held for the inputs the generator happened to pick. See
+    /// [`sampling_overshoots_by_at_most_a_rounding_step`] for the measurement
+    /// behind the multiplier.
+    ///
+    /// The claim that matters is not float exactness - nothing downstream cares,
+    /// since `step` clamps its input. It is that a bar cannot read *materially*
+    /// louder than the spectrum, which would be a gain bug.
     #[test]
     fn sampling_never_reads_louder_than_the_spectrum(
         bars in 1usize..=256,
         bins in 1usize..=2048,
-        magnitudes in prop::collection::vec(0.0f32..=1.0, 1..=512),
+        magnitudes in prop::collection::vec(0.0f32..=64.0, 1..=512),
         scale in 0.0f32..=1.0,
     ) {
         let map = BarMap::new(bars, bins, scale);
@@ -177,9 +191,10 @@ proptest! {
         prop_assert_eq!(out.len(), bars, "one reading per bar, whatever came in");
         let loudest = magnitudes.iter().copied().fold(f32::MIN, f32::max);
         let quietest = magnitudes.iter().copied().fold(f32::MAX, f32::min);
+        let slack = loudest * ROUNDING_SLACK;
         for value in out {
             prop_assert!(
-                value <= loudest + f32::EPSILON && value >= quietest - f32::EPSILON,
+                value <= loudest + slack && value >= quietest - slack,
                 "{value} is outside {quietest}..={loudest} by more than a rounding step",
             );
         }
@@ -197,4 +212,59 @@ proptest! {
         prop_assert_eq!(out.len(), bars);
         prop_assert!(out.iter().all(|&value| value == 0.0), "it invented a signal");
     }
+}
+
+/// How far outside its two bins an interpolated reading can actually land.
+///
+/// The number behind [`ROUNDING_SLACK`], measured rather than asserted from an
+/// error analysis. Sweeping magnitudes across the range an FFT produces - which
+/// is not `0..=1`, since nothing normalises it - the worst overshoot is **0.55
+/// epsilon of the larger bin, and it is never material**. Four is the bound the
+/// property uses, seven times the headroom: enough for a rounding mode this
+/// machine does not have, nowhere near enough to hide a gain bug.
+#[test]
+fn sampling_overshoots_by_at_most_a_rounding_step() {
+    // The overshoot needs both ends of the interpolation to be the *same* bin,
+    // which is where `v * (1 - f) + v * f` has to reproduce `v` exactly and does
+    // not. A long spectrum of differing magnitudes never reaches it - a first
+    // attempt at this measurement swept 512 varying bins, found an overshoot of
+    // zero, and was asserting nothing at all. So: short buffers, which force
+    // `hi` to clamp onto `lo`, and flat ones, where the two bins agree.
+    let shapes: [Vec<f32>; 4] = [
+        std::vec![0.030617567],
+        std::vec![7.25; 3],
+        (0..9).map(|i| 1.0 + i as f32 * 8.0).collect(),
+        (0..512)
+            .map(|i| (i as f32 * 0.37).sin().abs() * 64.0)
+            .collect(),
+    ];
+
+    let mut worst: f32 = 0.0;
+    let mut reached = false;
+    for magnitudes in &shapes {
+        let loudest = magnitudes.iter().copied().fold(f32::MIN, f32::max);
+        let quietest = magnitudes.iter().copied().fold(f32::MAX, f32::min);
+        for bars in [1usize, 2, 3, 6, 7, 16, 64, 129, 256] {
+            for bins in [1usize, 2, 17, 256, 512, 763, 1024, 2048] {
+                for scale in [0.0f32, 0.25, 0.5, 0.75, 1.0] {
+                    let mut out = Vec::new();
+                    BarMap::new(bars, bins, scale).sample(magnitudes, &mut out);
+                    for value in out {
+                        let over = (value - loudest).max(quietest - value).max(0.0);
+                        reached |= over > 0.0;
+                        worst = worst.max(over / loudest);
+                    }
+                }
+            }
+        }
+    }
+
+    println!("worst overshoot {:.2} epsilon", worst / f32::EPSILON);
+    assert!(reached, "no overshoot at all - this is measuring nothing");
+    assert!(
+        worst <= ROUNDING_SLACK,
+        "overshot by {:.2} epsilon, past the {:.0} the property allows",
+        worst / f32::EPSILON,
+        ROUNDING_SLACK / f32::EPSILON,
+    );
 }
