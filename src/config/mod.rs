@@ -5,17 +5,23 @@
 //! peaks, frequency range, gain - is a runtime key, and the colours come from a
 //! theme file, so none of it belongs here.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+/// Everything here has a default, so a file may say only what it wants to
+/// change. Requiring the whole shape means someone who writes three lines to
+/// slow the redraw is told their file is missing a section they had no reason
+/// to know about, and rav does not start.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Config {
     pub audio: AudioConfig,
     pub display: DisplayConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AudioConfig {
     /// Requested capture rate. The device may renegotiate it; whatever it lands
     /// on is what the analysis chain uses.
@@ -25,9 +31,22 @@ pub struct AudioConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct DisplayConfig {
     /// Redraw rate, clamped to 1..=240 at use.
     pub refresh_rate: u32,
+}
+
+impl Default for AudioConfig {
+    fn default() -> Self {
+        Config::default().audio
+    }
+}
+
+impl Default for DisplayConfig {
+    fn default() -> Self {
+        Config::default().display
+    }
 }
 
 impl Default for Config {
@@ -45,9 +64,7 @@ impl Default for Config {
 impl Config {
     pub async fn load(config_path: Option<&Path>) -> Result<Self> {
         if let Some(path) = config_path {
-            // Load from specified path
-            let content = tokio::fs::read_to_string(path).await?;
-            return Ok(toml::from_str(&content)?);
+            return Self::read(path).await;
         }
 
         let Some(config_dir) = dirs::config_dir() else {
@@ -56,14 +73,23 @@ impl Config {
 
         let default_path = config_dir.join("rav").join("config.toml");
         if default_path.exists() {
-            let content = tokio::fs::read_to_string(&default_path).await?;
-            Ok(toml::from_str(&content)?)
+            Self::read(&default_path).await
         } else {
             // Write the defaults out, so the file exists to be edited.
             let config = Self::default();
             config.save_to_default_location().await?;
             Ok(config)
         }
+    }
+
+    /// Read one config file, naming it in whatever goes wrong. "No such file or
+    /// directory" on its own leaves the user to guess which path rav tried.
+    async fn read(path: &Path) -> Result<Self> {
+        let content = tokio::fs::read_to_string(path)
+            .await
+            .with_context(|| format!("cannot read {}", path.display()))?;
+        toml::from_str(&content)
+            .with_context(|| format!("{} is not a valid config", path.display()))
     }
 
     pub async fn save_to_default_location(&self) -> Result<()> {
@@ -100,6 +126,41 @@ mod tests {
         let config: Config = toml::from_str(text).expect("should parse");
         assert_eq!(config.audio.sample_rate, 48_000);
         assert_eq!(config.display.refresh_rate, 30);
+    }
+
+    #[test]
+    fn a_file_may_say_only_what_it_wants_to_change() {
+        // Three lines to slow the redraw is a reasonable thing to write. Being
+        // told the file is missing a section you had no reason to know about,
+        // and rav not starting, is not a reasonable thing to be told.
+        let only_display: Config = toml::from_str("[display]\nrefresh_rate = 30\n")
+            .expect("a file that sets one thing must load");
+        assert_eq!(only_display.display.refresh_rate, 30);
+        assert_eq!(
+            only_display.audio.sample_rate,
+            Config::default().audio.sample_rate,
+            "the section it did not mention lost its default",
+        );
+
+        let only_rate: Config =
+            toml::from_str("[audio]\nsample_rate = 48000\n").expect("half a section must load");
+        assert_eq!(only_rate.audio.sample_rate, 48_000);
+        assert_eq!(
+            only_rate.audio.buffer_size,
+            Config::default().audio.buffer_size,
+        );
+
+        assert!(
+            toml::from_str::<Config>("").is_ok(),
+            "an empty file is a file that changes nothing",
+        );
+    }
+
+    #[test]
+    fn a_setting_of_the_wrong_shape_is_still_refused() {
+        // Defaults fill in what is absent, not what is wrong. A number written
+        // as a word is a mistake worth being told about.
+        assert!(toml::from_str::<Config>("[audio]\nsample_rate = \"loud\"\n").is_err());
     }
 
     #[test]
