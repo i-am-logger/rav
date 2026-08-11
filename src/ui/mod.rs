@@ -277,7 +277,7 @@ impl App {
         // Read the terminal's palette the first time a theme actually needs it -
         // once, and never for a theme that spells its colours out.
         if theme.needs_terminal_palette() && self.palette == Palette::default() {
-            self.palette = Palette::query(true);
+            self.palette = crate::visual::palette::query(true);
         }
         self.theme = theme;
         self.sized_for = (0, 0);

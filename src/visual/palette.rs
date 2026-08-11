@@ -14,7 +14,8 @@
 //! Terminals that do not answer are the normal case, not an error: rav waits a
 //! moment, gives up, and leaves those colours alone.
 
-use crate::render::{Colour, Ink};
+use rav_appearance::Palette;
+
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::time::{Duration, Instant};
@@ -23,149 +24,67 @@ use std::time::{Duration, Instant};
 /// short enough not to be a visible pause at startup.
 const TIMEOUT: Duration = Duration::from_millis(120);
 
-/// The sixteen ANSI colours as this terminal actually paints them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Palette {
-    slots: [Option<(u8, u8, u8)>; 16],
+/// Ask the terminal for its palette, if `needed`.
+///
+/// Asking is not free and it is not invisible: it writes escape sequences and
+/// reads the replies straight off the terminal. Themes that spell their colours
+/// out in hex never need it, so the common case says nothing at all.
+///
+/// Must run before the alternate screen is entered and while nothing else is
+/// reading stdin.
+///
+/// A free function rather than a constructor, because [`Palette`] itself is
+/// portable and this is the one part that requires a terminal to exist.
+#[cfg(not(test))]
+pub fn query(needed: bool) -> Palette {
+    if !needed {
+        return Palette::default();
+    }
+    let mut out = std::io::stdout();
+    let mut input = std::io::stdin();
+    query_via(&mut out, &mut input)
 }
 
-impl Palette {
-    /// A palette that answered, for tests.
-    ///
-    /// `Palette::default()` is the terminal that said nothing, and a test built
-    /// on it exercises the transform rather than what the running app feeds it -
-    /// which is how a `mono` regression stayed invisible: the case that breaks
-    /// the theme is the one where the terminal *did* answer.
-    #[cfg(test)]
-    pub fn answering(slots: [(u8, u8, u8); 16]) -> Self {
-        Self {
-            slots: slots.map(Some),
-        }
-    }
+/// No terminal under test, so nothing answers.
+#[cfg(test)]
+pub fn query(_needed: bool) -> Palette {
+    Palette::default()
+}
 
-    /// Ask the terminal for its palette, if `needed`.
-    ///
-    /// Asking is not free and it is not invisible: it writes escape sequences and
-    /// reads the replies straight off the terminal. Themes that spell their
-    /// colours out in hex never need it, so the common case says nothing at all.
-    ///
-    /// Must run before the alternate screen is entered and while nothing else is
-    /// reading stdin.
-    #[cfg(not(test))]
-    pub fn query(needed: bool) -> Self {
-        if !needed {
-            return Self::default();
-        }
-        // Raw mode, or the terminal echoes every reply back as visible text and
-        // line buffering holds them until the user presses Enter. Restored to
-        // however it was found - the caller may already have set it up.
-        let was_raw = crossterm::terminal::is_raw_mode_enabled().unwrap_or(false);
-        if !was_raw && crossterm::terminal::enable_raw_mode().is_err() {
-            return Self::default();
-        }
-        let palette = Self::query_via(&mut std::io::stdout(), &mut std::io::stdin());
-        if !was_raw {
-            let _ = crossterm::terminal::disable_raw_mode();
-        }
-        palette
-    }
-
-    /// The palette without asking anything.
-    #[cfg(test)]
-    pub fn query(_needed: bool) -> Self {
-        Self::default()
-    }
-
-    /// Resolve a colour to RGB, if it is one this palette can speak for.
-    ///
-    /// `Rgb` passes through - the theme already said exactly what it wanted.
-    /// A name resolves only when the terminal answered; `None` means the caller
-    /// should leave the colour alone rather than invent one.
-    pub fn rgb(&self, ink: Ink) -> Option<(u8, u8, u8)> {
-        match ink {
-            Ink::Rgb(r, g, b) => Some((r, g, b)),
-            Ink::Ansi(i) => self.slots[usize::from(i) & 0x0f],
-        }
-    }
-
-    /// Resolve a colour, falling back to the standard value for a name.
-    ///
-    /// For a surface with no terminal to ask, where `None` is not an answer -
-    /// it would mean not drawing. Anything with a terminal should use
-    /// [`rgb`](Self::rgb) and leave an unanswered name alone, so the theme
-    /// still follows the palette the user runs.
-    pub fn resolve(&self, ink: Ink) -> Colour {
-        match self.rgb(ink) {
-            Some((r, g, b)) => Colour::rgb(r, g, b),
-            None => ink.resolved(),
-        }
-    }
-
-    fn query_via<W: Write, R: Read + AsRawFd>(out: &mut W, input: &mut R) -> Self {
-        let mut palette = Self::default();
-        for i in 0..16 {
-            if write!(out, "\x1b]4;{i};?\x07").is_err() {
-                return palette;
-            }
-        }
-        if out.flush().is_err() {
+fn query_via<W: Write, R: Read + AsRawFd>(out: &mut W, input: &mut R) -> Palette {
+    let mut palette = Palette::default();
+    for i in 0..16 {
+        if write!(out, "\x1b]4;{i};?\x07").is_err() {
             return palette;
         }
+    }
+    if out.flush().is_err() {
+        return palette;
+    }
 
-        let deadline = Instant::now() + TIMEOUT;
-        let mut buf = Vec::new();
-        let mut chunk = [0u8; 512];
-        while let Some(left) = deadline.checked_duration_since(Instant::now()) {
-            // Wait with a deadline rather than calling read() straight away: a
-            // terminal that does not implement this says nothing at all, and a
-            // blocking read would hang rav at startup rather than give up.
-            if !readable(input.as_raw_fd(), left) {
-                break;
-            }
-            match input.read(&mut chunk) {
-                Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    buf.extend_from_slice(&chunk[..n]);
-                    palette.absorb(&buf);
-                    if palette.is_complete() {
-                        break;
-                    }
+    let deadline = Instant::now() + TIMEOUT;
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 512];
+    while let Some(left) = deadline.checked_duration_since(Instant::now()) {
+        // Wait with a deadline rather than calling read() straight away: a
+        // terminal that does not implement this says nothing at all, and a
+        // blocking read would hang rav at startup rather than give up.
+        if !readable(input.as_raw_fd(), left) {
+            break;
+        }
+        match input.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                buf.extend_from_slice(&chunk[..n]);
+                palette.absorb(&buf);
+                if palette.is_complete() {
+                    break;
                 }
             }
         }
-        palette
     }
-
-    fn is_complete(&self) -> bool {
-        self.slots.iter().all(Option::is_some)
-    }
-
-    /// Pull every `4;n;rgb:…` reply out of whatever has arrived so far.
-    fn absorb(&mut self, bytes: &[u8]) {
-        let text = String::from_utf8_lossy(bytes);
-        for reply in text.split('\x1b') {
-            let Some(body) = reply.strip_prefix("]4;") else {
-                continue;
-            };
-            let body = body
-                .trim_end_matches(['\x07', '\\'])
-                .trim_end_matches('\x1b');
-            let Some((index, spec)) = body.split_once(';') else {
-                continue;
-            };
-            let Ok(index) = index.trim().parse::<usize>() else {
-                continue;
-            };
-            if index < 16
-                && let Some(rgb) = parse_rgb(spec)
-            {
-                self.slots[index] = Some(rgb);
-            }
-        }
-    }
+    palette
 }
-
-/// Whether `fd` has something to read within `within`.
 fn readable(fd: i32, within: Duration) -> bool {
     let mut poll = libc::pollfd {
         fd,
@@ -177,105 +96,10 @@ fn readable(fd: i32, within: Duration) -> bool {
     unsafe { libc::poll(&mut poll, 1, ms) > 0 }
 }
 
-/// `rgb:RRRR/GGGG/BBBB`, with each channel 1-4 hex digits.
-fn parse_rgb(spec: &str) -> Option<(u8, u8, u8)> {
-    let spec = spec.trim().strip_prefix("rgb:")?;
-    let mut parts = spec.split('/');
-    let mut channel = || -> Option<u8> {
-        let hex = parts.next()?.trim();
-        if hex.is_empty() || hex.len() > 4 {
-            return None;
-        }
-        let value = u32::from_str_radix(hex, 16).ok()?;
-        // Terminals answer in whatever width they please: `ff`, `ffff`, even
-        // `f`. Scale by the width rather than truncating, or `f` would read as 15
-        // instead of white.
-        let max = (1u32 << (4 * hex.len())) - 1;
-        Some((value * 255 / max) as u8)
-    };
-    let (r, g, b) = (channel()?, channel()?, channel()?);
-    parts.next().is_none().then_some((r, g, b))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_reply_is_read_back_as_rgb() {
-        let mut palette = Palette::default();
-        palette.absorb(b"\x1b]4;2;rgb:2929/cece/1010\x07");
-        assert_eq!(
-            palette.rgb(Ink::from_name("green").unwrap()),
-            Some((41, 206, 16))
-        );
-    }
-
-    #[test]
-    fn replies_arrive_together_and_in_any_order() {
-        // One write per index, but the terminal answers however it likes, and
-        // the whole lot usually lands in a single read.
-        let mut palette = Palette::default();
-        palette.absorb(b"\x1b]4;9;rgb:ffff/0000/0000\x07\x1b]4;1;rgb:8080/0000/0000\x07");
-        assert_eq!(
-            palette.rgb(Ink::from_name("bright-red").unwrap()),
-            Some((255, 0, 0))
-        );
-        assert_eq!(
-            palette.rgb(Ink::from_name("red").unwrap()),
-            Some((128, 0, 0))
-        );
-    }
-
-    #[test]
-    fn a_partial_read_is_absorbed_once_the_rest_arrives() {
-        // `absorb` is called on the whole buffer each time, so a reply split
-        // across two reads is picked up when it completes rather than lost.
-        let mut palette = Palette::default();
-        let full = b"\x1b]4;2;rgb:2929/cece/1010\x07";
-        palette.absorb(&full[..12]);
-        assert_eq!(
-            palette.rgb(Ink::from_name("green").unwrap()),
-            None,
-            "not yet"
-        );
-        palette.absorb(full);
-        assert_eq!(
-            palette.rgb(Ink::from_name("green").unwrap()),
-            Some((41, 206, 16))
-        );
-    }
-
-    #[test]
-    fn channels_scale_by_their_width() {
-        // Terminals answer in 1 to 4 hex digits; `f` is white, not 15.
-        assert_eq!(parse_rgb("rgb:f/f/f"), Some((255, 255, 255)));
-        assert_eq!(parse_rgb("rgb:ff/ff/ff"), Some((255, 255, 255)));
-        assert_eq!(parse_rgb("rgb:ffff/ffff/ffff"), Some((255, 255, 255)));
-        // 0x8000/0xffff is a hair under a half, so this floors to 127.
-        assert_eq!(parse_rgb("rgb:0000/8000/ffff"), Some((0, 127, 255)));
-    }
-
-    #[test]
-    fn nonsense_is_ignored_rather_than_guessed_at() {
-        for bad in [
-            "",
-            "rgb:",
-            "rgb:zz/00/00",
-            "rgb:00/00",
-            "rgb:0/0/0/0",
-            "#ff0000",
-        ] {
-            assert_eq!(parse_rgb(bad), None, "{bad:?} should not parse");
-        }
-        let mut palette = Palette::default();
-        palette.absorb(b"\x1b]4;99;rgb:ffff/ffff/ffff\x07");
-        assert_eq!(
-            palette,
-            Palette::default(),
-            "an out-of-range index is dropped"
-        );
-    }
+    use rav_appearance::Ink;
 
     #[test]
     fn an_unanswered_query_leaves_named_colours_alone() {
@@ -295,7 +119,7 @@ mod tests {
         let mut sink = Vec::new();
         let mut null = std::fs::File::open("/dev/null").unwrap();
         let start = Instant::now();
-        let palette = Palette::query_via(&mut sink, &mut null);
+        let palette = query_via(&mut sink, &mut null);
         assert!(start.elapsed() < TIMEOUT * 2, "took too long to give up");
         assert_eq!(palette, Palette::default());
         assert!(!sink.is_empty(), "it should still have asked");
