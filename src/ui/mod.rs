@@ -987,7 +987,8 @@ impl App {
             if self.surface.surface == crate::surface::Surface::Kitty
                 && self.paint(status.as_deref(), help_rows.as_deref())?
             {
-                frames += 1;
+                // The frame is already counted above; this path draws it a
+                // different way rather than drawing an extra one.
                 continue;
             }
 
@@ -1054,6 +1055,11 @@ impl App {
             })?;
         }
 
+        // Reclaim any frame the terminal never got round to reading. It unlinks
+        // what it does read, so this is usually nothing - but in `/dev/shm` an
+        // abandoned frame is resident memory that outlives the process, and at
+        // a full screen that is megabytes each.
+        let _ = self.stop_painting(&mut Vec::new());
         info!("👋 Analyser shut down");
         Ok(())
     }
@@ -1585,6 +1591,34 @@ mod tests {
         a.apply(Action::CycleVisualisation);
         let mut again = Vec::new();
         assert!(a.painted(&mut again, window(), &dir, None, None).unwrap());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn handing_the_screen_back_reclaims_the_frames_the_terminal_skipped() {
+        // The terminal unlinks what it reads, so this is usually nothing. What
+        // it is not nothing for is a terminal that fell behind: in `/dev/shm` an
+        // abandoned frame is resident memory, megabytes each at a full screen,
+        // and it outlives the process that staged it.
+        let mut a = app();
+        a.resize(80, 24);
+        let dir = scratch("reclaim");
+
+        let mut out = Vec::new();
+        for _ in 0..3 {
+            a.painted(&mut out, window(), &dir, None, None).unwrap();
+        }
+        assert!(
+            std::fs::read_dir(&dir).unwrap().count() > 0,
+            "nothing was staged, so this proves nothing",
+        );
+
+        a.painter.tidy(&dir);
+        assert_eq!(
+            std::fs::read_dir(&dir).unwrap().count(),
+            0,
+            "frames were left in the staging directory",
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
