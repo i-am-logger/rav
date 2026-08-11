@@ -42,18 +42,13 @@ impl AudioGenerator {
     /// rather than pink - pink falls 3dB per octave, so it would put least
     /// energy exactly where a spectrum analyser has the most bars.
     ///
-    /// This was called `pink_noise` and was not pink. It summed eight octaves of
-    /// white noise at falling amplitudes, which is a description of the
-    /// Voss-McCartney algorithm with the part that makes it work left out: each
-    /// term was independent white noise over the whole band, so the sum was
-    /// white noise with a larger variance and no 1/f tilt anywhere. Measured
-    /// against a known white source through the same analysis, the two had the
-    /// same spectral shape to within 2% across every octave - a constant ratio,
-    /// which is what "identical shape" looks like.
-    ///
     /// Seeded rather than drawn from the thread's generator, so a failure is
     /// reproducible. A test source that cannot be replayed turns a rare failure
     /// into a mystery, and this module's whole claim is to be deterministic.
+    ///
+    /// Pink noise would need a filter with memory across samples - summing
+    /// independent draws at falling amplitudes gives white noise with a larger
+    /// variance and no 1/f tilt at all, however many terms it has.
     pub fn white_noise(&self, amplitude: f32, samples: usize) -> Vec<f32> {
         // A plain LCG, written out rather than pulled in: the numbers are
         // Numerical Recipes', the sequence has to be the same everywhere, and
@@ -107,9 +102,9 @@ mod tests {
 
     #[test]
     fn the_same_noise_comes_back_every_time() {
-        // The module's claim, and it was not true while the noise came from the
-        // thread's generator: a test that fails once in a thousand runs is a
-        // mystery rather than a bug report if the input cannot be replayed.
+        // The module's claim, and the thing that makes a rare failure a bug
+        // report rather than a mystery: a test that fails once in a thousand
+        // runs is only useful if the input can be replayed.
         let generator = AudioGenerator::new(48_000.0);
         assert_eq!(
             generator.white_noise(1.0, 256),

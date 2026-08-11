@@ -269,14 +269,13 @@ mod tests {
 
     #[test]
     fn the_numbers_in_the_module_note_are_the_ones_it_uses() {
-        // The note at the top of this file quotes figures, and nothing checked
-        // them. One had drifted: it said the cap's velocity starts at `3/4096`
-        // of full scale, which is 3 over 256 x *16* - the analyser's row count,
-        // not the clip. `FULL_SCALE_PIXELS` warns about exactly that confusion
-        // two dozen lines below, and says it costs 6.7%. 4096/3840 is 6.7%.
+        // The note at the top of this file quotes figures a reader will trust,
+        // and prose cannot be compiled. This is what checks it.
         //
-        // The code was right and only the prose was wrong, so nothing looked
-        // different - which is why it needed a test rather than a reading.
+        // The seed is the one to watch: `3/3840` is 3 over 256 x *15*, the
+        // clip. Using 16 - the analyser's row count - gives `3/4096` and makes
+        // every bar and cap fall 6.7% slow, which is the confusion
+        // `FULL_SCALE_PIXELS` warns about two dozen lines below.
         let seed = Ballistics::new(1).velocity_seed();
         assert_eq!(
             seed,
@@ -309,9 +308,9 @@ mod tests {
     #[test]
     fn bar_fall_matches_the_original_rate() {
         // 15px clip at 12/16 px per frame = 20 frames = 0.3333s at 60fps.
-        // Spelled as literals on purpose - deriving it from the same constants
-        // the implementation uses made this test self-confirming, and it passed
-        // happily while the conversion divided by 16 instead of 15.
+        // Spelled as literals on purpose: derived from the same constants the
+        // implementation uses, this would agree with itself whatever those
+        // constants said.
         let actual = fall_seconds(60.0, false);
         assert!(
             (actual - 0.3333).abs() < 0.005,

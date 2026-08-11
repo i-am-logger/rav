@@ -165,12 +165,11 @@ proptest! {
     /// width while a buffer sized for the old one is still in flight.
     ///
     /// Within a rounding step, because `v * (1 - f) + v * f` is not exactly `v`
-    /// - three rounded operations, and the first case this found was a single
-    /// bin reading `0.030617569` where it held `0.030617567`. The bound is
-    /// *relative*: an FFT magnitude is not a fraction of full scale and is
-    /// routinely well above 1.0 (`Spectrum::analyse` returns `norm() *
-    /// equalize`, normalised by nothing), so an absolute epsilon would be a
-    /// bound that only held for the inputs the generator happened to pick. See
+    /// - three rounded operations, so a single bin holding `0.030617567` reads
+    /// back as `0.030617569`. The bound is *relative*: an FFT magnitude is not a
+    /// fraction of full scale and is routinely well above 1.0
+    /// (`Spectrum::analyse` returns `norm() * equalize`, normalised by nothing),
+    /// so an absolute epsilon holds only for inputs that happen to be small. See
     /// [`sampling_overshoots_by_at_most_a_rounding_step`] for the measurement
     /// behind the multiplier.
     ///
@@ -226,10 +225,9 @@ proptest! {
 fn sampling_overshoots_by_at_most_a_rounding_step() {
     // The overshoot needs both ends of the interpolation to be the *same* bin,
     // which is where `v * (1 - f) + v * f` has to reproduce `v` exactly and does
-    // not. A long spectrum of differing magnitudes never reaches it - a first
-    // attempt at this measurement swept 512 varying bins, found an overshoot of
-    // zero, and was asserting nothing at all. So: short buffers, which force
-    // `hi` to clamp onto `lo`, and flat ones, where the two bins agree.
+    // not. A long spectrum of differing magnitudes never reaches it, so the
+    // shapes below are short buffers, which force `hi` to clamp onto `lo`, and
+    // flat ones, where the two bins hold the same value.
     let shapes: [Vec<f32>; 4] = [
         std::vec![0.030617567],
         std::vec![7.25; 3],

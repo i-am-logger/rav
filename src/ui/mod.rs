@@ -1019,7 +1019,7 @@ mod tests {
         App::new(Config::default(), 2, 48_000).expect("app should build")
     }
 
-    /// One channel, so a generated signal reaches the window as it was written.
+    /// One channel, so a generated signal reaches the window unaltered.
     ///
     /// `push_samples` averages across channels, so handing a two-channel app a
     /// mono tone averages each pair of neighbouring samples - which is a
@@ -1172,8 +1172,9 @@ mod tests {
 
         let mut checked = 0;
         // `skip(1)` steps over what is left of the header line itself, which is
-        // empty and would end the run before it started - the count below is
-        // what caught that, having happily checked nothing at all.
+        // empty and would end the run before it began. The count at the bottom
+        // is there because a table this fails to parse looks exactly like a
+        // table with nothing wrong in it.
         for row in table
             .lines()
             .skip(1)
@@ -1749,9 +1750,9 @@ mod tests {
     #[test]
     fn cycling_themes_walks_the_bundled_order_and_returns() {
         // The path a user without --theme presses constantly, and the one that
-        // exercises the generated consts end to end: the themes are no longer
-        // parsed at startup, they are static data, and this is where a wrong
-        // order or a missing entry would actually be seen.
+        // exercises the generated consts end to end: the themes are static
+        // data rather than something parsed at startup, and this is where a
+        // wrong order or a missing entry would actually be seen.
         //
         // Four presses must return to where they started, or the cycle has
         // dropped an entry or gained one.

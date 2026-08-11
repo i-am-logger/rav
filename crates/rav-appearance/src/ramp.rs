@@ -168,12 +168,10 @@ mod tests {
         // `at`. A ramp module whose two halves disagreed would be the 679/19980
         // divergence again, one layer up.
         //
-        // Sixteen stops, sampled near both edges of each stripe and not only at
-        // its midpoint. A first version did midpoints of a four-stop ramp and
-        // passed happily against evenly-spaced stripes - the two placements
-        // agree in the middle of a stripe and part company towards its ends, so
-        // a midpoint test was checking the half of the range where the bug
-        // cannot show.
+        // Sixteen stops, sampled near both edges of each stripe as well as its
+        // middle. Any two placements of the stops agree in the middle of a
+        // stripe and part company towards its ends, so midpoints alone cover
+        // only the half of the range where a misplaced boundary cannot show.
         let screen = Length(480.0);
         let ramp = Ramp::new((0..16).map(|i| Colour::rgb(i * 16, 0, 0)).collect());
         for stripe in ramp.stripes(screen) {

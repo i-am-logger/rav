@@ -56,10 +56,10 @@ fn bar_of(note: Note) -> usize {
 
 /// Whether a bar stands above both its neighbours.
 ///
-/// Deliberately without a loudness floor. An early version required a peak to
-/// clear 15% of the loudest bar, which is a number chosen to make an answer come
-/// out - and removing it changed none of the conclusions, only added leakage
-/// peaks up in the empty top of the spectrum that no test here asks about.
+/// Deliberately without a loudness floor. A threshold here would be a number
+/// picked to make an answer come out, and none is needed: the tests below ask
+/// about specific bars, so the leakage peaks up in the empty top of the
+/// spectrum are simply not looked at.
 fn is_peak(bars: &[f32], at: usize) -> bool {
     at > 0 && at + 1 < bars.len() && bars[at] > bars[at - 1] && bars[at] > bars[at + 1]
 }
@@ -179,8 +179,8 @@ fn the_smallest_interval_the_display_can_separate() {
             .find(|&semitones| {
                 let other = Note(root.0 + semitones);
                 // Both must reach *distinct* bars, or "two peaks" is one peak
-                // counted twice - which is how a first attempt at this
-                // measurement reported that C3 resolves a semitone.
+                // counted twice - and down in the bass a semitone lands well
+                // inside a single bar.
                 let (low, high) = (bar_of(root), bar_of(other));
                 if low == high {
                     return false;
