@@ -12,11 +12,13 @@ use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::time::{Duration, Instant};
 
-/// How long to wait for a terminal to answer the capability query.
+/// How long to wait before giving up on a terminal that answers nothing at all.
 ///
-/// The same budget the palette query allows, for the same reason: a terminal
-/// that does not implement this says nothing at all, so the deadline is the only
-/// thing that ends the wait.
+/// A backstop, not the mechanism. The graphics query is chained with a device
+/// attributes request that every terminal answers, so the usual "no" arrives in
+/// a millisecond rather than by running this out. Reaching it means the terminal
+/// ignored *both* questions, which is rare enough that a stall is the right
+/// price for not guessing.
 const PROBE_TIMEOUT: Duration = Duration::from_millis(120);
 
 /// Where a frame is drawn.
@@ -109,10 +111,10 @@ impl Chosen {
 /// - the probe needs one and this does not.
 ///
 /// `answers` is a closure rather than a `bool` so the arms that ignore it never
-/// ask. That is not a micro-optimisation: asking writes escape sequences and
-/// reads stdin, and costs [`PROBE_TIMEOUT`] against a terminal that will never
-/// reply. Passing a `bool` would make every startup pay for an answer three of
-/// the five arms discard.
+/// ask. That is not a micro-optimisation: asking writes escape sequences to the
+/// terminal and swallows what comes back off stdin, so it is a thing that
+/// happens rather than a value that is read. Passing a `bool` would do it on
+/// every startup for an answer three of the five arms discard.
 pub fn choose(asked: Choice, multiplexed: bool, answers: impl FnOnce() -> bool) -> Chosen {
     let glyphs = |because| Chosen {
         surface: Surface::Glyphs,
@@ -187,8 +189,15 @@ pub fn probe() -> bool {
 fn probe_via<W: Write, R: Read + AsRawFd>(out: &mut W, input: &mut R) -> bool {
     // One opaque pixel, transmitted and queried rather than displayed: `a=q`
     // asks whether the terminal *could* take it and draws nothing either way.
+    //
+    // Chained with a device attributes request in the same write, because a
+    // terminal that does not implement graphics answers the first question with
+    // silence and there is nothing to wait for. Terminals answer queries in the
+    // order they arrive, so a `CSI c` reply with no graphics reply ahead of it
+    // is a definite no, available immediately.
     let pixel = "AAAA"; // three zero bytes, base64
-    if write!(out, "\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;{pixel}\x1b\\").is_err() || out.flush().is_err()
+    if write!(out, "\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;{pixel}\x1b\\\x1b[c").is_err()
+        || out.flush().is_err()
     {
         return false;
     }
@@ -220,13 +229,28 @@ fn probe_via<W: Write, R: Read + AsRawFd>(out: &mut W, input: &mut R) -> bool {
 /// this.
 pub fn answered(bytes: &[u8]) -> Option<bool> {
     let text = String::from_utf8_lossy(bytes);
-    let reply = text.split("\x1b_G").nth(1)?;
-    // The terminator has to have arrived, or the payload may still be growing.
-    let body = reply.split("\x1b\\").next()?;
-    if !reply.contains("\x1b\\") {
-        return None;
+    if let Some(reply) = text.split("\x1b_G").nth(1) {
+        // The terminator has to have arrived, or the payload may still be
+        // growing - and a graphics reply outranks whatever follows it.
+        return reply
+            .split_once("\x1b\\")
+            .map(|(body, _)| body.contains(";OK"));
     }
-    Some(body.contains(";OK"))
+    // No graphics reply, but the terminal has answered the question chained
+    // behind it - so it read the first one, understood it well enough to ignore
+    // it, and moved on. That is the answer.
+    device_attributes(&text).then_some(false)
+}
+
+/// Whether a Primary Device Attributes reply - `CSI ? … c` - has arrived.
+///
+/// The parameters are digits and semicolons and say which VT the terminal claims
+/// to be, which rav does not care about. What matters is that one arrived.
+fn device_attributes(text: &str) -> bool {
+    text.split("\x1b[?").skip(1).any(|rest| {
+        rest.split_once('c')
+            .is_some_and(|(params, _)| params.bytes().all(|b| b.is_ascii_digit() || b == b';'))
+    })
 }
 
 #[cfg(test)]
@@ -257,6 +281,39 @@ mod tests {
             asked.set(true);
             yes
         }
+    }
+
+    /// Run the probe against a socket playing the part of a terminal that has
+    /// already replied `reply`, and report the verdict and how long it took.
+    ///
+    /// A socket rather than a pty because `probe_via` only needs something
+    /// readable with a descriptor to poll, which is all a terminal is to it. The
+    /// reply is waiting before the query goes out, which a real terminal cannot
+    /// do - the point here is what happens once bytes arrive, not the round trip.
+    fn against_a_terminal_saying(reply: &[u8]) -> (bool, Duration) {
+        use std::os::unix::net::UnixStream;
+        let (mut terminal, mut rav) = UnixStream::pair().unwrap();
+        terminal.write_all(reply).unwrap();
+        terminal.flush().unwrap();
+        let mut sink = Vec::new();
+        let start = Instant::now();
+        let verdict = probe_via(&mut sink, &mut rav);
+        (verdict, start.elapsed())
+    }
+
+    #[test]
+    fn a_terminal_without_graphics_is_taken_at_its_word_immediately() {
+        // The one path every user of Terminal.app, Alacritty and xterm takes. A
+        // graphics query alone is answered with silence there, so believing
+        // silence would put the whole timeout on the common case - a visible
+        // stall at startup, shipped under a change that draws nothing.
+        let (verdict, took) = against_a_terminal_saying(b"\x1b[?62;1;6c");
+        assert!(!verdict, "it declined");
+        assert!(took < PROBE_TIMEOUT / 4, "waited it out instead: {took:?}");
+
+        let (verdict, took) = against_a_terminal_saying(b"\x1b_Gi=31;OK\x1b\\\x1b[?62c");
+        assert!(verdict, "it accepted");
+        assert!(took < PROBE_TIMEOUT / 4, "waited it out instead: {took:?}");
     }
 
     #[test]
@@ -325,6 +382,32 @@ mod tests {
         assert_eq!(answered(b""), None, "nothing yet");
         assert_eq!(answered(b"\x1b_Gi=31;OK\x1b\\"), Some(true));
         assert_eq!(answered(b"\x1b_Gi=31;ENOTSUPPORTED\x1b\\"), Some(false));
+    }
+
+    #[test]
+    fn the_no_arrives_rather_than_being_waited_out() {
+        // The whole reason the graphics query is chained with `CSI c`. Silence
+        // is what a terminal without graphics says, so waiting for it would put
+        // the full timeout on the one path every user of every other terminal
+        // takes - a startup stall on Terminal.app, Alacritty and xterm.
+        assert_eq!(
+            answered(b"\x1b[?62;1;6c"),
+            Some(false),
+            "answered, not mute"
+        );
+        assert_eq!(answered(b"\x1b[?6c"), Some(false), "a short one counts");
+
+        // Order settles it: terminals answer queries as they arrive, so a
+        // graphics reply is always ahead of the attributes reply behind it.
+        assert_eq!(answered(b"\x1b_Gi=31;OK\x1b\\\x1b[?62c"), Some(true));
+
+        // Half an attributes reply is not one, or a terminal that is mid-word
+        // gets read as a refusal it has not made.
+        assert_eq!(answered(b"\x1b[?62;1"), None, "no final byte yet");
+        assert_eq!(answered(b"\x1b[?"), None);
+        // Not every CSI is this one - a mouse or bracketed-paste report shares
+        // the prefix and says nothing about graphics.
+        assert_eq!(answered(b"\x1b[?1000;1006$y"), None, "a different report");
     }
 
     #[test]
