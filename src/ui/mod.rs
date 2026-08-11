@@ -618,11 +618,7 @@ impl App {
 
     pub async fn run(&mut self, audio_receiver: Receiver<AudioData>) -> Result<()> {
         #[cfg(not(test))]
-        {
-            enable_raw_mode()?;
-            io::stdout().execute(EnterAlternateScreen)?;
-            guard_the_terminal();
-        }
+        let _terminal = TerminalGuard::take_the_terminal()?;
         self.terminal.clear()?;
         info!("🎨 Starting analyser");
 
@@ -889,8 +885,6 @@ impl App {
             })?;
         }
 
-        #[cfg(not(test))]
-        hand_the_terminal_back();
         info!("👋 Analyser shut down");
         Ok(())
     }
@@ -915,25 +909,66 @@ fn hand_the_terminal_back() {
     let _ = io::stdout().execute(crossterm::cursor::Show);
 }
 
-/// Make sure a panic hands the terminal back too.
-///
-/// Without this a panic leaves the user on the alternate screen in raw mode:
-/// no echo, no line editing, and a backtrace they cannot see. The way out is to
-/// type `reset` blind.
-///
-/// The previous hook still runs, so the panic still reports itself - and it
-/// reports to `rav.log`, since `main` points stderr there before anything
-/// touches the terminal.
-///
-/// `panic = "abort"` in the release profile does not skip this: hooks run
-/// before the abort.
 #[cfg(not(test))]
-fn guard_the_terminal() {
-    let previous = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |panicked| {
+type PanicHook = Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Sync + Send + 'static>;
+
+/// Holds the terminal for as long as rav is drawing on it.
+///
+/// Every way out has to hand it back: returning normally, returning an error
+/// through `?`, and panicking. Drop covers the first two. The panic hook covers
+/// the third, because `panic = "abort"` in the release build never unwinds and
+/// so never drops anything - and without it a panic leaves the user on the
+/// alternate screen in raw mode, with no echo, no line editing, and a backtrace
+/// they cannot see.
+///
+/// The hook rav replaces still runs, so a panic still reports itself, into
+/// `rav.log` where `main` points stderr before anything touches the terminal.
+#[cfg(not(test))]
+struct TerminalGuard {
+    replaced_hook: Option<std::sync::Arc<PanicHook>>,
+}
+
+#[cfg(not(test))]
+impl TerminalGuard {
+    fn take_the_terminal() -> Result<Self> {
+        enable_raw_mode()?;
+        io::stdout().execute(EnterAlternateScreen)?;
+
+        let replaced = std::sync::Arc::new(std::panic::take_hook());
+        let on_panic = std::sync::Arc::clone(&replaced);
+        std::panic::set_hook(Box::new(move |panicked| {
+            hand_the_terminal_back();
+            (*on_panic)(panicked);
+        }));
+        Ok(Self {
+            replaced_hook: Some(replaced),
+        })
+    }
+}
+
+#[cfg(not(test))]
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
         hand_the_terminal_back();
-        previous(panicked);
-    }));
+
+        // `take_hook` and `set_hook` panic when called from a panicking thread,
+        // and a second panic during an unwind aborts. The hook has already done
+        // this work by the time an unwind reaches here, and the process is on
+        // its way out regardless.
+        if std::thread::panicking() {
+            return;
+        }
+
+        // The hook is process-wide, so leaving rav's in place would have a
+        // later panic restore a terminal nobody is holding - and a second run
+        // would stack another on top.
+        let _ = std::panic::take_hook();
+        if let Some(replaced) = self.replaced_hook.take()
+            && let Ok(hook) = std::sync::Arc::try_unwrap(replaced)
+        {
+            std::panic::set_hook(hook);
+        }
+    }
 }
 
 /// Terminal events, on a channel the render loop can wait on.
