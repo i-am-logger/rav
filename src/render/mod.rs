@@ -8,7 +8,7 @@
 //! allocator. What stays here is the part that cannot: the colour model, and the
 //! rasteriser that owns a `tiny-skia` pixmap.
 
-pub use rav_appearance::{ink, ramp};
+pub use rav_appearance::{ink, ramp, scene};
 pub use rav_core::{capability, geometry};
 
 pub mod raster;
@@ -17,4 +17,5 @@ pub use capability::{Capabilities, Requirements, Shortfall};
 pub use geometry::{Anchor, BarLayout, Column, Rectangle, Screen};
 pub use ink::{Colour, Ink};
 pub use ramp::{Ramp, Stripe};
-pub use raster::{Band, Canvas, CapStyle, Scene, Style, StyleId};
+pub use raster::{Canvas, Draw};
+pub use scene::{Band, CapStyle, Scene, Style, StyleId};

@@ -5,9 +5,8 @@
 //! from crates that have never heard of tiny-skia - which is what lets the same
 //! scene go to a glyph grid or an LED matrix instead.
 
-use crate::render::{Colour, Ramp};
-use rav_core::geometry::{BarLayout, Rectangle, Screen};
-use rav_core::units::{Length, Level};
+use crate::render::{Colour, Ramp, Scene};
+use rav_core::geometry::{Rectangle, Screen};
 use tiny_skia::{Paint, Pixmap, Rect as SkRect, Transform};
 
 /// An RGBA buffer that geometry is drawn into.
@@ -105,152 +104,46 @@ impl Canvas {
     }
 }
 
-/// Which of a scene's styles a band wears.
+/// Drawing a scene onto a surface.
 ///
-/// An index, not a colour - the same boundary [`crate::units::Step`] keeps. A
-/// band knows it wears style 1; only the surface knows style 1 is a blue ramp
-/// with a white cap.
-///
-/// Everything is style zero unless something says otherwise, so the common case
-/// costs one byte per band and no thought. A stereo pair is `0`/`1`, a rainbow
-/// is one per band, and highlighting a single band is one `1` among zeroes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
-#[repr(transparent)]
-pub struct StyleId(pub u8);
-
-impl StyleId {
-    pub const FIRST: Self = Self(0);
-
-    pub const fn index(self) -> usize {
-        self.0 as usize
-    }
+/// An extension trait rather than an inherent method, because [`Scene`] belongs
+/// to `rav-appearance` and that crate must never name a rasteriser: a scene that
+/// knew how to rasterise itself would be one only a rasteriser could consume,
+/// and an LED matrix has none. The trait is where the pixel surface adds the
+/// ability without the scene acquiring it.
+pub trait Draw {
+    fn draw(&self, canvas: &mut Canvas);
 }
 
-/// One frequency band, as the analyser currently sees it.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct Band {
-    /// How loud it is now.
-    pub level: Level,
-    /// How loud it recently was - where the cap rides.
-    pub peak: Level,
-    /// Which style it wears.
-    pub style: StyleId,
-}
-
-impl Band {
-    /// A band in the first style, which is what almost every band is.
-    pub fn new(level: Level, peak: Level) -> Self {
-        Self {
-            level,
-            peak,
-            style: StyleId::FIRST,
-        }
-    }
-
-    /// The same band wearing a different style - one channel of a stereo pair,
-    /// or a highlighted band.
-    pub fn styled(self, style: StyleId) -> Self {
-        Self { style, ..self }
-    }
-}
-
-/// Everything a surface needs to draw one frame.
-///
-/// The seam between the analyser and whatever is drawing. Deliberately not a
-/// retained scene graph: the glyph renderer has to quantise to cells with its
-/// own rules - the fill-versus-glyph backdrop, cap lifting, partial blocks - and
-/// quantising a shared list of rectangles back into cells cannot reproduce them.
-/// Every surface takes the same scene and each is free to be itself.
-pub struct Scene<'a> {
-    pub bands: &'a [Band],
-    pub layout: BarLayout,
-    pub screen: Screen,
-    /// The looks a band may wear, indexed by its [`StyleId`].
-    ///
-    /// Usually one. Two for a stereo pair, one per band for a rainbow. A scene
-    /// with none draws nothing rather than inventing a colour.
-    pub styles: &'a [Style<'a>],
-}
-
-/// One complete look: what a lit bar, its backdrop and its cap are drawn in.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Style<'a> {
-    /// Colour of a lit bar, by height.
-    pub bars: &'a Ramp,
-    /// Colour of the unlit backdrop, by height. `None` leaves the terminal's own
-    /// background showing, which is what a theme without a grid asks for.
-    pub grid: Option<&'a Ramp>,
-    /// `None` when caps are switched off.
-    pub cap: Option<CapStyle>,
-}
-
-/// How the peak caps are drawn.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct CapStyle {
-    pub colour: Colour,
-    pub thickness: Length,
-}
-
-impl Scene<'_> {
-    /// How many bands are actually drawn.
-    ///
-    /// The glyph renderer's rule, taken verbatim: the lesser of what fits and
-    /// what exists. Drawing one per band regardless would put rectangles past
-    /// the screen, which the rasteriser discards in silence - so the surfaces
-    /// would disagree on bar count with nothing to say so.
-    pub fn visible_bands(&self) -> usize {
-        self.layout
-            .fitting_across(&self.screen)
-            .min(self.bands.len())
-    }
-
-    /// The style a band wears, or the first if it names one that is not there.
-    ///
-    /// Falling back rather than panicking: a band carrying a stale style after a
-    /// theme change is a frame drawn in the wrong colour, not a reason to take
-    /// the process down mid-render.
-    fn style_of(&self, band: &Band) -> Option<&Style<'_>> {
-        self.styles
-            .get(band.style.index())
-            .or_else(|| self.styles.first())
-    }
-
-    /// Draw into `canvas`, back to front.
-    ///
-    /// Backdrop, then bars, then caps - the order that lets a cap lie over the
-    /// backdrop instead of replacing it. Each layer runs over every band before
-    /// the next begins, so a band's cap is never buried by its neighbour's
-    /// backdrop when the two wear different styles.
-    pub fn draw(&self, canvas: &mut Canvas) {
+impl Draw for Scene<'_> {
+    /// Back to front: backdrop, then bars, then caps - the order that lets a cap
+    /// lie over the backdrop instead of replacing it. Each layer runs over every
+    /// band before the next begins, so a band's cap is never buried by its
+    /// neighbour's backdrop when the two wear different styles.
+    fn draw(&self, canvas: &mut Canvas) {
         canvas.clear();
 
         let drawable = self.visible_bands();
+        let screen = &self.screen;
 
         for (index, band) in self.bands.iter().take(drawable).enumerate() {
             if let Some(grid) = self.style_of(band).and_then(|style| style.grid) {
-                let column = self.layout.column(index);
-                canvas.fill_ramped(column.backdrop(&self.screen), grid, &self.screen);
+                let backdrop = self.layout.column(index).backdrop(screen);
+                canvas.fill_ramped(backdrop, grid, screen);
             }
         }
 
         for (index, band) in self.bands.iter().take(drawable).enumerate() {
             if let Some(style) = self.style_of(band) {
-                let column = self.layout.column(index);
-                canvas.fill_ramped(
-                    column.bar(band.level, &self.screen),
-                    style.bars,
-                    &self.screen,
-                );
+                let bar = self.layout.column(index).bar(band.level, screen);
+                canvas.fill_ramped(bar, style.bars, screen);
             }
         }
 
         for (index, band) in self.bands.iter().take(drawable).enumerate() {
             if let Some(cap) = self.style_of(band).and_then(|style| style.cap) {
                 let column = self.layout.column(index);
-                canvas.fill(
-                    column.cap(band.peak, cap.thickness, &self.screen),
-                    cap.colour,
-                );
+                canvas.fill(column.cap(band.peak, cap.thickness, screen), cap.colour);
             }
         }
     }
@@ -259,6 +152,9 @@ impl Scene<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render::{Band, CapStyle, Scene, Style, StyleId};
+    use rav_core::geometry::BarLayout;
+    use rav_core::units::{Length, Level};
 
     fn screen(width: f32, height: f32) -> Screen {
         Screen::new(Length(width), Length(height))

@@ -26,7 +26,7 @@
 //! cargo run --bin kitty_spike -- --occlusion
 //! ```
 
-use rav::render::{Band, BarLayout, Canvas, CapStyle, Colour, Ramp, Scene, Screen, Style};
+use rav::render::{Band, BarLayout, Canvas, CapStyle, Colour, Draw, Ramp, Scene, Screen, Style};
 use rav::units::{Length, Level};
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
