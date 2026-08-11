@@ -1312,6 +1312,46 @@ mod tests {
     }
 
     #[test]
+    fn cycling_themes_walks_the_bundled_order_and_returns() {
+        // The path a user without --theme presses constantly, and the one that
+        // exercises the generated consts end to end: the themes are no longer
+        // parsed at startup, they are static data, and this is where a wrong
+        // order or a missing entry would actually be seen.
+        //
+        // Four presses must return to where they started, or the cycle has
+        // dropped an entry or gained one.
+        let mut a = app();
+        assert_eq!(a.theme.name, "rav", "rav is the default");
+
+        let seen: Vec<String> = (0..4)
+            .map(|_| {
+                let label = a.theme.name.clone();
+                a.apply(Action::CycleTheme);
+                label
+            })
+            .collect();
+        assert_eq!(seen, vec!["rav", "winamp", "terminal", "mono"]);
+        assert_eq!(a.theme.name, "rav", "the fourth press comes back round");
+    }
+
+    #[test]
+    fn a_cycled_theme_is_the_same_data_the_parser_would_have_produced() {
+        // The consts replaced a parse at startup, so this checks the swap did
+        // not change what reaches the display - not that the two agree in
+        // isolation, which theme.rs already covers, but that the app hands on
+        // exactly what a user loading the same file by path would get.
+        let mut a = app();
+        a.apply(Action::CycleTheme);
+        let cycled = a.theme.clone();
+        let from_disk = crate::visual::theme::load(&format!(
+            "crates/rav-appearance/themes/{}.toml",
+            cycled.name
+        ))
+        .expect("the bundled file is beside the crate");
+        assert_eq!(cycled, from_disk);
+    }
+
+    #[test]
     fn a_loaded_theme_stays_in_the_cycle() {
         // --theme puts a fourth entry in the rotation; cycling all the way round
         // has to come back to it rather than dropping it after the first change.
