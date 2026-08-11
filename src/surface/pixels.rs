@@ -107,16 +107,22 @@ impl Pixels {
         self.sent += 1;
         out.flush()
     }
+}
 
-    /// Remove every frame this has staged and not yet reclaimed.
-    ///
-    /// For shutting down. In `/dev/shm` a leftover frame is resident memory
-    /// that outlives the process.
-    pub fn tidy(&self, dir: &Path) {
-        let first = self.sent.saturating_sub(LAG_TOLERATED);
-        for tick in first..self.sent {
-            let _ =
-                std::fs::remove_file(dir.join(format!("rav-{}-{}.rgba", std::process::id(), tick)));
+/// Remove every frame this process staged.
+///
+/// By name rather than by count, so it needs nothing but the directory - which
+/// is what lets it run from the panic path, where there is no [`Pixels`] to
+/// ask. In `/dev/shm` a leftover frame is resident memory that outlives the
+/// process, and at a full screen each one is megabytes.
+pub fn tidy(dir: &Path) {
+    let mine = format!("rav-{}-", std::process::id());
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if entry.file_name().to_string_lossy().starts_with(&mine) {
+            let _ = std::fs::remove_file(entry.path());
         }
     }
 }
@@ -170,7 +176,7 @@ mod tests {
         );
         assert!(large.len() * 1000 < big.len(), "the command carried it");
 
-        pixels.tidy(&dir);
+        tidy(&dir);
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -193,7 +199,7 @@ mod tests {
             .collect();
         assert_eq!(staged.len(), 3, "frames shared a name: {staged:?}");
 
-        pixels.tidy(&dir);
+        tidy(&dir);
         assert_eq!(
             std::fs::read_dir(&dir).unwrap().count(),
             0,
@@ -220,7 +226,7 @@ mod tests {
             "the staging directory is growing without bound",
         );
 
-        pixels.tidy(&dir);
+        tidy(&dir);
         std::fs::remove_dir_all(&dir).ok();
     }
 }
