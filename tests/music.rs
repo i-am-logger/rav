@@ -156,9 +156,20 @@ fn the_smallest_interval_the_display_can_separate() {
     // chord shows two bars. Doubling the FFT size would roughly halve every
     // number in this table, and this test is what would say so.
     //
-    // A semitone of tolerance, because the boundary is where two peaks merge
-    // and the last one before it is a hair away from being one. That is enough
-    // to catch the change a different FFT size makes, which is a factor of two.
+    // This is the one test here whose pass rests on a `>` between two floats
+    // rather than on an inequality with room in it, so the room was measured.
+    // At the tightest boundary - C3 at a minor seventh - the deciding bar
+    // stands **1.0% above its neighbour, about 80,000 ULP**; the nearest miss
+    // is 3.1% the other way. rustfft dispatches on CPU features, so an x86 CI
+    // machine and this arm64 one do not agree bit for bit, but they disagree by
+    // single-digit ULP and not by a percent. It will not flake.
+    //
+    // A semitone of tolerance anyway, for a mapping change too small to move
+    // the table. Note it does *not* cover C3's boundary moving: resolution is
+    // not monotonic in interval there - 10 semitones separates and 11 does not,
+    // because the pair happens to land in bars 4/7 and then 4/8 - so a flip at
+    // 10 would jump the answer to 12. That is a real change in what the display
+    // resolves and should fail rather than be absorbed.
     let expected = [(48u8, 10u8), (60, 7), (72, 4), (84, 3)];
     let instrument = Instrument::pure(RATE as f32);
 
