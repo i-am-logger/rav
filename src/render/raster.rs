@@ -210,6 +210,27 @@ impl Canvas {
     }
 }
 
+/// Which of a scene's styles a band wears.
+///
+/// An index, not a colour - the same boundary [`crate::units::Step`] keeps. A
+/// band knows it wears style 1; only the surface knows style 1 is a blue ramp
+/// with a white cap.
+///
+/// Everything is style zero unless something says otherwise, so the common case
+/// costs one byte per band and no thought. A stereo pair is `0`/`1`, a rainbow
+/// is one per band, and highlighting a single band is one `1` among zeroes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[repr(transparent)]
+pub struct StyleId(pub u8);
+
+impl StyleId {
+    pub const FIRST: Self = Self(0);
+
+    pub const fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
 /// One frequency band, as the analyser currently sees it.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Band {
@@ -217,11 +238,24 @@ pub struct Band {
     pub level: Level,
     /// How loud it recently was - where the cap rides.
     pub peak: Level,
+    /// Which style it wears.
+    pub style: StyleId,
 }
 
 impl Band {
+    /// A band in the first style, which is what almost every band is.
     pub fn new(level: Level, peak: Level) -> Self {
-        Self { level, peak }
+        Self {
+            level,
+            peak,
+            style: StyleId::FIRST,
+        }
+    }
+
+    /// The same band wearing a different style - one channel of a stereo pair,
+    /// or a highlighted band.
+    pub fn styled(self, style: StyleId) -> Self {
+        Self { style, ..self }
     }
 }
 
@@ -236,11 +270,21 @@ pub struct Scene<'a> {
     pub bands: &'a [Band],
     pub layout: BarLayout,
     pub screen: Screen,
+    /// The looks a band may wear, indexed by its [`StyleId`].
+    ///
+    /// Usually one. Two for a stereo pair, one per band for a rainbow. A scene
+    /// with none draws nothing rather than inventing a colour.
+    pub styles: &'a [Style<'a>],
+}
+
+/// One complete look: what a lit bar, its backdrop and its cap are drawn in.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Style<'a> {
     /// Colour of a lit bar, by height.
-    pub bar_ramp: &'a Ramp,
+    pub bars: &'a Ramp,
     /// Colour of the unlit backdrop, by height. `None` leaves the terminal's own
     /// background showing, which is what a theme without a grid asks for.
-    pub grid_ramp: Option<&'a Ramp>,
+    pub grid: Option<&'a Ramp>,
     /// `None` when caps are switched off.
     pub cap: Option<CapStyle>,
 }
@@ -265,34 +309,52 @@ impl Scene<'_> {
             .min(self.bands.len())
     }
 
+    /// The style a band wears, or the first if it names one that is not there.
+    ///
+    /// Falling back rather than panicking: a band carrying a stale style after a
+    /// theme change is a frame drawn in the wrong colour, not a reason to take
+    /// the process down mid-render.
+    fn style_of(&self, band: &Band) -> Option<&Style<'_>> {
+        self.styles
+            .get(band.style.index())
+            .or_else(|| self.styles.first())
+    }
+
     /// Draw into `canvas`, back to front.
     ///
     /// Backdrop, then bars, then caps - the order that lets a cap lie over the
-    /// backdrop instead of replacing it.
+    /// backdrop instead of replacing it. Each layer runs over every band before
+    /// the next begins, so a band's cap is never buried by its neighbour's
+    /// backdrop when the two wear different styles.
     pub fn draw(&self, canvas: &mut Canvas) {
         canvas.clear();
 
-        if let Some(grid) = self.grid_ramp {
-            for column in self.layout.columns(&self.screen) {
+        let drawable = self.visible_bands();
+
+        for (index, band) in self.bands.iter().take(drawable).enumerate() {
+            if let Some(grid) = self.style_of(band).and_then(|style| style.grid) {
+                let column = self.layout.column(index);
                 canvas.fill_ramped(column.backdrop(&self.screen), grid, &self.screen);
             }
         }
 
-        for (index, band) in self.bands.iter().take(self.visible_bands()).enumerate() {
-            let column = self.layout.column(index);
-            canvas.fill_ramped(
-                column.bar(band.level, &self.screen),
-                self.bar_ramp,
-                &self.screen,
-            );
+        for (index, band) in self.bands.iter().take(drawable).enumerate() {
+            if let Some(style) = self.style_of(band) {
+                let column = self.layout.column(index);
+                canvas.fill_ramped(
+                    column.bar(band.level, &self.screen),
+                    style.bars,
+                    &self.screen,
+                );
+            }
         }
 
-        if let Some(style) = self.cap {
-            for (index, band) in self.bands.iter().take(self.visible_bands()).enumerate() {
+        for (index, band) in self.bands.iter().take(drawable).enumerate() {
+            if let Some(cap) = self.style_of(band).and_then(|style| style.cap) {
                 let column = self.layout.column(index);
                 canvas.fill(
-                    column.cap(band.peak, style.thickness, &self.screen),
-                    style.colour,
+                    column.cap(band.peak, cap.thickness, &self.screen),
+                    cap.colour,
                 );
             }
         }
@@ -334,17 +396,24 @@ mod tests {
         }
     }
 
-    fn scene<'a>(bands: &'a [Band], bar_ramp: &'a Ramp, grid_ramp: Option<&'a Ramp>) -> Scene<'a> {
+    /// One style, with caps on unless `capped` says otherwise.
+    fn one_style<'a>(bars: &'a Ramp, grid: Option<&'a Ramp>, capped: bool) -> [Style<'a>; 1] {
+        [Style {
+            bars,
+            grid,
+            cap: capped.then_some(CapStyle {
+                colour: Colour::WHITE,
+                thickness: Length(3.0),
+            }),
+        }]
+    }
+
+    fn scene<'a>(bands: &'a [Band], styles: &'a [Style<'a>]) -> Scene<'a> {
         Scene {
             bands,
             layout: layout(10.0, 0.0),
             screen: screen(10.0, 60.0),
-            bar_ramp,
-            grid_ramp,
-            cap: Some(CapStyle {
-                colour: Colour::WHITE,
-                thickness: Length(3.0),
-            }),
+            styles,
         }
     }
 
@@ -383,9 +452,9 @@ mod tests {
         let loud = bands(&[0.9]);
 
         let mut short = Canvas::new(10, 60).unwrap();
-        scene(&quiet, &ramp, None).draw(&mut short);
+        scene(&quiet, &one_style(&ramp, None, true)).draw(&mut short);
         let mut tall = Canvas::new(10, 60).unwrap();
-        scene(&loud, &ramp, None).draw(&mut tall);
+        scene(&loud, &one_style(&ramp, None, true)).draw(&mut tall);
 
         for y in 43..60 {
             assert_eq!(
@@ -424,6 +493,103 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn bands_can_wear_different_styles() {
+        // What a stereo pair needs: left and right in their own colours, from
+        // one scene, without the core learning what either colour is.
+        let left_ramp = Ramp::new(vec![Colour::GREEN]);
+        let right_ramp = Ramp::new(vec![Colour::BLUE]);
+        let styles = [
+            Style {
+                bars: &left_ramp,
+                grid: None,
+                cap: None,
+            },
+            Style {
+                bars: &right_ramp,
+                grid: None,
+                cap: None,
+            },
+        ];
+        // Two bands side by side, second one in the second style.
+        let pair = [
+            Band::new(Level::FULL, Level::FULL),
+            Band::new(Level::FULL, Level::FULL).styled(StyleId(1)),
+        ];
+        let mut canvas = Canvas::new(20, 60).unwrap();
+        Scene {
+            screen: screen(20.0, 60.0),
+            ..scene(&pair, &styles)
+        }
+        .draw(&mut canvas);
+
+        assert_eq!(at(&canvas, 5, 30), Colour::GREEN, "the first band");
+        assert_eq!(at(&canvas, 15, 30), Colour::BLUE, "the second band");
+    }
+
+    #[test]
+    fn a_style_does_not_break_colour_following_height() {
+        // The invariant per-band styling could have broken. Within one style,
+        // colour is still a function of height and not of the band's own level,
+        // so a quiet band and a loud one wearing the same style still agree
+        // where they overlap.
+        let ramp = traffic_light();
+        let other = Ramp::new(vec![Colour::BLUE]);
+        let styles = [
+            Style {
+                bars: &ramp,
+                grid: None,
+                cap: None,
+            },
+            Style {
+                bars: &other,
+                grid: None,
+                cap: None,
+            },
+        ];
+        // Band 0 quiet, band 1 loud - both in style 0, with style 1 present but
+        // unused, so the lookup cannot be what makes them agree.
+        let mixed = [
+            Band::new(Level::new(0.3), Level::SILENT),
+            Band::new(Level::new(0.9), Level::SILENT),
+        ];
+        let mut canvas = Canvas::new(20, 60).unwrap();
+        Scene {
+            screen: screen(20.0, 60.0),
+            ..scene(&mixed, &styles)
+        }
+        .draw(&mut canvas);
+
+        for y in 43..60 {
+            assert_eq!(
+                at(&canvas, 5, y),
+                at(&canvas, 15, y),
+                "row {y}: same style, same height, so the same colour"
+            );
+        }
+    }
+
+    #[test]
+    fn a_band_naming_a_style_that_is_not_there_falls_back() {
+        // A stale index after a theme change is a frame in the wrong colour, not
+        // a reason to take the process down mid-render.
+        let ramp = Ramp::new(vec![Colour::GREEN]);
+        let only = one_style(&ramp, None, false);
+        let stale = [Band::new(Level::FULL, Level::SILENT).styled(StyleId(7))];
+        let mut canvas = Canvas::new(10, 60).unwrap();
+        scene(&stale, &only).draw(&mut canvas);
+        assert_eq!(at(&canvas, 5, 30), Colour::GREEN, "fell back to the first");
+    }
+
+    #[test]
+    fn a_scene_with_no_styles_draws_nothing_rather_than_inventing_a_colour() {
+        let nothing: [Style; 0] = [];
+        let loud = bands(&[1.0]);
+        let mut canvas = Canvas::new(10, 60).unwrap();
+        scene(&loud, &nothing).draw(&mut canvas);
+        assert!(canvas.to_rgba().chunks(4).all(|pixel| pixel[3] == 0));
     }
 
     #[test]
@@ -477,11 +643,7 @@ mod tests {
         let ramp = traffic_light();
         let silent = bands(&[0.0]);
         let mut canvas = Canvas::new(10, 60).unwrap();
-        Scene {
-            cap: None,
-            ..scene(&silent, &ramp, None)
-        }
-        .draw(&mut canvas);
+        scene(&silent, &one_style(&ramp, None, false)).draw(&mut canvas);
         assert!(
             canvas.to_rgba().chunks(4).all(|pixel| pixel[3] == 0),
             "silence must leave the frame transparent"
@@ -495,13 +657,9 @@ mod tests {
         let loud = bands(&[0.5]);
 
         let mut with = Canvas::new(10, 60).unwrap();
-        scene(&loud, &ramp, Some(&grid)).draw(&mut with);
+        scene(&loud, &one_style(&ramp, Some(&grid), true)).draw(&mut with);
         let mut without = Canvas::new(10, 60).unwrap();
-        Scene {
-            cap: None,
-            ..scene(&loud, &ramp, Some(&grid))
-        }
-        .draw(&mut without);
+        scene(&loud, &one_style(&ramp, Some(&grid), false)).draw(&mut without);
 
         assert_ne!(with.to_rgba(), without.to_rgba(), "a cap must be visible");
     }
@@ -513,11 +671,7 @@ mod tests {
         let ramp = traffic_light();
         let quiet = bands(&[0.25]);
         let mut canvas = Canvas::new(10, 60).unwrap();
-        Scene {
-            cap: None,
-            ..scene(&quiet, &ramp, None)
-        }
-        .draw(&mut canvas);
+        scene(&quiet, &one_style(&ramp, None, false)).draw(&mut canvas);
         assert_eq!(at(&canvas, 5, 5).alpha, 0, "unlit rows stay transparent");
         assert_eq!(at(&canvas, 5, 58).alpha, 0xff, "the lit bar is still drawn");
     }
@@ -535,11 +689,7 @@ mod tests {
         let edge_case = bands(&[0.333]);
 
         let mut over_grid = Canvas::new(10, 60).unwrap();
-        Scene {
-            cap: None,
-            ..scene(&edge_case, &ramp, Some(&grid))
-        }
-        .draw(&mut over_grid);
+        scene(&edge_case, &one_style(&ramp, Some(&grid), false)).draw(&mut over_grid);
         let blended = at(&over_grid, 5, 40);
         assert_eq!(blended.alpha, 0xff, "the backdrop keeps the edge opaque");
         assert!(
@@ -550,11 +700,7 @@ mod tests {
         // Without a backdrop the same edge reaches the terminal semi-transparent
         // and the terminal composites it. Different pixels, deliberately.
         let mut bare = Canvas::new(10, 60).unwrap();
-        Scene {
-            cap: None,
-            ..scene(&edge_case, &ramp, None)
-        }
-        .draw(&mut bare);
+        scene(&edge_case, &one_style(&ramp, None, false)).draw(&mut bare);
         let alone = at(&bare, 5, 40);
         assert!(
             alone.alpha > 0 && alone.alpha < 0xff,
@@ -575,18 +721,17 @@ mod tests {
         let three = bands(&[1.0, 1.0, 1.0]);
         let ten = bands(&[1.0; 10]);
 
+        let plain = one_style(&ramp, None, false);
         let mut exact = Canvas::new(30, 60).unwrap();
         Scene {
             screen: wide,
-            cap: None,
-            ..scene(&three, &ramp, None)
+            ..scene(&three, &plain)
         }
         .draw(&mut exact);
         let mut overflowing = Canvas::new(30, 60).unwrap();
         Scene {
             screen: wide,
-            cap: None,
-            ..scene(&ten, &ramp, None)
+            ..scene(&ten, &plain)
         }
         .draw(&mut overflowing);
 

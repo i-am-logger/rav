@@ -26,7 +26,7 @@
 //! cargo run --bin kitty_spike -- --occlusion
 //! ```
 
-use rav::render::{Band, BarLayout, Canvas, CapStyle, Colour, Ramp, Scene, Screen};
+use rav::render::{Band, BarLayout, Canvas, CapStyle, Colour, Ramp, Scene, Screen, Style};
 use rav::units::{Length, Level};
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
@@ -463,16 +463,21 @@ fn paint(frame: &mut [u8], width: u32, tick: u64) {
         Some(canvas) => canvas,
         None => return,
     };
-    Scene {
-        bands: &bands,
-        layout,
-        screen,
-        bar_ramp: &Ramp::new(vec![Colour::rgb(0xe0, 0x22, 0x18)]),
-        grid_ramp: Some(&Ramp::new(vec![Colour::rgb(0x22, 0x04, 0x04)])),
+    let bars = Ramp::new(vec![Colour::rgb(0xe0, 0x22, 0x18)]);
+    let grid = Ramp::new(vec![Colour::rgb(0x22, 0x04, 0x04)]);
+    let styles = [Style {
+        bars: &bars,
+        grid: Some(&grid),
         cap: Some(CapStyle {
             colour: Colour::rgb(0xff, 0xc0, 0xb0),
             thickness: Length(3.0),
         }),
+    }];
+    Scene {
+        bands: &bands,
+        layout,
+        screen,
+        styles: &styles,
     }
     .draw(&mut canvas);
 

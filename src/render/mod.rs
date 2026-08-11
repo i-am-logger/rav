@@ -12,4 +12,4 @@ pub mod raster;
 pub use capability::{Capabilities, Requirements, Shortfall};
 pub use geometry::{Anchor, BarLayout, Column, Rectangle, Screen};
 pub use ink::{Colour, Ink};
-pub use raster::{Band, Canvas, CapStyle, Ramp, Scene, Stripe};
+pub use raster::{Band, Canvas, CapStyle, Ramp, Scene, Stripe, Style, StyleId};
