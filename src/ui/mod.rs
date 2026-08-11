@@ -1232,7 +1232,10 @@ mod tests {
             .into_iter()
             .find(|r| r.description == "would draw on")
             .and_then(|r| r.value);
-        assert_eq!(readout, Some("glyphs (under a multiplexer)".to_string()));
+        assert_eq!(
+            readout,
+            Some("glyphs (tmux or screen is in the way)".to_string())
+        );
     }
 
     #[test]

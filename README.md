@@ -45,10 +45,8 @@ rav --clean           # keep logging out of the display
 rav --surface kitty   # auto, glyphs, kitty or window
 ```
 
-`--surface` is reported and not yet obeyed: `h` shows which one rav *would* draw
-on, and block glyphs draw the frame either way. It is out early so the startup
-probe behind it — which asks your terminal a question and waits 120ms for an
-answer — gets a release of exposure before anything depends on it.
+`--surface` only reports for now. Press `h` and rav tells you which surface it
+would draw on and why; block characters draw the picture either way.
 
 Everything else is a keypress, and `h` shows the lot with their current values:
 

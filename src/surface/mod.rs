@@ -99,7 +99,7 @@ impl Chosen {
     /// answer when there is no answer.
     pub const UNASKED: Self = Self {
         surface: Surface::Glyphs,
-        because: "nothing asked",
+        because: "not asked yet",
     };
 }
 
@@ -137,17 +137,17 @@ pub fn choose(asked: Choice, multiplexed: bool, answers: impl FnOnce() -> bool) 
         // passes through. Image escapes do not survive that intact, and the
         // failure is a garbled screen rather than a missing picture - so auto
         // never picks pixels there, however the terminal answers.
-        Choice::Auto if multiplexed => glyphs("under a multiplexer"),
+        Choice::Auto if multiplexed => glyphs("tmux or screen is in the way"),
         // Not a guard, because calling `answers` consumes it and a match guard
         // only gets a borrow.
         Choice::Auto => {
             if answers() {
                 Chosen {
                     surface: Surface::Kitty,
-                    because: "the terminal answered",
+                    because: "your terminal can draw images",
                 }
             } else {
-                glyphs("the terminal said nothing")
+                glyphs("your terminal cannot draw images")
             }
         }
     }
@@ -323,7 +323,7 @@ mod tests {
         // missing picture, which is worse than not trying.
         let under_tmux = choose(Choice::Auto, true, || true);
         assert_eq!(under_tmux.surface, Surface::Glyphs);
-        assert_eq!(under_tmux.because, "under a multiplexer");
+        assert_eq!(under_tmux.because, "tmux or screen is in the way");
     }
 
     #[test]
