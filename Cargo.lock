@@ -1273,6 +1273,7 @@ dependencies = [
  "libc",
  "objc2",
  "objc2-foundation",
+ "proptest",
  "rand 0.8.7",
  "ratatui",
  "rav-appearance",
