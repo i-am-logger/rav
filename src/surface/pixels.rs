@@ -22,11 +22,9 @@
 //! **One image id, reused.** A new id per frame leaves the terminal holding
 //! every frame ever sent.
 
+use super::kitty::Command;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-
-/// The id every frame is sent under.
-const IMAGE_ID: u32 = 1;
 
 /// How long a frame may go unread before its staging file is reclaimed, in
 /// frames. The terminal unlinks what it reads, so this normally finds nothing;
@@ -88,8 +86,16 @@ impl Pixels {
         // read half a frame or find the file already gone - and it would happen
         // under exactly the lag this transport exists to tolerate.
         let path = dir.join(format!("rav-{}-{}.rgba", std::process::id(), self.sent));
+        // The frame goes to the file exactly as it is. Nothing encodes it: the
+        // command below carries the path, not the pixels.
         std::fs::write(&path, frame)?;
-        out.write_all(&transmission(&path, frame.len(), width, height))?;
+        let command = Command::Draw {
+            frame: &path,
+            bytes: frame.len(),
+            width,
+            height,
+        };
+        out.write_all(command.escape().as_bytes())?;
 
         if let Some(stale) = self.sent.checked_sub(LAG_TOLERATED) {
             let _ = std::fs::remove_file(dir.join(format!(
@@ -115,111 +121,57 @@ impl Pixels {
     }
 }
 
-/// The escape sequence that places a staged frame.
-fn transmission(path: &Path, bytes: usize, width: u32, height: u32) -> Vec<u8> {
-    let encoded = base64(path.to_string_lossy().as_bytes());
-    // `z=0` is the default and is written anyway. Below zero puts the frame
-    // under every cell's background, and a terminal running any theme gives
-    // every cell one - so a negative z is a blank screen that still reports
-    // every frame transmitted successfully.
-    format!(
-        "\x1b_Ga=T,q=2,i={IMAGE_ID},f=32,s={width},v={height},z=0,C=1,S={bytes},t=t;{encoded}\x1b\\"
-    )
-    .into_bytes()
-}
-
 /// Take every image off the screen.
 ///
 /// Belongs in a panic hook as much as in a clean exit: `panic = "abort"` still
 /// runs one, and without this a panic leaves pixels painted over the shell the
 /// user comes back to.
 pub fn clear(out: &mut impl Write) -> io::Result<()> {
-    out.write_all(b"\x1b_Ga=d,d=A\x1b\\")?;
+    out.write_all(Command::Erase.escape().as_bytes())?;
     out.flush()
-}
-
-fn base64(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for group in bytes.chunks(3) {
-        let b = [
-            group[0],
-            group.get(1).copied().unwrap_or(0),
-            group.get(2).copied().unwrap_or(0),
-        ];
-        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
-        for i in 0..4 {
-            if i <= group.len() {
-                out.push(ALPHABET[(n >> (18 - i * 6)) as usize & 0x3f] as char);
-            } else {
-                out.push('=');
-            }
-        }
-    }
-    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn sequence(path: &str, bytes: usize, width: u32, height: u32) -> String {
-        String::from_utf8(transmission(Path::new(path), bytes, width, height)).unwrap()
-    }
-
     #[test]
-    fn base64_matches_the_standard_alphabet_and_padding() {
-        // The terminal decodes this; a wrong table sends it a path that does not
-        // exist and it draws nothing, silently.
-        assert_eq!(base64(b""), "");
-        assert_eq!(base64(b"f"), "Zg==");
-        assert_eq!(base64(b"fo"), "Zm8=");
-        assert_eq!(base64(b"foo"), "Zm9v");
-        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
-        assert_eq!(base64(&[0xff, 0xef, 0xfe]), "/+/+", "the last two symbols");
-    }
+    fn a_staged_frame_reaches_the_file_byte_for_byte() {
+        // The reason `t=t` is the transport at all: what the terminal reads is
+        // the frame itself, not an encoding of it. Anything that put the pixels
+        // through the escape sequence would cost a third again in bytes and a
+        // pass over the whole frame, sixty times a second.
+        let dir = std::env::temp_dir().join(format!("rav-raw-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let frame: Vec<u8> = (0..=255u8).cycle().take(4096).collect();
 
-    #[test]
-    fn a_transmission_carries_everything_the_terminal_needs() {
-        let escape = sequence("/dev/shm/rav-1-0.rgba", 40_000, 100, 100);
+        let mut pixels = Pixels::new();
+        let mut small = Vec::new();
+        pixels.send(&mut small, &frame, 32, 32, &dir).unwrap();
 
-        assert!(escape.starts_with("\x1b_G"), "not an APC string");
-        assert!(escape.ends_with("\x1b\\"), "unterminated");
-        assert!(escape.contains("S=40000"), "no size: it would draw nothing");
-        assert!(escape.contains("C=1"), "the picture would walk off-screen");
-        assert!(escape.contains("q=2"), "replies would flood the key reader");
-        assert!(escape.contains("s=100,v=100"), "wrong extent");
-        assert!(escape.contains("f=32"), "RGBA");
-        assert!(escape.contains("t=t"), "a file the terminal unlinks");
-        assert!(escape.contains(&format!("i={IMAGE_ID}")), "one id, reused");
-
-        // Byte for byte the sequence measured at 60fps in WezTerm, so any
-        // difference here is a difference from the only form known to draw.
+        let staged = std::fs::read_dir(&dir).unwrap().next().unwrap().unwrap();
         assert_eq!(
-            escape,
-            format!(
-                "\x1b_Ga=T,q=2,i=1,f=32,s=100,v=100,z=0,C=1,S=40000,t=t;{}\x1b\\",
-                base64(b"/dev/shm/rav-1-0.rgba"),
-            ),
+            std::fs::read(staged.path()).unwrap(),
+            frame,
+            "not the frame"
         );
-    }
 
-    #[test]
-    fn the_path_travels_encoded_rather_than_raw() {
-        // A raw path with a `;` or a `,` in it would be read as more of the
-        // header, and the frame would be dropped or misread.
-        let escape = sequence("/tmp/a,b;c/rav-0.rgba", 4, 1, 1);
-        assert!(!escape.contains("/tmp/a,b;c"), "the path went out raw");
-        assert!(escape.contains(&base64(b"/tmp/a,b;c/rav-0.rgba")));
-    }
+        // A hundredfold larger frame, and the same command but for the digits of
+        // the byte count. Anything else means the pixels are being carried
+        // rather than pointed at.
+        let big = vec![0u8; frame.len() * 100];
+        let mut large = Vec::new();
+        pixels.send(&mut large, &big, 320, 320, &dir).unwrap();
+        assert!(
+            large.len().abs_diff(small.len()) <= 4,
+            "{} bytes for a 4KB frame, {} for a 400KB one",
+            small.len(),
+            large.len(),
+        );
+        assert!(large.len() * 1000 < big.len(), "the command carried it");
 
-    #[test]
-    fn clearing_removes_every_image_rather_than_one() {
-        // `d=A` is all of them. A panic hook has no idea which ids are live, and
-        // leaving one behind paints it over the user's shell.
-        let mut out = Vec::new();
-        clear(&mut out).unwrap();
-        assert_eq!(out, b"\x1b_Ga=d,d=A\x1b\\");
+        pixels.tidy(&dir);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

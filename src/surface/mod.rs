@@ -6,6 +6,7 @@
 //! class in this area, so it ships first with its only possible symptom being a
 //! wrong label.
 
+pub mod kitty;
 pub mod pixels;
 
 use crate::render::Capabilities;
@@ -197,10 +198,7 @@ fn probe_via<W: Write, R: Read + AsRawFd>(out: &mut W, input: &mut R) -> bool {
     // silence and there is nothing to wait for. Terminals answer queries in the
     // order they arrive, so a `CSI c` reply with no graphics reply ahead of it
     // is a definite no, available immediately.
-    let pixel = "AAAA"; // three zero bytes, base64
-    if write!(out, "\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;{pixel}\x1b\\\x1b[c").is_err()
-        || out.flush().is_err()
-    {
+    if write!(out, "{}\x1b[c", kitty::Command::Ask.escape()).is_err() || out.flush().is_err() {
         return false;
     }
 
