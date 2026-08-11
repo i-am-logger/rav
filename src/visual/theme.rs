@@ -225,4 +225,168 @@ mod tests {
     fn an_unknown_theme_says_so_rather_than_falling_back() {
         assert!(load("puce").is_err());
     }
+
+    /// A theme file with `body` inside `[colors]`, otherwise well formed.
+    fn theme_with(colors: &str) -> String {
+        format!("name = \"test\"\n[colors]\npeak = \"#ffffff\"\n{colors}\n")
+    }
+
+    /// A TOML array of `count` identical colours.
+    fn ladder(count: usize) -> String {
+        let stops: Vec<&str> = (0..count).map(|_| "\"#ff0000\"").collect();
+        format!("[{}]", stops.join(", "))
+    }
+
+    #[test]
+    fn a_ladder_of_the_wrong_length_is_refused_rather_than_padded() {
+        // The one error worth being strict about. Padding a short ramp puts a
+        // colour the author never chose at the top - where a full-scale bar
+        // reaches - and it reads as a rendering bug rather than as a file with
+        // fifteen colours in it. The message has to say the number, because
+        // miscounting the entries is how the mistake gets made.
+        assert_eq!(ladder(15).matches("#ff0000").count(), 15, "fifteen stops");
+
+        let file = |bars: String, scope: String| {
+            theme_with(&format!(
+                "bars = {bars}\ngrid = \"#000000\"\nscope = {scope}"
+            ))
+        };
+
+        // Whichever ramp is not under test is given a length that is fine, so
+        // the refusal can only be about the one being asked about.
+        for wrong in [0, 1, 15, 17, 32] {
+            let error = parse(&file(ladder(wrong), ladder(SCOPE_LEVELS)))
+                .expect_err(&format!("{wrong} stops is not {STOPS}"));
+            let said = format!("{error:#}");
+            assert!(said.contains("bars"), "which ramp? {said}");
+            assert!(said.contains(&STOPS.to_string()), "how many? {said}");
+        }
+        for wrong in [0, 1, 4, 6] {
+            let error = parse(&file(ladder(STOPS), ladder(wrong)))
+                .expect_err(&format!("{wrong} levels is not {SCOPE_LEVELS}"));
+            assert!(format!("{error:#}").contains("scope"), "which ramp?");
+        }
+
+        // An array of one is not the single-colour form - that is a bare string.
+        // Getting those two confused is the likeliest way to write this wrong,
+        // so both are pinned: the array is refused and the string is not.
+        assert!(parse(&file("[\"#ff0000\"]".into(), ladder(SCOPE_LEVELS))).is_err());
+        assert!(parse(&file("\"#ff0000\"".into(), ladder(SCOPE_LEVELS))).is_ok());
+    }
+
+    #[test]
+    fn one_colour_stands_in_for_a_whole_ladder() {
+        // How `mono` is written, and the shortest possible theme file.
+        let flat = parse(&theme_with(
+            "bars = \"#123456\"\ngrid = \"black\"\nscope = \"#ffffff\"",
+        ))
+        .expect("a single colour is a ladder");
+        assert_eq!(flat.bars.len(), STOPS);
+        assert_eq!(flat.scope.len(), SCOPE_LEVELS);
+        assert!(
+            flat.bars
+                .iter()
+                .all(|&ink| ink == Ink::Rgb(0x12, 0x34, 0x56))
+        );
+    }
+
+    #[test]
+    fn a_colour_that_is_not_one_is_refused_with_the_two_ways_to_write_one() {
+        // Every one of these is a plausible thing to type, and the error is the
+        // only place a theme author finds out which forms exist.
+        for bad in [
+            "#fff",
+            "#ffff",
+            "#gggggg",
+            "#ffffffff",
+            "puce",
+            "rgb(1,2,3)",
+        ] {
+            let error = parse(&theme_with(&format!(
+                "bars = \"{bad}\"\ngrid = \"black\"\nscope = \"white\""
+            )))
+            .expect_err("{bad} is not a colour");
+            let said = format!("{error:#}");
+            assert!(
+                said.contains("#rrggbb"),
+                "{bad:?} was refused without saying how to write one: {said}",
+            );
+        }
+    }
+
+    #[test]
+    fn the_named_colours_stay_named_all_the_way_through() {
+        // The whole reason `terminal` and `mono` exist: a name is handed to the
+        // surface unresolved, so the terminal paints it from the palette the
+        // user actually runs. Resolving it here would replace their green with
+        // one rav chose.
+        let named = parse(&theme_with(
+            "bars = \"bright-green\"\ngrid = \"black\"\nscope = \"white\"",
+        ))
+        .expect("names are colours");
+        assert!(
+            matches!(named.bars[0], Ink::Ansi(_)),
+            "the name was resolved to an exact colour",
+        );
+    }
+
+    #[test]
+    fn darken_reads_all_three_ways_it_can_be_written() {
+        // Absent, `true`, and a number are three different intents and one of
+        // them is "leave it alone" - which is not the same as `Some(1.0)`. That
+        // distinction is what keeps `mono` following the terminal's palette,
+        // and collapsing it is a mistake this has already caught once.
+        let with = |line: &str| {
+            parse(&format!(
+                "name = \"t\"\n{line}\n[colors]\npeak = \"#ffffff\"\n\
+                 bars = \"#ffffff\"\ngrid = \"#000000\"\nscope = \"#ffffff\"\n"
+            ))
+            .expect("valid")
+            .darken
+        };
+        assert_eq!(with(""), None, "absent means leave it alone");
+        assert_eq!(with("darken = true"), Some(DEFAULT_DARKEN));
+        assert_eq!(with("darken = false"), None, "off is not zero");
+        assert_eq!(with("darken = 0.4"), Some(0.4));
+        assert_eq!(with("darken = 2.0"), Some(1.0), "clamped, not refused");
+        assert_eq!(with("darken = -1.0"), Some(0.0));
+    }
+
+    #[test]
+    fn a_theme_from_a_newer_rav_still_loads_on_an_older_one() {
+        // Deliberate: the on-disk shape has no `deny_unknown_fields`, so a file
+        // carrying a `[shapes]` table parses here and is ignored. That is what
+        // lets skins ship without every older binary refusing every new theme
+        // file - and it is a guarantee, so it is tested rather than assumed.
+        let forward = parse(
+            "name = \"future\"\ndescription = \"from later\"\n\
+             [about]\nsource = \"someone else\"\n\
+             [shapes]\nsteps = 8\nglyphs = \"blocks\"\n\
+             [colors]\npeak = \"#ffffff\"\nbars = \"#ff0000\"\n\
+             grid = \"#000000\"\nscope = \"#ffffff\"\nsparkle = \"#ff00ff\"\n",
+        )
+        .expect("unknown keys are for whoever reads the file next");
+        assert_eq!(forward.name, "future");
+    }
+
+    #[test]
+    fn the_theme_file_in_the_documentation_is_one_that_works() {
+        // docs/themes.md hands a whole `sunset.toml` to anyone writing their
+        // first theme. If it has drifted from the parser, their first attempt
+        // fails and the error is rav's fault, not theirs. Extracted from the
+        // document rather than copied into this test, or the copy is what stays
+        // correct while the document rots.
+        let doc = std::fs::read_to_string("docs/themes.md").expect("beside the source");
+        let example = doc
+            .split("```toml")
+            .map(|block| block.split("```").next().unwrap_or_default())
+            .find(|block| block.contains("name = \"sunset\""))
+            .expect("the worked example is still in docs/themes.md");
+
+        let theme = parse(example).expect("the documented example must parse");
+        assert_eq!(theme.name, "sunset");
+        assert_eq!(theme.bars.len(), STOPS);
+        assert_eq!(theme.grid.len(), STOPS, "one colour fills the ladder");
+        assert_eq!(theme.scope.len(), SCOPE_LEVELS);
+    }
 }
