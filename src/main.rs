@@ -60,7 +60,22 @@ fn surface(text: &str) -> Result<rav::surface::Choice, String> {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> std::process::ExitCode {
+    match rav_main().await {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(problem) => {
+            // To stdout, deliberately. Everything rav can fail at happens after
+            // stderr has been pointed at the log file, so reporting the usual
+            // way means a mistyped `--theme` looks like rav dying in silence:
+            // exit 1, a blank terminal, and the reason in a file the user has
+            // no reason to look in.
+            println!("rav: {problem:#}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+async fn rav_main() -> Result<()> {
     let args = Args::parse();
 
     // Initialize logging with clean mode support
