@@ -2,6 +2,7 @@ pub mod analyzer;
 pub mod help;
 pub mod scale;
 pub mod scope;
+pub mod status;
 
 use crate::{
     audio::AudioData,
@@ -34,6 +35,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::backend::TestBackend;
 use ratatui::{Terminal, style::Color};
 use scope::{Scope, ScopeStyle};
+use status::Status;
 #[cfg(not(test))]
 use std::io::{self, Stdout};
 use std::time::{Duration, Instant};
@@ -790,8 +792,16 @@ impl App {
                 // The transient note still fires on every settings key; the
                 // overlay is the full picture when you want it.
                 if let Some(text) = &status {
-                    let area = f.area();
-                    draw_status(f.buffer_mut(), area, text);
+                    f.render_widget(
+                        Status {
+                            text,
+                            foreground: Color::Rgb(222, 222, 222),
+                            // The floor of the *active* theme, so the note sits
+                            // on the backdrop the user is looking at.
+                            background: to_color(theme.grid[0]),
+                        },
+                        f.area(),
+                    );
                 }
                 if let Some(rows) = &help_rows {
                     f.render_widget(Help { rows, title: "rav" }, f.area());
@@ -841,28 +851,6 @@ fn key_reader() -> flume::Receiver<Event> {
     #[cfg(test)]
     drop(tx);
     rx
-}
-
-/// Draw a short message in the top-left corner.
-///
-/// Written straight into the buffer rather than as a widget so it overlays the
-/// visualisation without reserving a row for a status bar that is empty most of
-/// the time.
-fn draw_status(buf: &mut ratatui::buffer::Buffer, area: ratatui::layout::Rect, text: &str) {
-    if area.is_empty() {
-        return;
-    }
-    let label = format!(" {text} ");
-    for (i, ch) in label.chars().enumerate() {
-        let x = area.x + i as u16;
-        if x >= area.x + area.width {
-            break;
-        }
-        buf[(x, area.y)]
-            .set_symbol(&ch.to_string())
-            .set_fg(Color::Rgb(222, 222, 222))
-            .set_bg(to_color(Theme::default().grid[0]));
-    }
 }
 
 #[cfg(test)]
