@@ -397,7 +397,25 @@ impl App {
                 status,
                 help,
             ),
-            _ => Ok(false),
+            // This will not change while the terminal is the terminal it is, so
+            // the overlay stops promising pixels and the loop stops asking. A
+            // help panel reading "pixels" over a picture made of block
+            // characters is worse than no label at all.
+            _ => {
+                let fallback = Chosen {
+                    surface: crate::surface::Surface::Glyphs,
+                    because: "your terminal will not say how big it is in pixels",
+                };
+                if self.surface != fallback {
+                    info!(
+                        "Drawing with {} ({})",
+                        fallback.surface.label(),
+                        fallback.because
+                    );
+                }
+                self.surface = fallback;
+                Ok(false)
+            }
         }
     }
 
