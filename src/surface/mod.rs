@@ -126,10 +126,10 @@ pub fn choose(asked: Choice, multiplexed: bool, answers: impl FnOnce() -> bool) 
         because,
     };
     match asked {
-        Choice::Window => Chosen {
-            surface: Surface::Window,
-            because: "asked for",
-        },
+        // A window of rav's own is not built. Saying so beats reporting a
+        // surface nothing draws on and leaving the user to wonder why the
+        // picture looks exactly as it did before.
+        Choice::Window => glyphs("a window of rav's own is not built yet"),
         // An explicit request is honoured even where auto would decline, so a
         // terminal that does not answer the query but does draw images is still
         // reachable. It is the user's terminal and they can see the result.
@@ -143,8 +143,6 @@ pub fn choose(asked: Choice, multiplexed: bool, answers: impl FnOnce() -> bool) 
         // failure is a garbled screen rather than a missing picture - so auto
         // never picks pixels there, however the terminal answers.
         Choice::Auto if multiplexed => glyphs("tmux or screen is in the way"),
-        // Not a guard, because calling `answers` consumes it and a match guard
-        // only gets a borrow.
         // Pixels are asked for, never assumed. A terminal that says it can draw
         // images is told so and left on block characters, because "it looked
         // fine on the one terminal that was tried" is not something a default
@@ -152,6 +150,9 @@ pub fn choose(asked: Choice, multiplexed: bool, answers: impl FnOnce() -> bool) 
         // for everybody rather than for whoever opted in.
         //
         // The line to change when that is no longer true is the one below.
+        //
+        // Not a match guard, because calling `answers` consumes it and a guard
+        // only gets a borrow.
         Choice::Auto => {
             if answers() {
                 glyphs("your terminal can draw images - try --surface kitty")
@@ -356,6 +357,15 @@ mod tests {
             choose(Choice::Kitty, false, || false).surface,
             Surface::Kitty
         );
+    }
+
+    #[test]
+    fn asking_for_a_window_says_there_is_not_one_yet() {
+        // Reporting a surface nothing draws on leaves the user looking at a
+        // picture identical to the one before, wondering what the flag did.
+        let asked = choose(Choice::Window, false, || false);
+        assert_eq!(asked.surface, Surface::Glyphs);
+        assert!(asked.because.contains("not built"), "{}", asked.because);
     }
 
     #[test]
