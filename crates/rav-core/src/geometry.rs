@@ -232,6 +232,11 @@ impl Column {
         self.width
     }
 
+    /// The far edge, so asking whether a column fits is asking the column.
+    pub fn right(&self) -> Length {
+        self.left + self.width
+    }
+
     pub fn anchor(&self) -> Anchor {
         self.anchor
     }

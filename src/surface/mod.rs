@@ -6,6 +6,7 @@
 //! class in this area, so it ships first with its only possible symptom being a
 //! wrong label.
 
+pub mod frame;
 pub mod kitty;
 pub mod pixels;
 
