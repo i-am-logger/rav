@@ -502,8 +502,11 @@ impl Elapsed {
     /// The bridge every rate written per-frame has to cross. Constants copied
     /// from something that drew sixty times a second mean nothing until they
     /// are told how many of those frames have gone by.
+    ///
+    /// A rate below one a second gives a fraction of a frame, which is the
+    /// honest answer; a nonsensical one gives none.
     pub fn frames_at(self, fps: f32) -> Frames {
-        Frames(self.0 * fps.max(1.0))
+        Frames::count(self.0 * fps)
     }
 }
 
@@ -829,6 +832,24 @@ mod tests {
     fn time_never_runs_backwards() {
         assert_eq!(Elapsed::seconds(-1.0).as_seconds(), 0.0);
         assert_eq!(Elapsed::seconds(f32::NAN).as_seconds(), 0.0);
+    }
+
+    #[test]
+    fn a_duration_counts_frames_of_the_display_it_is_asked_about() {
+        // The same half second is thirty frames of one display and fifteen of
+        // another, which is why a rate written per frame has to say whose.
+        assert_eq!(Elapsed::seconds(0.5).frames_at(60.0), Frames::count(30.0));
+        assert_eq!(Elapsed::seconds(0.5).frames_at(30.0), Frames::count(15.0));
+
+        // A display slower than a frame a second gets a fraction of one, not a
+        // whole one - rounding up here would make a rate fall faster than asked
+        // on exactly the hardware least able to hide it.
+        assert_eq!(Elapsed::seconds(1.0).frames_at(0.5), Frames::count(0.5));
+
+        // A rate nobody could run at counts nothing, rather than running the
+        // motion backwards or filling it with NaN.
+        assert!(Elapsed::seconds(1.0).frames_at(f32::NAN).is_none());
+        assert!(Elapsed::seconds(1.0).frames_at(-60.0).is_none());
     }
 
     #[test]

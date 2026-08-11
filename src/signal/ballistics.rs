@@ -187,8 +187,11 @@ impl Ballistics {
         let k = self.peak_fall;
         // A cap's velocity compounds, so how far it falls is the sum of a
         // series rather than speed times frames. The sum lives in `rav-core`
-        // with the rest of the arithmetic an LED strip would need.
-        let growth = k.powf(frames);
+        // with the rest of the arithmetic an LED strip would need, and the new
+        // velocity is raised by the same `powf` the sum uses - two
+        // implementations of it could disagree in the last bit and leave the
+        // cap a hair from where the distance says it landed.
+        let growth = rav_core::math::powf(k, frames);
         let distance_factor = rav_core::math::compounded_travel(k, Frames::count(frames));
 
         // Indexing rather than zipping: four parallel arrays, and three of them
