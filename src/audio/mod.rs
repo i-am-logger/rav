@@ -1,3 +1,4 @@
+pub mod synthetic;
 #[cfg(target_os = "macos")]
 pub mod tap;
 

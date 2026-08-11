@@ -152,36 +152,57 @@ async fn rav_main() -> Result<()> {
         return Ok(());
     }
 
-    // Initialize audio capture
-    let mut audio_capture = AudioCapture::new(
-        args.device.as_deref(),
-        config.audio.sample_rate,
-        config.audio.buffer_size,
-    )
-    .await?;
+    // `--test-audio` opens no device at all, which is the whole of its use: a
+    // machine with no loopback, no recording permission or no sound card still
+    // shows a working display.
+    let mut audio_capture = if args.test_audio {
+        None
+    } else {
+        Some(
+            AudioCapture::new(
+                args.device.as_deref(),
+                config.audio.sample_rate,
+                config.audio.buffer_size,
+            )
+            .await?,
+        )
+    };
 
-    // Start audio capture
-    let audio_receiver = audio_capture.start().await?;
-    info!("🎵 Audio capture started");
+    let (audio_receiver, channels, sample_rate, source) = match &mut audio_capture {
+        Some(capture) => {
+            let receiver = capture.start().await?;
+            info!("🎵 Audio capture started");
+            // Both are only final after start(), which may renegotiate. The
+            // channel count matters: cpal delivers interleaved frames, and
+            // ignoring it silently mixes L and R into the time domain.
+            info!(
+                "Capturing at {}Hz, {} channel(s)",
+                capture.sample_rate(),
+                capture.channels()
+            );
+            (
+                receiver,
+                capture.channels(),
+                capture.sample_rate(),
+                capture.device_name(),
+            )
+        }
+        None => {
+            let rate = config.audio.sample_rate;
+            (
+                rav::audio::synthetic::start(rate),
+                1,
+                rate,
+                "the built-in test signal".to_string(),
+            )
+        }
+    };
 
-    // Both are only final after start(), which may renegotiate. The channel
-    // count matters: cpal delivers interleaved frames, and ignoring it silently
-    // mixes L and R into the time domain.
-    info!(
-        "Capturing at {}Hz, {} channel(s)",
-        audio_capture.sample_rate(),
-        audio_capture.channels()
-    );
-
-    let mut app = App::new(
-        config,
-        audio_capture.channels(),
-        audio_capture.sample_rate(),
-    )?;
+    let mut app = App::new(config, channels, sample_rate)?;
     // The device for now; the tap below replaces it if it starts. Said here and
     // corrected there rather than announced once in the middle, because the
     // answer is not settled until the tap has had its turn.
-    app.listening_to(audio_capture.device_name());
+    app.listening_to(source);
 
     // A named theme that cannot be read is an error rather than a silent fall
     // back to the default: the display would look right and be the wrong theme.
@@ -209,22 +230,28 @@ async fn rav_main() -> Result<()> {
     // the system volume, so playback level does not drive the display, and it
     // needs no virtual device installed. Falls back to the capture device when
     // unavailable - macOS below 14.2, or the recording permission refused.
+    //
+    // Skipped entirely under `--test-audio`: taking the system's own output
+    // would be capturing a device, which is the one thing that flag exists to
+    // avoid.
     #[cfg(target_os = "macos")]
-    match rav::audio::tap::Tap::start() {
-        Ok(tap) => {
-            info!(
-                "Using CoreAudio process tap: {}Hz, {} channel(s)",
-                tap.sample_rate(),
-                tap.channels()
-            );
-            // Nothing drains the cpal stream once the tap takes over. Its queue
-            // is bounded and drops its oldest block, so this frees a capture
-            // device and a callback rather than memory.
-            audio_capture.stop();
-            app.use_tap(tap);
-        }
-        Err(e) => {
-            info!("Process tap unavailable ({e}); using the capture device instead");
+    if let Some(capture) = &mut audio_capture {
+        match rav::audio::tap::Tap::start() {
+            Ok(tap) => {
+                info!(
+                    "Using CoreAudio process tap: {}Hz, {} channel(s)",
+                    tap.sample_rate(),
+                    tap.channels()
+                );
+                // Nothing drains the cpal stream once the tap takes over. Its
+                // queue is bounded and drops its oldest block, so this frees a
+                // capture device and a callback rather than memory.
+                capture.stop();
+                app.use_tap(tap);
+            }
+            Err(e) => {
+                info!("Process tap unavailable ({e}); using the capture device instead");
+            }
         }
     }
 
@@ -239,9 +266,12 @@ async fn rav_main() -> Result<()> {
         }
     };
 
-    // Explicitly stop audio capture before exit
-    info!("Stopping audio capture...");
-    audio_capture.stop();
+    // Explicitly stop audio capture before exit. The test signal needs no such
+    // thing: its thread ends when the channel it feeds is dropped.
+    if let Some(capture) = &mut audio_capture {
+        info!("Stopping audio capture...");
+        capture.stop();
+    }
 
     // Small delay to allow cleanup
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
