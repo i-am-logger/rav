@@ -101,7 +101,7 @@ fn query_via<W: Write, R: Read + AsRawFd>(out: &mut W, input: &mut R) -> Palette
     }
     palette
 }
-fn readable(fd: i32, within: Duration) -> bool {
+pub(crate) fn readable(fd: i32, within: Duration) -> bool {
     let mut poll = libc::pollfd {
         fd,
         events: libc::POLLIN,

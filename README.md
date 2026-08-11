@@ -42,7 +42,11 @@ rav --theme winamp    # rav, winamp, terminal, mono, or a path to a theme
 rav --list-devices    # what rav can capture from
 rav -d "<name>"       # capture from a named device
 rav --clean           # keep logging out of the display
+rav --surface kitty   # auto, glyphs, kitty or window
 ```
+
+`--surface` only reports for now. Press `h` and rav tells you which surface it
+would draw on and why; block characters draw the picture either way.
 
 Everything else is a keypress, and `h` shows the lot with their current values:
 

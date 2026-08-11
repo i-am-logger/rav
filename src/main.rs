@@ -39,6 +39,24 @@ struct Args {
     /// Theme: `rav`, `winamp`, `terminal`, `mono`, or a name/path of a theme file
     #[arg(long, value_name = "NAME|PATH")]
     theme: Option<String>,
+
+    /// Which surface to draw on. Reported in the help overlay; nothing draws on
+    /// it yet, so today this only changes what rav says it would use.
+    #[arg(
+        long,
+        value_name = "auto|glyphs|kitty|window",
+        default_value = "auto",
+        value_parser = surface
+    )]
+    surface: rav::surface::Choice,
+}
+
+/// Reject an unknown surface rather than falling back to `auto`.
+///
+/// A typo that silently means `auto` is a bug report about rav ignoring a flag.
+fn surface(text: &str) -> Result<rav::surface::Choice, String> {
+    rav::surface::Choice::parse(text)
+        .ok_or_else(|| format!("unknown surface `{text}` - try auto, glyphs, kitty or window"))
 }
 
 #[tokio::main]
@@ -152,6 +170,21 @@ async fn main() -> Result<()> {
         app.set_theme(rav::visual::theme::load(theme)?);
         info!("Using theme: {theme}");
     }
+
+    // Here, and not inside `App`, because asking the terminal has to happen
+    // before the alternate screen is entered and while nothing else is reading
+    // stdin - the same constraint the palette query above runs under.
+    let chosen = rav::surface::choose(
+        args.surface,
+        rav::surface::multiplexed(),
+        rav::surface::probe,
+    );
+    info!(
+        "Would draw on {} ({})",
+        chosen.surface.label(),
+        chosen.because
+    );
+    app.set_surface(chosen);
 
     // Prefer a CoreAudio process tap. It captures every process' output ahead of
     // the system volume, so playback level does not drive the display, and it

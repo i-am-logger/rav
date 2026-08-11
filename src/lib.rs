@@ -3,6 +3,7 @@ pub mod audio;
 pub mod config;
 pub mod render;
 pub mod signal;
+pub mod surface;
 pub mod testing;
 pub mod ui;
 pub mod visual;
