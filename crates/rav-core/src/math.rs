@@ -1,5 +1,9 @@
 //! The floating-point operations `core` does not have.
 //!
+//! Public because the sibling crates need the same ones, and two shims would be
+//! two chances to disagree - which is the failure this workspace exists to make
+//! impossible.
+//!
 //! `f32::floor`, `round`, `log10` and `powf` are `std` methods, not `core` ones,
 //! so a `no_std` crate cannot call them however ordinary they look. They are
 //! gathered here rather than spread as `libm::floorf` calls through the
@@ -10,27 +14,27 @@
 //! rust-lang port of musl's, which is what `std` itself uses on many targets.
 
 /// Toward negative infinity.
-pub(crate) fn floor(value: f32) -> f32 {
+pub fn floor(value: f32) -> f32 {
     libm::floorf(value)
 }
 
 /// To the nearest, halfway away from zero - the same rule `f32::round` uses.
-pub(crate) fn round(value: f32) -> f32 {
+pub fn round(value: f32) -> f32 {
     libm::roundf(value)
 }
 
 /// Toward positive infinity.
-pub(crate) fn ceil(value: f32) -> f32 {
+pub fn ceil(value: f32) -> f32 {
     libm::ceilf(value)
 }
 
 /// Base-ten logarithm. Only [`crate::units::Curve::Decibel`] needs it.
-pub(crate) fn log10(value: f32) -> f32 {
+pub fn log10(value: f32) -> f32 {
     libm::log10f(value)
 }
 
 /// Raise to a power. Only [`crate::units::Curve::Gamma`] needs it.
-pub(crate) fn powf(value: f32, exponent: f32) -> f32 {
+pub fn powf(value: f32, exponent: f32) -> f32 {
     libm::powf(value, exponent)
 }
 

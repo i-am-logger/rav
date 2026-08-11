@@ -77,7 +77,7 @@ impl Colour {
     /// All three channels together, which keeps the hue - scaling per channel
     /// drains a saturated colour towards black by way of brown.
     pub fn dimmed(self, keep: f32) -> Self {
-        let scale = |c: u8| (f32::from(c) * keep).round().clamp(0.0, 255.0) as u8;
+        let scale = |c: u8| rav_core::math::round(f32::from(c) * keep).clamp(0.0, 255.0) as u8;
         Self {
             red: scale(self.red),
             green: scale(self.green),
@@ -206,7 +206,8 @@ impl Ink {
             (Some(keep), Some((r, g, b))) => {
                 // All three channels together, which keeps the hue. Per channel
                 // drains a saturated colour to black by way of brown.
-                let scale = |c: u8| (f32::from(c) * keep).round().clamp(0.0, 255.0) as u8;
+                let scale =
+                    |c: u8| rav_core::math::round(f32::from(c) * keep).clamp(0.0, 255.0) as u8;
                 Self::Rgb(scale(r), scale(g), scale(b))
             }
         }
@@ -216,6 +217,8 @@ impl Ink {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // `no_std` drops the prelude, so a test that builds a string says so.
+    use alloc::format;
 
     #[test]
     fn a_rising_ramp_loses_luminance_which_is_why_brightness_is_not_derived_from_it() {

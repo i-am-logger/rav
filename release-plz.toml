@@ -67,3 +67,9 @@ git_release_enable = true
 name = "rav-core"
 git_tag_name = "rav-core-v{{ version }}"
 git_release_enable = false
+
+# Published for the same reason as rav-core, and no more user-facing than it is.
+[[package]]
+name = "rav-appearance"
+git_tag_name = "rav-appearance-v{{ version }}"
+git_release_enable = false

@@ -36,7 +36,7 @@
 #[cfg(test)]
 extern crate std;
 
-mod math;
+pub mod math;
 
 pub mod capability;
 pub mod geometry;

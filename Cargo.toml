@@ -3,7 +3,7 @@
 # is `no_std` and allocation-free, and a crate cannot acquire a dependency on an
 # allocator, a clock or a terminal by accident where a module can.
 [workspace]
-members = ["crates/rav-core"]
+members = ["crates/rav-core", "crates/rav-appearance"]
 
 # Stated once, inherited by every member. The crates ship together and their
 # versions have to move together - a rav built against a different rav-core is
@@ -21,6 +21,7 @@ repository = "https://github.com/i-am-logger/rav"
 # the version is what a published rav requires, so the two cannot drift.
 [workspace.dependencies]
 rav-core = { path = "crates/rav-core", version = "1.0.0-beta.6" }
+rav-appearance = { path = "crates/rav-appearance", version = "1.0.0-beta.6" }
 
 [package]
 name = "rav"
@@ -53,6 +54,9 @@ unused = "deny"
 # The mechanics: levels, steps, geometry, and what a display can show. no_std and
 # allocation-free, so the same crate builds for a microcontroller unchanged.
 rav-core = { workspace = true }
+# Themes, ramps and colour - what an abstract step looks like. no_std, and it
+# names no rasteriser, so the same theme dresses every surface.
+rav-appearance = { workspace = true }
 
 # Terminal User Interface
 ratatui = "0.28"
