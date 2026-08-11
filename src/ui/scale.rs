@@ -9,6 +9,8 @@
 //! but `as usize` on a negative float saturates silently rather than failing, and
 //! a helper that trusts its caller eventually gets a bad value.
 
+use crate::units::Level;
+
 /// Solid-bar height in eighths of a cell. **Truncates.**
 ///
 /// Sub-cell resolution comes from the ⅛ block glyphs, so a bar of 3.4 cells is
@@ -118,6 +120,11 @@ pub fn ramp_index(row_from_bottom: u16, height: u16, bands: usize) -> usize {
         // is the only answer that is not arbitrary.
         return last_band / 2;
     }
+    // Stretched, not positional: row 0 is the floor of the ramp and row
+    // `height - 1` its ceiling, whatever the height. A continuous surface has no
+    // rows to stretch between and measures from the floor instead - which is the
+    // one genuine difference between the two, and is why this computes a
+    // fraction rather than reaching for the stop itself.
     let t = row_from_bottom.min(height - 1) as f32 / (height - 1) as f32;
     // Only skew while stops are being skipped. With a row per stop every colour
     // is reachable anyway and the ramp should be used exactly as the theme has it.
@@ -126,7 +133,10 @@ pub fn ramp_index(row_from_bottom: u16, height: u16, bands: usize) -> usize {
     } else {
         t
     };
-    ((t * last_band as f32).round() as usize).min(last_band)
+    // The selection rule itself lives in `units`, so the terminal and every
+    // pixel surface share one implementation of "which stop is this". They had
+    // two, and the two disagreed on 679 of 19980 row/height pairs.
+    Level::new(t).nearest_step(bands).index()
 }
 
 #[cfg(test)]

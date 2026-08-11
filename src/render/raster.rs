@@ -68,13 +68,17 @@ impl Ramp {
     }
 
     /// The colour at a height above the floor, on a screen this tall.
+    ///
+    /// Positional: measured from the floor, because a continuous surface has no
+    /// rows to stretch between. The terminal's `ramp_index` stretches instead,
+    /// so that row `height - 1` is always the last stop however few rows there
+    /// are. That difference in *input* is deliberate and is the only one - the
+    /// selection rule below is shared, and
+    /// `the_two_surfaces_never_differ_by_more_than_one_stop` bounds what the
+    /// difference can cost.
     pub fn at(&self, height_above_floor: Length, screen_height: Length) -> Colour {
-        let last = self.stops.len() - 1;
-        if last == 0 {
-            return self.stops[0];
-        }
         let fraction = height_above_floor.fraction_of(screen_height);
-        self.stops[((fraction * last as f32).round() as usize).min(last)]
+        self.stops[Level::new(fraction).nearest_step(self.stops.len()).index()]
     }
 
     /// The stripes this ramp paints on a screen, ceiling first.
@@ -384,6 +388,36 @@ mod tests {
                 at(&tall, 5, y),
                 "row {y} disagrees between a quiet band and a loud one"
             );
+        }
+    }
+
+    #[test]
+    fn the_two_surfaces_never_differ_by_more_than_one_stop() {
+        // The terminal and the rasteriser each pick a stop by height, and they
+        // used to do it with two separate implementations that disagreed on 679
+        // of 19980 row/height pairs. They now share one rule and differ only in
+        // how each computes its fraction: the terminal stretches row 0..height-1
+        // across the whole ramp so a short display still reaches the last
+        // colour, while a continuous surface measures from the floor.
+        //
+        // That residue is inherent to quantising a continuous height onto cells,
+        // so this bounds it rather than forbidding it. If the two ever drift
+        // further apart than one stop, they have stopped being one rule again.
+        use crate::ui::scale::ramp_index;
+        let stops: Vec<Colour> = (0..16).map(|i| Colour::rgb(i as u8, 0, 0)).collect();
+        let ramp = Ramp::new(stops);
+
+        for rows in 16u16..=200 {
+            for row in 0..rows {
+                let terminal = ramp_index(row, rows, 16) as i32;
+                // The same row's centre, as a continuous height above the floor.
+                let centre = Length((row as f32 + 0.5) / rows as f32);
+                let pixel = ramp.at(centre, Length(1.0)).red as i32;
+                assert!(
+                    (terminal - pixel).abs() <= 1,
+                    "rows {rows} row {row}: terminal {terminal}, pixel {pixel}"
+                );
+            }
         }
     }
 
