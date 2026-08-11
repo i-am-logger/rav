@@ -533,7 +533,7 @@ impl App {
     fn stop_painting(&mut self, out: &mut impl Write) -> Result<()> {
         if self.painting {
             crate::surface::pixels::clear(out)?;
-            self.painter.tidy(crate::surface::pixels::staging());
+            crate::surface::pixels::tidy(crate::surface::pixels::staging());
             self.painted_cells.clear();
             self.painting = false;
         }
@@ -1139,10 +1139,18 @@ const WATCHDOG: Duration = Duration::from_millis(250);
 
 /// Put the terminal back the way it was found.
 ///
-/// Raw mode off, off the alternate screen, cursor visible. The one place that
-/// knows what setting rav up did, so the way out cannot drift from the way in.
+/// Images off the screen and their frames reclaimed, raw mode off, off the
+/// alternate screen, cursor visible. The one place that knows what setting rav
+/// up did, so the way out cannot drift from the way in.
+///
+/// Images go first: one left behind is painted over the shell the user comes
+/// back to. The frames go with them because in `/dev/shm` an unread frame is
+/// resident memory that outlives the process, and this runs on the paths where
+/// `stop_painting` never gets the chance - an error, and a panic.
 #[cfg(not(test))]
 fn hand_the_terminal_back() {
+    let _ = crate::surface::pixels::clear(&mut io::stdout());
+    crate::surface::pixels::tidy(crate::surface::pixels::staging());
     let _ = disable_raw_mode();
     let _ = io::stdout().execute(LeaveAlternateScreen);
     let _ = io::stdout().execute(crossterm::cursor::Show);
@@ -1837,7 +1845,7 @@ mod tests {
             "nothing was staged, so this proves nothing",
         );
 
-        a.painter.tidy(&dir);
+        crate::surface::pixels::tidy(&dir);
         assert_eq!(
             std::fs::read_dir(&dir).unwrap().count(),
             0,
