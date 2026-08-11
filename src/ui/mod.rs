@@ -326,6 +326,37 @@ impl App {
         self.surface = chosen;
     }
 
+    /// Turn the rolling window into a level per band, and report the gain.
+    ///
+    /// Everything between the samples and the bars, and nothing else: the
+    /// ballistics are stepped by the caller, because they need a `dt` and a
+    /// clock is the one thing that cannot be handed to a test.
+    ///
+    /// Extracted from the render loop unchanged rather than as a redesign. It
+    /// was the only part of the chain with no way in from a test - which is why
+    /// nothing checks that a note lights its bar within a frame of sounding,
+    /// only that it lights the right one eventually.
+    fn measure(&mut self) -> f32 {
+        let magnitudes = self.spectrum.analyse(&self.window);
+        self.bar_map.sample(magnitudes, &mut self.sampled);
+        self.bandwidth.group(&self.sampled, &mut self.bands);
+        // Gain is applied before the clip, so full scale always means
+        // exactly full scale whatever the trim.
+        let gain = 10f32.powf(self.gain_db / 20.0);
+        for v in self.bands.iter_mut() {
+            // The preset's response curve, applied where the measured
+            // amplitude becomes a level to draw. Linear for every preset
+            // rav ships on a screen, which is rav's documented choice and
+            // what makes a quiet passage read quiet; a short LED bar needs
+            // otherwise, and says so in its own preset rather than here.
+            *v = self
+                .curve
+                .apply(Level::new(*v * gain / MAX_HEIGHT))
+                .fraction();
+        }
+        gain
+    }
+
     /// Append a capture buffer to the rolling window, de-interleaving to mono.
     ///
     /// cpal delivers interleaved frames. Averaging rather than summing keeps a
@@ -771,23 +802,7 @@ impl App {
             // plainer one: it is framerate-independent because it integrates
             // dt, and stepping it on the display's cadence rather than the
             // signal's threw away the accuracy that buys.
-            let magnitudes = self.spectrum.analyse(&self.window);
-            self.bar_map.sample(magnitudes, &mut self.sampled);
-            self.bandwidth.group(&self.sampled, &mut self.bands);
-            // Gain is applied before the clip, so full scale always means
-            // exactly full scale whatever the trim.
-            let gain = 10f32.powf(self.gain_db / 20.0);
-            for v in self.bands.iter_mut() {
-                // The preset's response curve, applied where the measured
-                // amplitude becomes a level to draw. Linear for every preset
-                // rav ships on a screen, which is rav's documented choice and
-                // what makes a quiet passage read quiet; a short LED bar needs
-                // otherwise, and says so in its own preset rather than here.
-                *v = self
-                    .curve
-                    .apply(Level::new(*v * gain / MAX_HEIGHT))
-                    .fraction();
-            }
+            let gain = self.measure();
 
             let measured_at = Instant::now();
             let dt = measured_at.duration_since(self.last_frame).as_secs_f32();
