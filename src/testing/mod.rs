@@ -4,5 +4,7 @@
 //! checked reproducibly - see `signal::pipeline_tests`.
 
 pub mod audio_generator;
+pub mod notes;
 
 pub use audio_generator::AudioGenerator;
+pub use notes::{Instrument, Note};
