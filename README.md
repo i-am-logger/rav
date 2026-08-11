@@ -41,7 +41,7 @@ rav                   # analyser
 rav --theme winamp    # rav, winamp, terminal, mono, or a path to a theme
 rav --list-devices    # what rav can capture from
 rav -d "<name>"       # capture from a named device
-rav --clean           # keep logging out of the display
+rav --clean           # log almost nothing
 rav --surface kitty   # auto, glyphs, kitty or window
 ```
 

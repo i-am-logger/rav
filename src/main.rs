@@ -32,7 +32,7 @@ struct Args {
     #[arg(long)]
     test_audio: bool,
 
-    /// Enable clean mode (minimal logging for better TUI)
+    /// Log almost nothing. `RUST_LOG` still wins if it is set
     #[arg(long)]
     clean: bool,
 
