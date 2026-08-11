@@ -93,8 +93,9 @@ The ballistics, and the ramp the `rav` and `winamp` themes use, come from
 
 ## What's next
 
-A GUI. Only `src/ui/` knows about terminal cells, so the same display and the
-same themes can be drawn anywhere.
+Pixels instead of block glyphs, a GUI, and small displays. The mechanics and the
+themes live in two `no_std` crates that know nothing about terminals — so the
+same bars, in the same colours, can be drawn to a window or to a strip of LEDs.
 
 ## License
 

@@ -119,9 +119,15 @@ through the middle, dark red at the top.
 
 ## Contributing one
 
-Drop it in `themes/`, add it to `BUILT_IN` in `src/visual/theme.rs` if it should
-ship, and open a PR. `cargo test` checks every built-in theme parses, has ramps of
-the right length, and keeps its backdrop distinguishable from its bars.
+Drop it in `crates/rav-appearance/themes/`, and if it should ship, add its name
+to `ORDER` in that crate's `build.rs` — that list is the order `t` cycles, so
+where you put it is where it lands. A theme file missing from `ORDER` fails the
+build rather than being silently ignored.
+
+Then open a PR. `cargo test --workspace` checks that every bundled theme has
+ramps of the right length, that its backdrop stays distinguishable from its bars,
+and that the consts the build script generates match what the runtime parser
+produces from the same file.
 
 If the colours come from someone else's work, put an `[about]` block in the file
 naming the source and its licence — `winamp.toml` is the worked example.
