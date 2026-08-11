@@ -208,6 +208,14 @@ pub struct App {
     /// Briefly shown after a settings key, so a change is visible without a
     /// permanent status bar cluttering the display.
     status: Option<(String, Instant)>,
+    /// What rav is listening to, for the help overlay to name.
+    ///
+    /// "Why are the bars showing the wrong thing" has one answer and it is this,
+    /// and until now it was only in `rav.log`. A microphone hears the room, so a
+    /// display fed by one moves convincingly while showing nothing of what is
+    /// playing - which looks like rav working rather than rav on the wrong
+    /// source.
+    source: Option<String>,
     /// When present, audio comes from here rather than the cpal channel.
     #[cfg(target_os = "macos")]
     tap: Option<crate::audio::tap::Tap>,
@@ -280,6 +288,7 @@ impl App {
             bar_style: BarStyle::default(),
             show_help: false,
             status: None,
+            source: None,
             #[cfg(target_os = "macos")]
             tap: None,
             #[cfg(target_os = "macos")]
@@ -513,7 +522,7 @@ impl App {
             Bandwidth::Wide => "wide",
             Bandwidth::Thin => "thin",
         };
-        vec![
+        let mut rows = vec![
             HelpRow {
                 key: "space",
                 description: "switch visualisation",
@@ -574,7 +583,27 @@ impl App {
                 description: "quit",
                 value: None,
             },
-        ]
+        ];
+        // Last, and with no key, because it is the one line here that reports
+        // rather than offers - and it is what the rest of the panel is worth
+        // nothing without.
+        if let Some(source) = &self.source {
+            rows.push(HelpRow {
+                key: "",
+                description: "listening to",
+                value: Some(source.clone()),
+            });
+        }
+        rows
+    }
+
+    /// Name the source the display is being fed from.
+    ///
+    /// Set once the source is settled, never guessed: on macOS the tap is tried
+    /// *after* the capture device is opened, so anything announced earlier can
+    /// be contradicted a moment later.
+    pub fn listening_to(&mut self, source: impl Into<String>) {
+        self.source = Some(source.into());
     }
 
     /// Feed the rolling window from a process tap instead of a cpal stream.
@@ -584,6 +613,7 @@ impl App {
         self.sample_rate = tap.sample_rate();
         self.sized_for = (0, 0); // the mapping depends on the sample rate
         self.tap = Some(tap);
+        self.listening_to("system audio");
     }
 
     pub async fn run(&mut self, audio_receiver: Receiver<AudioData>) -> Result<()> {
@@ -1248,6 +1278,34 @@ mod tests {
 
         a.apply(Action::ToggleHelp);
         assert!(!a.show_help);
+    }
+
+    #[test]
+    fn the_overlay_says_what_rav_is_listening_to() {
+        // "Why are the bars showing the wrong thing" has one answer and this is
+        // where it is now. A microphone hears the room, so a display fed by one
+        // moves convincingly while showing nothing of what is playing - which
+        // reads as rav working, not as rav on the wrong source.
+        let mut a = app();
+        assert!(
+            a.help_rows()
+                .iter()
+                .all(|r| r.description != "listening to"),
+            "a source nobody has named is not worth a row",
+        );
+
+        a.listening_to("MacBook Pro Microphone");
+        let source = a
+            .help_rows()
+            .into_iter()
+            .find(|r| r.description == "listening to")
+            .and_then(|r| r.value);
+        assert_eq!(source, Some("MacBook Pro Microphone".to_string()));
+
+        // And it is the panel's last word, after everything you can press.
+        let rows = a.help_rows();
+        assert_eq!(rows.last().unwrap().description, "listening to");
+        assert_eq!(rows.last().unwrap().key, "", "it is not a key you press");
     }
 
     #[test]
