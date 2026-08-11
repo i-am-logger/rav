@@ -37,15 +37,19 @@ build rather than after.
 ## Checks
 
 ```
-cargo test
-cargo clippy --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
+cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo fmt --check
 nix build .#default
 ```
 
-`clippy` and `rustfmt` also run as git hooks, and CI runs `cargo fmt --check`,
-`cargo clippy --all-targets -- -D warnings` and `cargo test` on Linux — which is
-where the `#[cfg(target_os = "macos")]` mistakes surface.
+**`--workspace` is not optional.** Without it both commands take only the root
+package and the two member crates go untested and unlinted — silently, and with a
+green result. 54 tests stopped running that way once.
+
+`clippy` and `rustfmt` also run as git hooks, and CI runs `devenv test` on Linux —
+the same command you can run locally, which is where the
+`#[cfg(target_os = "macos")]` mistakes surface.
 
 CI does **not** build the flake, so run `nix build .#default` yourself before a
 push that touches packaging. Flakes only see **git-tracked** files, so a new asset
@@ -115,13 +119,39 @@ prevent.
 | `src/visual/` | reading a theme a *user* wrote, and asking the terminal for its palette — the halves that need a filesystem and a terminal |
 | `src/ui/` | the `App` event loop and the analyser, scope, status and help widgets |
 | `src/render/` | the pixel surface: a `Canvas` over tiny-skia, and the one impl that puts a scene onto it |
+| `src/testing/` | signal sources with known ground truth — tones, noise, and notes by MIDI number |
+| `tests/`, `crates/rav-core/tests/` | the tests that have to see a crate from outside, and the ones that hold for *every* input rather than a chosen one |
 
 Everything lives in the library — `src/main.rs` is argument parsing and wiring —
 so the binary and the tests compile one copy of the tree rather than two that can
 drift apart.
 
-`cargo test` and `cargo clippy` need `--workspace`, or they take only the root
-package and the member crates go untested and unlinted.
+## Tests
+
+Three kinds, and where a new one goes follows from what it needs to see:
+
+| | |
+|---|---|
+| beside the code, `#[cfg(test)]` | most of them. Anything reaching a private field, and everything that documents what a type does |
+| `tests/` | anything that has to see a crate the way a dependent does, and the properties that hold for *every* input. `proptest` is a dev-dependency of the workspace |
+| `src/testing/` | the signal sources those drive: tones, noise, and notes by MIDI number, where the expected bar is derivable from the pitch rather than guessed |
+
+`App` swaps its terminal for ratatui's `TestBackend` under `#[cfg(test)]`, so a
+test that renders frames has to be inline — an integration test gets the real
+backend and no terminal.
+
+**Check a new test by breaking the code it covers, not by watching it pass.** A
+test that cannot fail is worse than none, because it reads as coverage. Several
+here were written, passed first time, and were measuring nothing: a peak test
+sampled the midpoints of a stripe, which is the half of the range where the bug
+it was written for cannot appear; a rounding sweep reported an overshoot of
+exactly zero because the case it looked for needs both ends of an interpolation
+to be the same bin. Both passed. Neither asserted anything.
+
+So: make the change the test forbids, watch it fail, and put it back. Where that
+has been done the reasoning is in the commit, and where a test rests on a float
+comparison rather than an inequality with room in it, the measured margin is in
+the test.
 
 ## Releasing
 
