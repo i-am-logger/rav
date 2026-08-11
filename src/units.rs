@@ -16,7 +16,10 @@
 //! on its own; it takes a [`CellSize`], because the only correct answer depends
 //! on what the terminal reports and guessing it is how issue #63 began.
 
-use std::ops::{Add, Div, Mul, Sub};
+// `core`, not `std`: nothing in this module may need an allocator, a clock or an
+// operating system. That is what makes it usable in a core meant to run on a
+// microcontroller, and the import is where it would first be broken.
+use core::ops::{Add, Div, Mul, Sub};
 
 /// How loud a band is, as a fraction of full scale: always `0..=1`.
 ///
@@ -348,8 +351,14 @@ impl Elapsed {
         Self(if value.is_nan() { 0.0 } else { value.max(0.0) })
     }
 
-    pub fn since(then: std::time::Instant) -> Self {
-        Self(then.elapsed().as_secs_f32())
+    /// From a duration, for a caller that has a clock.
+    ///
+    /// Deliberately takes the duration rather than reading a clock itself. A
+    /// clock is the one thing a core cannot have: an embedded target may not
+    /// have `std::time` at all, and a test needs to state the elapsed time
+    /// rather than wait for it.
+    pub fn from_secs_f32(seconds: f32) -> Self {
+        Self::seconds(seconds)
     }
 
     pub const fn as_seconds(self) -> f32 {
