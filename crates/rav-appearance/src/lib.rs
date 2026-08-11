@@ -7,8 +7,9 @@
 //! than merely working.
 //!
 //! It is a layer beside the core rather than inside it, because appearance has
-//! to be portable in its own right. The same theme dresses a glyph grid, a
-//! kitty image, a window and an LED matrix; only the last mile differs.
+//! to be portable in its own right. One theme dresses a glyph grid today, and
+//! is meant to dress a kitty image, a window and an LED matrix on the same
+//! terms; only the last mile differs.
 //!
 //! # The awkward case that shapes the API
 //!
@@ -21,10 +22,14 @@
 //!
 //! # Why no rasteriser
 //!
-//! Because the boundary is worth having, and the previous attempt at it was a
-//! comment. `Ramp` lived in the same file as `use tiny_skia`, under a doc
-//! comment claiming the renderer was meant to survive being made `no_std` -
-//! which was untrue as written. A crate cannot pick up a rasteriser by accident.
+//! Because a crate cannot pick one up by accident and a comment saying so can
+//! be ignored. Nothing here draws: [`Ramp`] hands back the stripes a screen
+//! should be painted in and never paints them, so the same ramp answers a
+//! rasteriser, a glyph grid and a strip of LEDs - none of which agree on what
+//! painting means. `tiny-skia` lives one crate up, with the surface that owns a
+//! pixmap.
+//!
+//! [`Ramp`]: ramp::Ramp
 
 #![no_std]
 
