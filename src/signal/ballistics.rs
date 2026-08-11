@@ -28,6 +28,8 @@
 //! geometric decay does not survive a frame-rate change otherwise: `v *= 1.1` at
 //! 30fps is not `v *= 1.1` at 60fps, nor `v *= 1.21`.
 
+use rav_core::Frames;
+
 /// The divisor in the original's `saFalloff -= falloff / 16.0`. This is part of
 /// the rate expression, not the display height, and the two must not be
 /// conflated - see [`FULL_SCALE_PIXELS`].
@@ -183,14 +185,11 @@ impl Ballistics {
         let bar_drop = self.bar_step() * frames;
         let seed = self.velocity_seed();
         let k = self.peak_fall;
-        // Distance covered by a geometric velocity over `frames` frames is the sum
-        // of the series, not velocity * frames. k == 1 degenerates to linear.
+        // A cap's velocity compounds, so how far it falls is the sum of a
+        // series rather than speed times frames. The sum lives in `rav-core`
+        // with the rest of the arithmetic an LED strip would need.
         let growth = k.powf(frames);
-        let distance_factor = if (k - 1.0).abs() < f32::EPSILON {
-            frames
-        } else {
-            (growth - 1.0) / (k - 1.0)
-        };
+        let distance_factor = rav_core::math::compounded_travel(k, Frames::count(frames));
 
         // Indexing rather than zipping: four parallel arrays, and three of them
         // are mutated, so the nested zip needed to satisfy the lint is markedly

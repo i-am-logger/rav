@@ -496,6 +496,43 @@ impl Elapsed {
     pub const fn as_seconds(self) -> f32 {
         self.0
     }
+
+    /// This much time counted in frames of a display running at `fps`.
+    ///
+    /// The bridge every rate written per-frame has to cross. Constants copied
+    /// from something that drew sixty times a second mean nothing until they
+    /// are told how many of those frames have gone by.
+    pub fn frames_at(self, fps: f32) -> Frames {
+        Frames(self.0 * fps.max(1.0))
+    }
+}
+
+/// A count of frames of the display a rate was written against.
+///
+/// Not a count of frames rav drew, and not a duration. A cap's velocity is
+/// multiplied by 1.1 "per frame", which is meaningless until it says *whose*
+/// frames - and 1.1 per frame at 30 a second is not 1.1 per frame at 60, nor
+/// 1.21. Keeping this apart from [`Elapsed`] is what stops a rate tuned on one
+/// display being applied unchanged to another.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
+#[repr(transparent)]
+pub struct Frames(f32);
+
+impl Frames {
+    pub const NONE: Self = Self(0.0);
+
+    /// For a caller that genuinely has a frame count rather than a duration.
+    pub fn count(value: f32) -> Self {
+        Self(if value.is_nan() { 0.0 } else { value.max(0.0) })
+    }
+
+    pub const fn get(self) -> f32 {
+        self.0
+    }
+
+    pub fn is_none(self) -> bool {
+        self.0 <= 0.0
+    }
 }
 
 #[cfg(test)]
