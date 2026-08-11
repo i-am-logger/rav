@@ -38,6 +38,7 @@ use ratatui::backend::TestBackend;
 use ratatui::{Terminal, style::Color};
 use scope::{Scope, ScopeStyle};
 use status::Status;
+use std::io::Write;
 #[cfg(not(test))]
 use std::io::{self, Stdout};
 use std::time::{Duration, Instant};
@@ -200,11 +201,14 @@ pub struct App {
     /// Size the cached mapping and colours were built for.
     sized_for: (u16, u16),
 
+    /// Sends frames to the terminal when the surface is pixels.
+    painter: crate::surface::pixels::Pixels,
+
     /// Which surface rav would draw on, and why.
     ///
-    /// Reported, not obeyed - the glyph renderer draws every frame whatever this
-    /// says. It is here so the choice is visible in the help overlay for a beta
-    /// before anything depends on it being right.
+    /// `--surface kitty` draws pixels; anything else draws block characters.
+    /// A terminal that will not report its size in pixels falls back to them
+    /// too, so this is what rav *would* use as much as what it does.
     surface: Chosen,
 
     visualisation: Visualisation,
@@ -281,6 +285,7 @@ impl App {
             palette: Palette::default(),
             layout: BarLayout::default(),
             sized_for: (0, 0),
+            painter: crate::surface::pixels::Pixels::new(),
             surface: Chosen::UNASKED,
             visualisation: Visualisation::default(),
             scope_style: ScopeStyle::default(),
@@ -324,6 +329,110 @@ impl App {
     /// harmless - a beta before the renderer that would act on it.
     pub fn set_surface(&mut self, chosen: Chosen) {
         self.surface = chosen;
+    }
+
+    /// Draw the frame as pixels, and say whether it managed to.
+    ///
+    /// Asking the terminal how big it is in pixels is the one part a test
+    /// cannot do, so it is the only part here. Everything that decides what
+    /// goes out is [`Self::painted`].
+    ///
+    /// A terminal that reports no pixel size is one that does not know, and
+    /// working a cell size out from a font is how #63 began - so that is a
+    /// `false`, and the glyph renderer draws the frame instead.
+    #[cfg(not(test))]
+    fn paint(&mut self, status: Option<&str>, help: Option<&[HelpRow<'_>]>) -> Result<bool> {
+        match crossterm::terminal::window_size() {
+            Ok(size) if size.width > 0 && size.height > 0 => self.painted(
+                &mut io::stdout(),
+                size,
+                crate::surface::pixels::staging(),
+                status,
+                help,
+            ),
+            _ => Ok(false),
+        }
+    }
+
+    /// Everything a pixel frame is, given a size to draw it at.
+    ///
+    /// The order is the whole of it: home the cursor, place the image where the
+    /// cursor now is, then write the overlay's own cells. An image lands
+    /// wherever the cursor happens to be, and the overlay goes on afterwards
+    /// because a written cell blanks the picture beneath it.
+    fn painted(
+        &mut self,
+        out: &mut impl Write,
+        size: crossterm::terminal::WindowSize,
+        staging: &std::path::Path,
+        status: Option<&str>,
+        help: Option<&[HelpRow<'_>]>,
+    ) -> Result<bool> {
+        use crate::surface::frame::{Frame, Look};
+        use crate::surface::overlay;
+        use rav_core::geometry::Screen;
+        use rav_core::units::{CellSize, Cells, Length};
+
+        let screen = Screen::new(
+            Length(f32::from(size.width)),
+            Length(f32::from(size.height)),
+        );
+
+        // The bar width is in cells, because cells are what `+` and `-` move.
+        // One cell is however many pixels this terminal says it is.
+        let cell = CellSize {
+            width: size.width / size.columns.max(1),
+            height: size.height / size.rows.max(1),
+        };
+        let layout = rav_core::geometry::BarLayout::new(
+            cell.across(Cells(self.layout.bar_width)),
+            cell.across(Cells(self.layout.spacing)),
+        );
+        let look = Look {
+            theme: &self.theme,
+            palette: &self.palette,
+            backdrop: self.show_grid,
+            // One row of the sixteen the original panel had, which is the
+            // proportion its caps were drawn at.
+            caps: (self.peaks != Peaks::Off).then(|| screen.height() / 16.0),
+        };
+        let Some(pixels) = Frame::new(
+            self.ballistics.bars(),
+            self.ballistics.peaks(),
+            &look,
+            layout,
+            screen,
+        )
+        .pixels() else {
+            return Ok(false);
+        };
+
+        write!(out, "\x1b[H")?;
+        self.painter.send(
+            out,
+            &pixels,
+            u32::from(size.width),
+            u32::from(size.height),
+            staging,
+        )?;
+
+        let grid = ratatui::layout::Rect::new(0, 0, size.columns, size.rows);
+        if let Some(text) = status {
+            let panel = overlay::of(
+                Status {
+                    text,
+                    foreground: Color::Rgb(222, 222, 222),
+                    background: to_color(self.theme.grid[0]),
+                },
+                grid,
+            );
+            out.write_all(panel.as_bytes())?;
+        }
+        if let Some(rows) = help {
+            out.write_all(overlay::of(Help { rows, title: "rav" }, grid).as_bytes())?;
+        }
+        out.flush()?;
+        Ok(true)
     }
 
     /// Append a capture buffer to the rolling window, de-interleaving to mono.
@@ -822,6 +931,19 @@ impl App {
                 None
             };
 
+            // Pixels first, when that is the surface and the terminal will say
+            // how big it is. A `false` here is a terminal that reports no pixel
+            // size or a window with no area, and the glyph renderer below draws
+            // the frame instead - so asking for a surface that cannot be had
+            // costs the label in the help overlay and nothing else.
+            #[cfg(not(test))]
+            if self.surface.surface == crate::surface::Surface::Kitty
+                && self.paint(status.as_deref(), help_rows.as_deref())?
+            {
+                frames += 1;
+                continue;
+            }
+
             // Destructure so the draw closure borrows fields, not all of `self`.
             let Self {
                 terminal,
@@ -1278,6 +1400,100 @@ mod tests {
 
         a.apply(Action::ToggleHelp);
         assert!(!a.show_help);
+    }
+
+    /// Somewhere to stage frames that is not the directory a running rav uses.
+    ///
+    /// Left behind, these are megabytes each in `/dev/shm` - a test suite has
+    /// no business putting them where a real run stages its own.
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("rav-ui-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A window the size of a modest terminal, in the units a terminal reports.
+    fn window() -> crossterm::terminal::WindowSize {
+        crossterm::terminal::WindowSize {
+            columns: 80,
+            rows: 24,
+            width: 800,
+            height: 480,
+        }
+    }
+
+    #[test]
+    fn a_pixel_frame_goes_out_homed_and_the_overlay_after_it() {
+        // The order is the whole of it. An image lands wherever the cursor
+        // happens to be, so the cursor is homed first or the picture walks off
+        // the screen; and a written cell blanks the image, so the overlay can
+        // only go on afterwards.
+        let mut a = app();
+        a.resize(80, 24);
+        let dir = scratch("order");
+        let mut out = Vec::new();
+        assert!(
+            a.painted(&mut out, window(), &dir, Some("wide"), None)
+                .unwrap()
+        );
+
+        let sent = String::from_utf8_lossy(&out);
+        let home = sent.find("\x1b[H").expect("the cursor was never homed");
+        let image = sent.find("a=T").expect("no frame was transmitted");
+        // The note goes out a cell at a time, each with its own move and its own
+        // reset, so its letters are never next to each other in the stream. The
+        // first reset is the first cell the overlay wrote.
+        let note = sent.find("\x1b[0m").expect("the note was not written");
+        assert!(home < image, "the frame was placed before homing");
+        assert!(image < note, "the note was written before the frame");
+        for letter in ["w", "i", "d", "e"] {
+            assert!(sent[note - 40..].contains(letter), "{letter} is missing");
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_quiet_frame_writes_nothing_but_the_picture() {
+        // No note, help closed - almost every frame. One stray cell would blank
+        // the image it was written over.
+        let mut a = app();
+        a.resize(80, 24);
+        let dir = scratch("quiet");
+        let mut out = Vec::new();
+        assert!(a.painted(&mut out, window(), &dir, None, None).unwrap());
+
+        let sent = String::from_utf8_lossy(&out);
+        assert!(sent.contains("a=T"), "no frame");
+        assert!(!sent.contains("\x1b[0m"), "a cell was written: {sent:?}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_window_with_no_pixels_draws_no_frame() {
+        // A terminal that does not report a pixel size, which is most of them.
+        // The caller falls back to glyphs, so this is a label being wrong
+        // rather than a screen being blank.
+        let mut a = app();
+        a.resize(80, 24);
+        let empty = crossterm::terminal::WindowSize {
+            columns: 80,
+            rows: 24,
+            width: 0,
+            height: 0,
+        };
+        let dir = scratch("nopixels");
+        let mut out = Vec::new();
+        assert!(!a.painted(&mut out, empty, &dir, None, None).unwrap());
+        assert!(
+            out.is_empty(),
+            "it wrote {out:?} to a screen it cannot draw"
+        );
+        assert_eq!(
+            std::fs::read_dir(&dir).unwrap().count(),
+            0,
+            "it staged a frame it was never going to send",
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
