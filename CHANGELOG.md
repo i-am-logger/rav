@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-beta.8](https://github.com/i-am-logger/rav/compare/rav-v1.0.0-beta.7...rav-v1.0.0-beta.8) - 2026-08-11
+
+### Added
+
+- rav says what it is listening to, and plays something when it cannot hear ([#79](https://github.com/i-am-logger/rav/pull/79))
+- a note has to light its bar while it is still sounding ([#77](https://github.com/i-am-logger/rav/pull/77))
+- *(core)* a cap's fall is arithmetic an LED strip can reach ([#73](https://github.com/i-am-logger/rav/pull/73))
+- ask the terminal whether it can draw images, and say so ([#71](https://github.com/i-am-logger/rav/pull/71))
+
+### Documentation
+
+- say what the code does, not what it was meant to do ([#74](https://github.com/i-am-logger/rav/pull/74))
+
+### Fixed
+
+- rav says why it will not start, and survives a crash ([#72](https://github.com/i-am-logger/rav/pull/72))
+
 ## [1.0.0-beta.7](https://github.com/i-am-logger/rav/compare/rav-v1.0.0-beta.6...rav-v1.0.0-beta.7) - 2026-08-11
 
 ### Added
