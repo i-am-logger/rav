@@ -56,7 +56,7 @@ pub struct Scope<'a> {
     pub samples: &'a [f32],
     pub theme: &'a Theme,
     pub style: ScopeStyle,
-    /// Linear gain from the trim, applied on top of [`ZOOM`].
+    /// Linear gain from the trim, applied on top of `ZOOM`.
     pub gain: f32,
 }
 

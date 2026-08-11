@@ -24,7 +24,7 @@
 //! The original works in pixels on a fixed 16px-tall display, with peaks in 1/256px
 //! fixed point. rav resizes, so everything here is normalised to `0.0..=1.0` of
 //! full scale and the constants are divided down accordingly. Rates are converted
-//! from per-frame to per-second via [`Ballistics::reference_fps`], because a
+//! from per-frame to per-second via `DEFAULT_REFERENCE_FPS`, because a
 //! geometric decay does not survive a frame-rate change otherwise: `v *= 1.1` at
 //! 30fps is not `v *= 1.1` at 60fps, nor `v *= 1.21`.
 

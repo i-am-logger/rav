@@ -16,7 +16,7 @@ use rav_core::units::{Length, Level};
 
 /// Which of a scene's styles a band wears.
 ///
-/// An index, not a colour - the same boundary [`crate::units::Step`] keeps. A
+/// An index, not a colour - the same boundary [`rav_core::units::Step`] keeps. A
 /// band knows it wears style 1; only the surface knows style 1 is a blue ramp
 /// with a white cap.
 ///

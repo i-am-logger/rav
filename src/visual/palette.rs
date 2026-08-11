@@ -40,9 +40,18 @@ pub fn query(needed: bool) -> Palette {
     if !needed {
         return Palette::default();
     }
-    let mut out = std::io::stdout();
-    let mut input = std::io::stdin();
-    query_via(&mut out, &mut input)
+    // Raw mode, or the terminal echoes every reply back as visible text and
+    // line buffering holds them until the user presses Enter. Restored to
+    // however it was found - the caller may already have set it up.
+    let was_raw = crossterm::terminal::is_raw_mode_enabled().unwrap_or(false);
+    if !was_raw && crossterm::terminal::enable_raw_mode().is_err() {
+        return Palette::default();
+    }
+    let palette = query_via(&mut std::io::stdout(), &mut std::io::stdin());
+    if !was_raw {
+        let _ = crossterm::terminal::disable_raw_mode();
+    }
+    palette
 }
 
 /// No terminal under test, so nothing answers.

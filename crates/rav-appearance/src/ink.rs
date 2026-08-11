@@ -11,7 +11,7 @@
 //! back and lets the terminal paint it. A pixel renderer has nobody to ask, so
 //! it resolves through a [`Palette`] and falls back to the standard values.
 //!
-//! [`Palette`]: crate::visual::Palette
+//! [`Palette`]: crate::palette::Palette
 
 /// A colour as a theme wrote it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
