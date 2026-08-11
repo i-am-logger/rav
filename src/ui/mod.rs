@@ -698,8 +698,44 @@ impl App {
             if self.should_quit {
                 break;
             }
-            let now = Instant::now();
-            if now < next_frame {
+
+            let area = self.terminal.size()?;
+            if (area.width, area.height) != self.sized_for {
+                self.resize(area.width, area.height);
+            }
+
+            // Measure on the audio's schedule, not the display's.
+            //
+            // This used to sit below the frame ceiling, so a coalesced wake
+            // skipped the analysis with it. That is harmless while the only
+            // consumer is an animation, but it makes the *interval between
+            // spectra* a property of the display - frame rate, a terminal
+            // stall, whether two buffers happened to arrive inside one frame.
+            // Anything that measures across time rather than within one frame,
+            // an onset detector above all, would inherit that jitter into its
+            // measurement rather than into how it looks.
+            //
+            // The ballistics step comes with it, for the same reason and a
+            // plainer one: it is framerate-independent because it integrates
+            // dt, and stepping it on the display's cadence rather than the
+            // signal's threw away the accuracy that buys.
+            let magnitudes = self.spectrum.analyse(&self.window);
+            self.bar_map.sample(magnitudes, &mut self.sampled);
+            self.bandwidth.group(&self.sampled, &mut self.bands);
+            // Gain is applied before the clip, so full scale always means
+            // exactly full scale whatever the trim.
+            let gain = 10f32.powf(self.gain_db / 20.0);
+            for v in self.bands.iter_mut() {
+                *v = (*v * gain / MAX_HEIGHT).min(1.0);
+            }
+
+            let measured_at = Instant::now();
+            let dt = measured_at.duration_since(self.last_frame).as_secs_f32();
+            self.last_frame = measured_at;
+            self.ballistics.step(&self.bands, dt);
+
+            // Only the drawing is capped. Everything above ran on the signal.
+            if measured_at < next_frame {
                 continue;
             }
             next_frame += min_frame;
@@ -707,31 +743,11 @@ impl App {
             // leave the deadline in the past and owing frames it would then take
             // back to back. There is no debt worth paying here: the next frame
             // shows the current state either way.
-            if next_frame < now {
-                next_frame = now + min_frame;
+            if next_frame < measured_at {
+                next_frame = measured_at + min_frame;
             }
             frames += 1;
-
-            let area = self.terminal.size()?;
-            if (area.width, area.height) != self.sized_for {
-                self.resize(area.width, area.height);
-            }
-
-            let magnitudes = self.spectrum.analyse(&self.window);
-            self.bar_map.sample(magnitudes, &mut self.sampled);
-            self.bandwidth.group(&self.sampled, &mut self.bands);
-            // Gain is applied before the clip, so full scale always means
-            // exactly full scale whatever the trim.
-            let gain = 10f32.powf(self.gain_db / 20.0);
             let scope_gain = gain;
-            for v in self.bands.iter_mut() {
-                *v = (*v * gain / MAX_HEIGHT).min(1.0);
-            }
-
-            let now = Instant::now();
-            let dt = now.duration_since(self.last_frame).as_secs_f32();
-            self.last_frame = now;
-            self.ballistics.step(&self.bands, dt);
 
             // Both borrow all of `self`, so they are taken before the destructure.
             // The warning outranks a transient note: a settings message that
