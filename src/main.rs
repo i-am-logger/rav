@@ -213,9 +213,12 @@ async fn rav_main() -> Result<()> {
                 tap.sample_rate(),
                 tap.channels()
             );
-            // The cpal stream is already running, and its channel is unbounded.
-            // Leaving it feeding a receiver the app will never drain again grows
-            // the queue by ~350 KB/s until the process is killed.
+            // The cpal stream is already running and nothing will drain it
+            // again. Its queue is bounded and drops its oldest block when full,
+            // so this is not about memory - it is a capture device held open
+            // and a callback woken a hundred times a second to fill a queue
+            // whose contents are thrown away, with the microphone light on to
+            // say so.
             audio_capture.stop();
             app.use_tap(tap);
         }
