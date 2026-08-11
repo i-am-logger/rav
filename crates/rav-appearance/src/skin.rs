@@ -25,6 +25,20 @@
 //! partial *brightness* and `steps` is how many levels of it are worth asking
 //! for. That is the same number, read differently - which is the whole reason
 //! the core deals in counts.
+//!
+//! # Nothing builds one yet
+//!
+//! No [`Skin`] is constructed anywhere in rav. The terminal's shapes come from
+//! `BarStyle`, an enum of the six styles `b` cycles, and it names its glyphs
+//! directly rather than asking a skin for them.
+//!
+//! So this is the shape of the answer rather than the answer being used, and
+//! the two differ in one way worth knowing: `BarStyle` carries the glyphs
+//! themselves, while a [`Skin`] is meant to carry only how many steps there are
+//! and let each surface decide what a step looks like. Wiring the terminal to
+//! this is what would let one setting dress a glyph grid, a pixel surface and a
+//! strip of LEDs at once - and it is why the artwork these describe is not here
+//! either.
 
 /// How a skin covers a partial rung.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
