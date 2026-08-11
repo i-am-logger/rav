@@ -14,21 +14,21 @@
 //! allowed to introduce.
 
 use crate::render::geometry::Rect;
-use crate::render::ink::Rgba;
+use crate::render::ink::Colour;
 use tiny_skia::{Paint, Pixmap, Rect as SkRect, Transform};
 
 /// A colour ramp, bottom-up: `stops[0]` is the floor.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ramp {
-    stops: Vec<Rgba>,
+    stops: Vec<Colour>,
 }
 
 impl Ramp {
     /// An empty ramp is not representable; a caller with no colours gets black
     /// rather than a panic at the point of drawing.
-    pub fn new(stops: Vec<Rgba>) -> Self {
+    pub fn new(stops: Vec<Colour>) -> Self {
         let stops = if stops.is_empty() {
-            vec![Rgba::opaque(0, 0, 0)]
+            vec![Colour::rgb(0, 0, 0)]
         } else {
             stops
         };
@@ -47,7 +47,7 @@ impl Ramp {
     ///
     /// `y` is measured downward from the top, as everything in `geometry` is, so
     /// the floor is `y == height` and the fraction is inverted here.
-    pub fn at(&self, y: f32, height: f32) -> Rgba {
+    pub fn at(&self, y: f32, height: f32) -> Colour {
         let last = self.stops.len() - 1;
         if last == 0 || height <= 0.0 {
             return self.stops[0];
@@ -61,7 +61,7 @@ impl Ramp {
     /// Half-height end bands are the point - see the module note. Returned
     /// top-down so a caller can clip against a rectangle in the same order it
     /// stores one.
-    pub fn bands(&self, height: f32) -> Vec<(f32, f32, Rgba)> {
+    pub fn bands(&self, height: f32) -> Vec<(f32, f32, Colour)> {
         let last = self.stops.len() - 1;
         if last == 0 || height <= 0.0 {
             return vec![(0.0, height.max(0.0), self.stops[0])];
@@ -115,12 +115,12 @@ impl Canvas {
     /// A rectangle with no area is skipped rather than refused: a bar at rest is
     /// zero pixels tall, and every frame of silence would otherwise be an error
     /// to handle.
-    pub fn fill(&mut self, rect: Rect, colour: Rgba) {
+    pub fn fill(&mut self, rect: Rect, colour: Colour) {
         let Some(sk) = SkRect::from_xywh(rect.x, rect.y, rect.w, rect.h) else {
             return;
         };
         let mut paint = Paint::default();
-        paint.set_color_rgba8(colour.r, colour.g, colour.b, colour.a);
+        paint.set_color_rgba8(colour.red, colour.green, colour.blue, colour.alpha);
         // Antialiasing on, which is the whole argument for drawing pixels: a bar
         // edge lands where the arithmetic puts it instead of being snapped to a
         // boundary, and that snapping is the mechanism behind #63.
@@ -188,7 +188,7 @@ pub struct Scene<'a> {
     /// Colour of the unlit backdrop, by height. `None` leaves the terminal's own
     /// background showing, which is what a theme without a grid asks for.
     pub grid: Option<&'a Ramp>,
-    pub cap: Rgba,
+    pub cap: Colour,
     pub cap_thickness: f32,
 }
 
@@ -239,21 +239,21 @@ mod tests {
 
     fn ramp() -> Ramp {
         Ramp::new(vec![
-            Rgba::opaque(0x00, 0xff, 0x00),
-            Rgba::opaque(0xff, 0xff, 0x00),
-            Rgba::opaque(0xff, 0x00, 0x00),
+            Colour::rgb(0x00, 0xff, 0x00),
+            Colour::rgb(0xff, 0xff, 0x00),
+            Colour::rgb(0xff, 0x00, 0x00),
         ])
     }
 
     /// The pixel at `(x, y)` as straight RGBA.
-    fn at(canvas: &Canvas, x: u32, y: u32) -> Rgba {
+    fn at(canvas: &Canvas, x: u32, y: u32) -> Colour {
         let data = canvas.to_rgba();
         let i = ((y * canvas.width() + x) * 4) as usize;
-        Rgba {
-            r: data[i],
-            g: data[i + 1],
-            b: data[i + 2],
-            a: data[i + 3],
+        Colour {
+            red: data[i],
+            green: data[i + 1],
+            blue: data[i + 2],
+            alpha: data[i + 3],
         }
     }
 
@@ -267,8 +267,8 @@ mod tests {
         let mut canvas = Canvas::new(20, 60).unwrap();
         canvas.clear();
 
-        let grid = Rgba::opaque(0x00, 0x40, 0x00);
-        let cap = Rgba::opaque(0xff, 0xff, 0xff);
+        let grid = Colour::rgb(0x00, 0x40, 0x00);
+        let cap = Colour::rgb(0xff, 0xff, 0xff);
         canvas.fill(backdrop(1, &layout, &view)[0], grid);
         let cap_rect = caps(&[0.5], 4.0, &layout, &view)[0];
         canvas.fill(cap_rect, cap);
@@ -309,9 +309,9 @@ mod tests {
     #[test]
     fn the_ramp_runs_bottom_up() {
         let r = ramp();
-        assert_eq!(r.at(60.0, 60.0), Rgba::opaque(0x00, 0xff, 0x00), "floor");
-        assert_eq!(r.at(0.0, 60.0), Rgba::opaque(0xff, 0x00, 0x00), "ceiling");
-        assert_eq!(r.at(30.0, 60.0), Rgba::opaque(0xff, 0xff, 0x00), "middle");
+        assert_eq!(r.at(60.0, 60.0), Colour::rgb(0x00, 0xff, 0x00), "floor");
+        assert_eq!(r.at(0.0, 60.0), Colour::rgb(0xff, 0x00, 0x00), "ceiling");
+        assert_eq!(r.at(30.0, 60.0), Colour::rgb(0xff, 0xff, 0x00), "middle");
     }
 
     #[test]
@@ -322,7 +322,7 @@ mod tests {
         let r = ramp();
         let bands = r.bands(60.0);
         assert_eq!(bands.len(), 3);
-        let height = |(top, bottom, _): &(f32, f32, Rgba)| bottom - top;
+        let height = |(top, bottom, _): &(f32, f32, Colour)| bottom - top;
         assert!((height(&bands[0]) - 15.0).abs() < 1e-4, "top band");
         assert!((height(&bands[1]) - 30.0).abs() < 1e-4, "middle band");
         assert!((height(&bands[2]) - 15.0).abs() < 1e-4, "bottom band");
@@ -357,9 +357,9 @@ mod tests {
 
     #[test]
     fn a_single_stop_ramp_is_flat() {
-        let r = Ramp::new(vec![Rgba::opaque(1, 2, 3)]);
-        assert_eq!(r.at(0.0, 60.0), Rgba::opaque(1, 2, 3));
-        assert_eq!(r.at(60.0, 60.0), Rgba::opaque(1, 2, 3));
+        let r = Ramp::new(vec![Colour::rgb(1, 2, 3)]);
+        assert_eq!(r.at(0.0, 60.0), Colour::rgb(1, 2, 3));
+        assert_eq!(r.at(60.0, 60.0), Colour::rgb(1, 2, 3));
         assert_eq!(r.bands(60.0).len(), 1);
     }
 
@@ -367,13 +367,13 @@ mod tests {
     fn an_empty_ramp_is_not_representable() {
         let r = Ramp::new(vec![]);
         assert_eq!(r.len(), 1);
-        assert_eq!(r.at(0.0, 60.0), Rgba::opaque(0, 0, 0));
+        assert_eq!(r.at(0.0, 60.0), Colour::rgb(0, 0, 0));
     }
 
     #[test]
     fn a_zero_height_viewport_produces_nothing_that_panics() {
         let r = ramp();
-        assert_eq!(r.at(0.0, 0.0), Rgba::opaque(0x00, 0xff, 0x00));
+        assert_eq!(r.at(0.0, 0.0), Colour::rgb(0x00, 0xff, 0x00));
         assert_eq!(r.bands(0.0).len(), 1);
         assert!(Canvas::new(0, 0).is_none());
     }
@@ -392,7 +392,7 @@ mod tests {
             view,
             ramp,
             grid,
-            cap: Rgba::opaque(0xff, 0xff, 0xff),
+            cap: Colour::rgb(0xff, 0xff, 0xff),
             cap_thickness: 3.0,
         }
     }
@@ -401,7 +401,7 @@ mod tests {
     fn a_whole_scene_layers_backdrop_then_bars_then_cap() {
         let view = Viewport::new(10.0, 60.0);
         let r = ramp();
-        let grid = Ramp::new(vec![Rgba::opaque(0x00, 0x20, 0x00)]);
+        let grid = Ramp::new(vec![Colour::rgb(0x00, 0x20, 0x00)]);
         let mut canvas = Canvas::new(10, 60).unwrap();
         draw(
             &scene(&[0.5], Some(&[0.5]), &r, Some(&grid), view),
@@ -409,14 +409,14 @@ mod tests {
         );
 
         // Above the cap: backdrop only, because nothing else reaches there.
-        assert_eq!(at(&canvas, 5, 5), Rgba::opaque(0x00, 0x20, 0x00));
+        assert_eq!(at(&canvas, 5, 5), Colour::rgb(0x00, 0x20, 0x00));
         // The bar sits on the floor and is lit, so it is not the backdrop.
-        assert_ne!(at(&canvas, 5, 58), Rgba::opaque(0x00, 0x20, 0x00));
+        assert_ne!(at(&canvas, 5, 58), Colour::rgb(0x00, 0x20, 0x00));
         // The cap is above the bar's top edge and is the cap colour.
         let cap_rect = caps(&[0.5], 3.0, &crate::render::Layout::new(10.0, 0.0), &view)[0];
         assert_eq!(
             at(&canvas, 5, cap_rect.y as u32 + 1),
-            Rgba::opaque(0xff, 0xff, 0xff)
+            Colour::rgb(0xff, 0xff, 0xff)
         );
     }
 
@@ -424,7 +424,7 @@ mod tests {
     fn caps_switched_off_draw_nothing() {
         let view = Viewport::new(10.0, 60.0);
         let r = ramp();
-        let grid = Ramp::new(vec![Rgba::opaque(0x00, 0x20, 0x00)]);
+        let grid = Ramp::new(vec![Colour::rgb(0x00, 0x20, 0x00)]);
 
         let mut with = Canvas::new(10, 60).unwrap();
         draw(
@@ -436,7 +436,7 @@ mod tests {
 
         assert_ne!(with.to_rgba(), without.to_rgba(), "a cap must be visible");
         // And with peaks off, the row the cap would occupy is plain backdrop.
-        assert_eq!(at(&without, 5, 8), Rgba::opaque(0x00, 0x20, 0x00));
+        assert_eq!(at(&without, 5, 8), Colour::rgb(0x00, 0x20, 0x00));
     }
 
     #[test]
@@ -447,24 +447,28 @@ mod tests {
         let r = ramp();
         let mut canvas = Canvas::new(10, 60).unwrap();
         draw(&scene(&[0.25], None, &r, None, view), &mut canvas);
-        assert_eq!(at(&canvas, 5, 5).a, 0, "unlit rows must stay transparent");
-        assert_eq!(at(&canvas, 5, 58).a, 0xff, "the lit bar is still drawn");
+        assert_eq!(
+            at(&canvas, 5, 5).alpha,
+            0,
+            "unlit rows must stay transparent"
+        );
+        assert_eq!(at(&canvas, 5, 58).alpha, 0xff, "the lit bar is still drawn");
     }
 
     #[test]
     fn silence_leaves_the_backdrop_and_the_caps_on_the_floor() {
         let view = Viewport::new(10.0, 60.0);
         let r = ramp();
-        let grid = Ramp::new(vec![Rgba::opaque(0x00, 0x20, 0x00)]);
+        let grid = Ramp::new(vec![Colour::rgb(0x00, 0x20, 0x00)]);
         let mut canvas = Canvas::new(10, 60).unwrap();
         draw(
             &scene(&[0.0], Some(&[0.0]), &r, Some(&grid), view),
             &mut canvas,
         );
         // The backdrop still shows the column.
-        assert_eq!(at(&canvas, 5, 5), Rgba::opaque(0x00, 0x20, 0x00));
+        assert_eq!(at(&canvas, 5, 5), Colour::rgb(0x00, 0x20, 0x00));
         // The cap rests on the floor rather than sinking out of sight.
-        assert_eq!(at(&canvas, 5, 58), Rgba::opaque(0xff, 0xff, 0xff));
+        assert_eq!(at(&canvas, 5, 58), Colour::rgb(0xff, 0xff, 0xff));
     }
 
     #[test]
@@ -474,17 +478,17 @@ mod tests {
         // at all. A bar whose top edge lands mid-pixel is where it shows: that
         // edge must be part bar and part backdrop, not part bar and part hole.
         let view = Viewport::new(10.0, 60.0);
-        let r = Ramp::new(vec![Rgba::opaque(0xff, 0x00, 0x00)]);
-        let grid = Ramp::new(vec![Rgba::opaque(0x00, 0x00, 0xff)]);
+        let r = Ramp::new(vec![Colour::rgb(0xff, 0x00, 0x00)]);
+        let grid = Ramp::new(vec![Colour::rgb(0x00, 0x00, 0xff)]);
 
         // 0.333 * 60 = 19.98, so the top edge sits a hundredth of a pixel inside
         // row 40 and that row is almost entirely backdrop.
         let mut canvas = Canvas::new(10, 60).unwrap();
         draw(&scene(&[0.333], None, &r, Some(&grid), view), &mut canvas);
         let edge = at(&canvas, 5, 40);
-        assert_eq!(edge.a, 0xff, "the backdrop keeps the edge opaque");
+        assert_eq!(edge.alpha, 0xff, "the backdrop keeps the edge opaque");
         assert!(
-            edge.r > 0 && edge.b > 0,
+            edge.red > 0 && edge.blue > 0,
             "the edge should carry both bar and backdrop, got {edge:?}"
         );
 
@@ -494,7 +498,7 @@ mod tests {
         draw(&scene(&[0.333], None, &r, None, view), &mut bare);
         let bare_edge = at(&bare, 5, 40);
         assert!(
-            bare_edge.a > 0 && bare_edge.a < 0xff,
+            bare_edge.alpha > 0 && bare_edge.alpha < 0xff,
             "a bare edge stays partly transparent, got {bare_edge:?}"
         );
     }
@@ -506,7 +510,7 @@ mod tests {
         // in silence, so the two would disagree on bar count with nothing to say
         // so - and "matches the glyph release" is the gate for shipping pixels.
         let view = Viewport::new(30.0, 60.0);
-        let r = Ramp::new(vec![Rgba::opaque(0xff, 0x00, 0x00)]);
+        let r = Ramp::new(vec![Colour::rgb(0xff, 0x00, 0x00)]);
         let layout = crate::render::Layout::new(10.0, 0.0);
         assert_eq!(layout.count(view.width), 3, "three bars fit");
 
@@ -547,15 +551,15 @@ mod tests {
                 w: 4.0,
                 h: 4.0,
             },
-            Rgba {
-                r: 0xff,
-                g: 0x00,
-                b: 0x00,
-                a: 0x80,
+            Colour {
+                red: 0xff,
+                green: 0x00,
+                blue: 0x00,
+                alpha: 0x80,
             },
         );
         let px = at(&canvas, 2, 2);
-        assert_eq!(px.a, 0x80, "alpha is preserved");
-        assert!(px.r >= 0xfe, "red came back as {} not 0xff", px.r);
+        assert_eq!(px.alpha, 0x80, "alpha is preserved");
+        assert!(px.red >= 0xfe, "red came back as {} not 0xff", px.red);
     }
 }

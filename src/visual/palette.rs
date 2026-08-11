@@ -14,7 +14,7 @@
 //! Terminals that do not answer are the normal case, not an error: rav waits a
 //! moment, gives up, and leaves those colours alone.
 
-use crate::render::{Ink, Rgba};
+use crate::render::{Colour, Ink};
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::time::{Duration, Instant};
@@ -81,9 +81,9 @@ impl Palette {
     /// it would mean not drawing. Anything with a terminal should use
     /// [`rgb`](Self::rgb) and leave an unanswered name alone, so the theme
     /// still follows the palette the user runs.
-    pub fn resolve(&self, ink: Ink) -> Rgba {
+    pub fn resolve(&self, ink: Ink) -> Colour {
         match self.rgb(ink) {
-            Some((r, g, b)) => Rgba::opaque(r, g, b),
+            Some((r, g, b)) => Colour::rgb(r, g, b),
             None => ink.resolved(),
         }
     }

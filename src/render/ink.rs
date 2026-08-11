@@ -25,17 +25,69 @@ pub enum Ink {
 }
 
 /// A resolved colour, with the alpha a compositing surface needs.
+///
+/// Named where a name exists: `Colour::WHITE` says what it is, where three hex
+/// bytes only say what it equals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Rgba {
-    pub r: u8,
-    pub g: u8,
-    pub b: u8,
-    pub a: u8,
+pub struct Colour {
+    pub red: u8,
+    pub green: u8,
+    pub blue: u8,
+    pub alpha: u8,
 }
 
-impl Rgba {
-    pub const fn opaque(r: u8, g: u8, b: u8) -> Self {
-        Self { r, g, b, a: 0xff }
+impl Colour {
+    pub const TRANSPARENT: Self = Self {
+        red: 0,
+        green: 0,
+        blue: 0,
+        alpha: 0,
+    };
+
+    pub const BLACK: Self = Self::rgb(0x00, 0x00, 0x00);
+    pub const WHITE: Self = Self::rgb(0xff, 0xff, 0xff);
+    pub const RED: Self = Self::rgb(0xff, 0x00, 0x00);
+    pub const GREEN: Self = Self::rgb(0x00, 0xff, 0x00);
+    pub const BLUE: Self = Self::rgb(0x00, 0x00, 0xff);
+    pub const YELLOW: Self = Self::rgb(0xff, 0xff, 0x00);
+    pub const MAGENTA: Self = Self::rgb(0xff, 0x00, 0xff);
+    pub const CYAN: Self = Self::rgb(0x00, 0xff, 0xff);
+
+    pub const fn rgb(red: u8, green: u8, blue: u8) -> Self {
+        Self {
+            red,
+            green,
+            blue,
+            alpha: 0xff,
+        }
+    }
+
+    /// From the `0xrrggbb` a theme file spells out, so a colour lifted from a
+    /// design reads the same in code as it does in the TOML.
+    pub const fn hex(value: u32) -> Self {
+        Self::rgb(
+            ((value >> 16) & 0xff) as u8,
+            ((value >> 8) & 0xff) as u8,
+            (value & 0xff) as u8,
+        )
+    }
+
+    /// The same hue at a fraction of its brightness.
+    ///
+    /// All three channels together, which keeps the hue - scaling per channel
+    /// drains a saturated colour towards black by way of brown.
+    pub fn dimmed(self, keep: f32) -> Self {
+        let scale = |c: u8| (f32::from(c) * keep).round().clamp(0.0, 255.0) as u8;
+        Self {
+            red: scale(self.red),
+            green: scale(self.green),
+            blue: scale(self.blue),
+            alpha: self.alpha,
+        }
+    }
+
+    pub fn is_transparent(self) -> bool {
+        self.alpha == 0
     }
 }
 
@@ -45,23 +97,23 @@ impl Rgba {
 /// terminal to interrogate, and leaving a named colour unresolved there would
 /// mean not drawing it. A terminal that *does* answer overrides every one of
 /// these - this is the floor, not the intent.
-pub const DEFAULT_ANSI: [Rgba; 16] = [
-    Rgba::opaque(0x00, 0x00, 0x00), // black
-    Rgba::opaque(0x80, 0x00, 0x00), // red
-    Rgba::opaque(0x00, 0x80, 0x00), // green
-    Rgba::opaque(0x80, 0x80, 0x00), // yellow
-    Rgba::opaque(0x00, 0x00, 0x80), // blue
-    Rgba::opaque(0x80, 0x00, 0x80), // magenta
-    Rgba::opaque(0x00, 0x80, 0x80), // cyan
-    Rgba::opaque(0xc0, 0xc0, 0xc0), // white
-    Rgba::opaque(0x80, 0x80, 0x80), // bright-black
-    Rgba::opaque(0xff, 0x00, 0x00), // bright-red
-    Rgba::opaque(0x00, 0xff, 0x00), // bright-green
-    Rgba::opaque(0xff, 0xff, 0x00), // bright-yellow
-    Rgba::opaque(0x00, 0x00, 0xff), // bright-blue
-    Rgba::opaque(0xff, 0x00, 0xff), // bright-magenta
-    Rgba::opaque(0x00, 0xff, 0xff), // bright-cyan
-    Rgba::opaque(0xff, 0xff, 0xff), // bright-white
+pub const DEFAULT_ANSI: [Colour; 16] = [
+    Colour::rgb(0x00, 0x00, 0x00), // black
+    Colour::rgb(0x80, 0x00, 0x00), // red
+    Colour::rgb(0x00, 0x80, 0x00), // green
+    Colour::rgb(0x80, 0x80, 0x00), // yellow
+    Colour::rgb(0x00, 0x00, 0x80), // blue
+    Colour::rgb(0x80, 0x00, 0x80), // magenta
+    Colour::rgb(0x00, 0x80, 0x80), // cyan
+    Colour::rgb(0xc0, 0xc0, 0xc0), // white
+    Colour::rgb(0x80, 0x80, 0x80), // bright-black
+    Colour::rgb(0xff, 0x00, 0x00), // bright-red
+    Colour::rgb(0x00, 0xff, 0x00), // bright-green
+    Colour::rgb(0xff, 0xff, 0x00), // bright-yellow
+    Colour::rgb(0x00, 0x00, 0xff), // bright-blue
+    Colour::rgb(0xff, 0x00, 0xff), // bright-magenta
+    Colour::rgb(0x00, 0xff, 0xff), // bright-cyan
+    Colour::rgb(0xff, 0xff, 0xff), // bright-white
 ];
 
 /// The ANSI names a theme may use, in slot order.
@@ -103,9 +155,9 @@ impl Ink {
     /// Only for a surface with no terminal to ask. Anything that *can* ask
     /// should, or the `terminal` theme stops following the user's colours,
     /// which is the whole reason that theme exists.
-    pub fn resolved(self) -> Rgba {
+    pub fn resolved(self) -> Colour {
         match self {
-            Self::Rgb(r, g, b) => Rgba::opaque(r, g, b),
+            Self::Rgb(r, g, b) => Colour::rgb(r, g, b),
             Self::Ansi(i) => DEFAULT_ANSI[usize::from(i) & 0x0f],
         }
     }
@@ -156,7 +208,7 @@ mod tests {
     fn an_exact_colour_resolves_to_itself() {
         assert_eq!(
             Ink::Rgb(0x18, 0x84, 0x08).resolved(),
-            Rgba::opaque(0x18, 0x84, 0x08)
+            Colour::rgb(0x18, 0x84, 0x08)
         );
         assert!(Ink::Rgb(0, 0, 0).is_exact());
         assert!(!Ink::Ansi(2).is_exact());

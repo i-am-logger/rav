@@ -10,7 +10,7 @@
 //! theme can mix them freely: that choice is the difference between reproducing a
 //! specific look and following whatever the user already runs.
 
-use crate::render::{Ink, Ramp, Rgba};
+use crate::render::{Colour, Ink, Ramp};
 use crate::visual::Palette;
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
@@ -90,27 +90,17 @@ impl Theme {
     /// a terminal is drawing glyphs anyway: the pixel surfaces are chosen for
     /// kitty-protocol terminals, all of which answer.
     pub fn grid_ramp(&self, palette: &Palette) -> Ramp {
-        let scale = self.darken.unwrap_or(1.0);
+        let keep = self.darken.unwrap_or(1.0);
         Ramp::new(
             self.grid
                 .iter()
-                .map(|&c| {
-                    let base = palette.resolve(c);
-                    // All three channels together, which keeps the hue. Per
-                    // channel drains a saturated colour to black by way of brown.
-                    Rgba {
-                        r: (base.r as f32 * scale).round() as u8,
-                        g: (base.g as f32 * scale).round() as u8,
-                        b: (base.b as f32 * scale).round() as u8,
-                        a: base.a,
-                    }
-                })
+                .map(|&ink| palette.resolve(ink).dimmed(keep))
                 .collect(),
         )
     }
 
     /// The peak cap's colour, for a surface that draws pixels.
-    pub fn cap_rgba(&self, palette: &Palette) -> Rgba {
+    pub fn cap_colour(&self, palette: &Palette) -> Colour {
         palette.resolve(self.peak)
     }
 
@@ -338,9 +328,12 @@ mod tests {
         // Scaled, not replaced: still green, just less of it.
         let lit = plain.at(0.0, 1.0);
         let dim = dimmed.at(0.0, 1.0);
-        assert!(dim.g < lit.g, "{dim:?} should be dimmer than {lit:?}");
-        assert_eq!(dim.r, 0, "the hue must survive darkening");
-        assert_eq!(dim.b, 0);
+        assert!(
+            dim.green < lit.green,
+            "{dim:?} should be dimmer than {lit:?}"
+        );
+        assert_eq!(dim.red, 0, "the hue must survive darkening");
+        assert_eq!(dim.blue, 0);
     }
 
     #[test]
@@ -349,7 +342,7 @@ mod tests {
         let theme = themed("#40a060", None);
         assert_eq!(
             theme.grid_ramp(&palette).at(0.0, 1.0),
-            Rgba::opaque(0x40, 0xa0, 0x60)
+            Colour::rgb(0x40, 0xa0, 0x60)
         );
     }
 
