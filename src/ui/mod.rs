@@ -1019,6 +1019,85 @@ mod tests {
         App::new(Config::default(), 2, 48_000).expect("app should build")
     }
 
+    /// One channel, so a generated signal reaches the window as it was written.
+    ///
+    /// `push_samples` averages across channels, so handing a two-channel app a
+    /// mono tone averages each pair of neighbouring samples - which is a
+    /// low-pass filter, and quietly moves the thing under test.
+    fn listening_app() -> App {
+        let mut a = App::new(Config::default(), 1, 48_000).expect("app should build");
+        a.resize(80, 24);
+        a
+    }
+
+    /// Samples in one frame at the 60fps ceiling.
+    const FRAME_SAMPLES: usize = 48_000 / 60;
+
+    #[test]
+    fn a_note_lights_the_display_in_the_first_frame_that_carries_it() {
+        // The timing half of "does the picture match the music", and until the
+        // analysis had a seam there was no way to ask it - `tests/music.rs` can
+        // only show that a note lights the *right* bar, never that it does so
+        // while the note is still sounding.
+        //
+        // No threshold: silence analyses to exactly zero, so "lit" is "above
+        // zero" and the assertion is about which frame rather than how much.
+        let mut a = listening_app();
+        a.push_samples(&vec![0.0; Spectrum::DEFAULT_SIZE]);
+        a.measure();
+        assert!(
+            a.bands.iter().all(|&level| level == 0.0),
+            "silence lit something: {:?}",
+            a.bands,
+        );
+
+        // One frame's worth of a note and not a sample more.
+        let note = crate::testing::Instrument::pure(48_000.0).play(
+            &[crate::testing::Note::MIDDLE_C.octave_up(2)],
+            FRAME_SAMPLES,
+        );
+        a.push_samples(&note);
+        a.measure();
+        assert!(
+            a.bands.iter().any(|&level| level > 0.0),
+            "the frame the note started in showed nothing",
+        );
+    }
+
+    #[test]
+    fn a_note_that_stops_leaves_its_cap_hanging_above_a_falling_bar() {
+        // The whole point of the effect, end to end through `App` for the first
+        // time rather than against the ballistics alone: the bar drops away and
+        // the cap stays up to mark where it had been.
+        let mut a = listening_app();
+        let note = crate::testing::Instrument::pure(48_000.0)
+            .play(&[crate::testing::Note::MIDDLE_C.octave_up(2)], 4096);
+        a.push_samples(&note);
+        a.measure();
+        a.ballistics.step(&a.bands, 1.0 / 60.0);
+
+        let loudest = (0..a.ballistics.len())
+            .max_by(|&x, &y| {
+                let (x, y) = (a.ballistics.bars()[x], a.ballistics.bars()[y]);
+                x.partial_cmp(&y).expect("no NaN in a bar")
+            })
+            .expect("bars to compare");
+        let struck = a.ballistics.bars()[loudest];
+        assert!(struck > 0.0, "the note did not register at all");
+
+        // Silence for a third of a second, which is a full-scale bar's fall.
+        for _ in 0..20 {
+            a.push_samples(&vec![0.0; FRAME_SAMPLES]);
+            a.measure();
+            a.ballistics.step(&a.bands, 1.0 / 60.0);
+        }
+
+        let bar = a.ballistics.bars()[loudest];
+        let cap = a.ballistics.peaks()[loudest];
+        assert!(bar < struck, "the bar did not fall: {struck} -> {bar}");
+        assert!(cap > bar, "the cap came down with the bar: {cap} vs {bar}");
+    }
+
     #[test]
     fn everything_rav_opens_with_comes_from_the_preset() {
         // Four constants scattered through the constructor is how a "default"
