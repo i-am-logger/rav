@@ -87,6 +87,72 @@ impl Level {
     }
 }
 
+/// How a measured amplitude becomes a level to display.
+///
+/// rav measures linearly and always has: the magnitude is never put through a
+/// logarithm, there is no dB window and no per-frame normalisation, and
+/// `amplitude_response_is_linear_not_logarithmic` holds it there. That is the
+/// right default - it is what makes a quiet passage read quiet.
+///
+/// It is also what a four-light bar cannot afford. Spread linearly, four rungs
+/// have their boundaries at 0.25, 0.5 and 0.75 of full scale - which is -12, -6
+/// and -2.5 dBFS. Three of the four lights live in the top 12 dB, and ordinary
+/// music spends almost none of its time there, so the strip sits dark.
+///
+/// So the curve is a property something carries rather than a decision the
+/// renderer makes. A desktop stays linear and faithful; a five-light strip on a
+/// speaker compresses so its four boundaries land where the music actually is.
+/// Both are rav, dressed for the hardware they are on.
+///
+/// **`no_std` note:** `Decibel` needs `log10` and `Gamma` needs `powf`, neither
+/// of which is in `core`. An allocator-free target wants `libm`, or `Linear`,
+/// which needs nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum Curve {
+    /// The display *is* the amplitude. rav's default and its documented choice.
+    #[default]
+    Linear,
+    /// Decibels across a window, so the range is spent where the music is.
+    ///
+    /// `floor` is the quietest amplitude that still lights anything, in dB below
+    /// full scale, and must be negative. -48 is a reasonable window for a small
+    /// strip; -60 is generous; -24 is aggressive.
+    Decibel { floor: f32 },
+    /// A power curve. Below 1 it lifts the quiet end, above 1 it flattens it.
+    ///
+    /// Cheaper than `Decibel` and has no floor to choose, at the cost of not
+    /// meaning anything an audio engineer would recognise.
+    Gamma(f32),
+}
+
+impl Curve {
+    /// Map a measured amplitude to the level to draw.
+    ///
+    /// Monotonic in every form - louder never draws shorter - and silence always
+    /// maps to silence, so a dead signal cannot light the display.
+    pub fn apply(self, amplitude: Level) -> Level {
+        let value = amplitude.fraction();
+        match self {
+            Self::Linear => amplitude,
+            Self::Decibel { floor } => {
+                // A floor at or above full scale has no range to map into, and
+                // silence has no logarithm.
+                if value <= 0.0 || floor >= 0.0 {
+                    return Level::SILENT;
+                }
+                let db = 20.0 * value.log10();
+                Level::new((db - floor) / -floor)
+            }
+            Self::Gamma(exponent) => {
+                if value <= 0.0 || exponent <= 0.0 {
+                    return Level::SILENT;
+                }
+                Level::new(value.powf(exponent))
+            }
+        }
+    }
+}
+
 /// One of a fixed number of steps a skin or a theme offers.
 ///
 /// The whole of what the core knows about either: **how many, and which one -
@@ -452,6 +518,100 @@ mod tests {
 
     /// Enough rungs to say anything at all - the four-light bar is the floor.
     type Rungs = Bounded<4, 4096>;
+
+    /// The amplitude of a signal `db` below full scale.
+    fn at_dbfs(db: f32) -> Level {
+        Level::new(10f32.powf(db / 20.0))
+    }
+
+    #[test]
+    fn a_linear_curve_changes_nothing() {
+        // rav's default and its documented choice: the display is the amplitude.
+        for value in [0.0f32, 0.1, 0.5, 0.9, 1.0] {
+            let level = Level::new(value);
+            assert_eq!(Curve::Linear.apply(level), level);
+        }
+    }
+
+    #[test]
+    fn a_four_light_bar_is_nearly_all_headroom_until_a_curve_fixes_it() {
+        // The finding this exists for. Four rungs spread linearly put their
+        // boundaries at 0.25/0.5/0.75 of full scale - which is -12, -6 and
+        // -2.5 dBFS - so three of four lights cover the top 12 dB and ordinary
+        // music leaves the strip dark.
+        let quiet = at_dbfs(-24.0);
+        assert_eq!(
+            Curve::Linear.apply(quiet).fill(4, 1).whole,
+            0,
+            "at -24 dBFS a linear four-light bar shows nothing at all"
+        );
+
+        // A window wide enough to hold the music lights half the bar instead.
+        let compressed = Curve::Decibel { floor: -48.0 };
+        assert_eq!(
+            compressed.apply(quiet).fill(4, 1).whole,
+            2,
+            "-24 dBFS is halfway through a -48 dB window"
+        );
+    }
+
+    #[test]
+    fn a_decibel_curve_spends_its_range_where_the_music_is() {
+        let curve = Curve::Decibel { floor: -48.0 };
+        // The window's ends are the display's ends.
+        assert_eq!(curve.apply(Level::FULL), Level::FULL, "0 dBFS is the top");
+        assert_eq!(curve.apply(at_dbfs(-48.0)), Level::SILENT, "the floor");
+        assert_eq!(curve.apply(at_dbfs(-60.0)), Level::SILENT, "below it too");
+        // And the midpoint of the window is the midpoint of the display, which
+        // is the whole point - linearly, -24 dBFS is 6% of the way up.
+        let half = curve.apply(at_dbfs(-24.0)).fraction();
+        assert!(
+            (half - 0.5).abs() < 0.01,
+            "-24 dB should be halfway, got {half}"
+        );
+    }
+
+    #[test]
+    fn every_curve_is_monotonic_and_keeps_silence_silent() {
+        // Louder never draws shorter, and a dead signal never lights anything -
+        // the two properties a display curve may not break however it is tuned.
+        for curve in [
+            Curve::Linear,
+            Curve::Decibel { floor: -48.0 },
+            Curve::Decibel { floor: -24.0 },
+            Curve::Gamma(0.5),
+            Curve::Gamma(2.0),
+        ] {
+            assert_eq!(curve.apply(Level::SILENT), Level::SILENT, "{curve:?}");
+            assert_eq!(curve.apply(Level::FULL), Level::FULL, "{curve:?}");
+            let mut previous = Level::SILENT;
+            for step in 0..=100 {
+                let drawn = curve.apply(Level::new(step as f32 / 100.0));
+                assert!(drawn >= previous, "{curve:?} fell at step {step}");
+                previous = drawn;
+            }
+        }
+    }
+
+    #[test]
+    fn a_gamma_below_one_lifts_the_quiet_end() {
+        let quiet = Level::new(0.25);
+        assert!(Curve::Gamma(0.5).apply(quiet) > quiet, "lifted");
+        assert!(Curve::Gamma(2.0).apply(quiet) < quiet, "flattened");
+    }
+
+    #[test]
+    fn a_nonsensical_curve_draws_nothing_rather_than_misbehaving() {
+        // A floor at or above full scale has no range to map into, and a
+        // non-positive exponent is not a curve. Neither should reach the screen
+        // as a NaN or an inverted display.
+        assert_eq!(
+            Curve::Decibel { floor: 0.0 }.apply(Level::new(0.5)),
+            Level::SILENT
+        );
+        assert_eq!(Curve::Gamma(0.0).apply(Level::new(0.5)), Level::SILENT);
+        assert_eq!(Curve::Gamma(-1.0).apply(Level::new(0.5)), Level::SILENT);
+    }
 
     #[test]
     fn a_bounded_count_refuses_what_is_out_of_range() {
