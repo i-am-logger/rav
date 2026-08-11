@@ -175,7 +175,7 @@ impl BarLayout {
             return 0;
         }
         let stride = self.width + self.gap;
-        (((screen.width() + self.gap).get() / stride.get()).floor() as usize).max(1)
+        (crate::math::floor((screen.width() + self.gap).get() / stride.get()) as usize).max(1)
     }
 
     /// The slot the band at `index` occupies.
@@ -298,6 +298,8 @@ impl Column {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // `no_std` drops the prelude, so a test that collects needs this said.
+    use std::vec::Vec;
 
     fn screen(width: f32, height: f32) -> Screen {
         Screen::new(Length(width), Length(height))

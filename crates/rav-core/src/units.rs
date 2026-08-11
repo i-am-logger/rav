@@ -63,7 +63,7 @@ impl Level {
     /// and changing it would move every colour boundary in the picture.
     pub fn nearest_step(self, count: usize) -> Step {
         let last = count.saturating_sub(1);
-        Step::new((self.0 * last as f32).round() as usize, count)
+        Step::new(crate::math::round(self.0 * last as f32) as usize, count)
     }
 
     /// How far this level fills a ladder of `rungs`, each divisible into `steps`.
@@ -79,7 +79,7 @@ impl Level {
             };
         }
         let total = self.0 * (rungs * steps) as f32;
-        let filled = (total.floor() as usize).min(rungs * steps);
+        let filled = (crate::math::floor(total) as usize).min(rungs * steps);
         Fill {
             whole: filled / steps,
             part: Step::new(filled % steps, steps),
@@ -140,14 +140,14 @@ impl Curve {
                 if value <= 0.0 || floor >= 0.0 {
                     return Level::SILENT;
                 }
-                let db = 20.0 * value.log10();
+                let db = 20.0 * crate::math::log10(value);
                 Level::new((db - floor) / -floor)
             }
             Self::Gamma(exponent) => {
                 if value <= 0.0 || exponent <= 0.0 {
                     return Level::SILENT;
                 }
-                Level::new(value.powf(exponent))
+                Level::new(crate::math::powf(value, exponent))
             }
         }
     }
@@ -211,7 +211,7 @@ impl Step {
         }
         let fraction = self.index as f32 / (self.count - 1) as f32;
         Self::new(
-            (fraction * count.max(1).saturating_sub(1) as f32).round() as usize,
+            crate::math::round(fraction * count.max(1).saturating_sub(1) as f32) as usize,
             count,
         )
     }
@@ -250,7 +250,7 @@ impl Fill {
 /// misrepresents the hardware. `None` makes them deal with it.
 ///
 /// ```
-/// use rav::units::Bounded;
+/// use rav_core::Bounded;
 /// type Rungs = Bounded<4, 4096>;
 /// assert!(Rungs::new(3).is_none(), "too few to say anything");
 /// assert_eq!(Rungs::new(5).map(Bounded::get), Some(5));
@@ -353,7 +353,7 @@ impl Length {
 
     /// How many whole lights this covers, for sizing a buffer.
     pub fn rounded_up(self) -> u32 {
-        self.0.max(0.0).ceil() as u32
+        crate::math::ceil(self.0.max(0.0)) as u32
     }
 }
 

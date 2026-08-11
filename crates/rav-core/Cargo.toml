@@ -1,0 +1,24 @@
+[package]
+name = "rav-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "The mechanics behind rav: levels, steps, geometry and what a display can show"
+license-file = "../../LICENSE"
+keywords = ["audio", "visualizer", "spectrum", "no-std", "embedded"]
+categories = ["multimedia::audio", "no-std", "visualization"]
+
+# One dependency, and it is the honest cost of `no_std` rather than a
+# convenience. `f32::floor`, `round`, `log10` and `powf` live in `std`, not in
+# `core` - the compiler says so the moment the crate declares `#![no_std]`, which
+# is precisely the kind of thing a module boundary and a comment never would have
+# caught. libm is the rust-lang port of musl's, pure Rust, with no dependencies
+# of its own, so the crate still needs no allocator, no clock and no operating
+# system.
+[dependencies]
+libm = "0.2"
+
+[lints.rust]
+unused = "deny"
