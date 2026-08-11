@@ -19,7 +19,7 @@
           inherit (pkgs) lib stdenv;
           craneLib = crane.mkLib pkgs;
 
-          # src/visual/skin.rs pulls skins/*.toml in with include_str!, so they
+          # src/visual/theme.rs pulls crates/rav-appearance/themes/*.toml in with
           # have to survive filtering. crane's filter keeps every .toml today,
           # which covers them incidentally rather than deliberately; the second
           # clause states the requirement so a narrower filter upstream cannot
@@ -28,7 +28,7 @@
             src = ./.;
             filter = path: type:
               (craneLib.filterCargoSources path type)
-              || (lib.hasInfix "/skins/" path);
+              || (lib.hasInfix "/themes/" path);
             name = "source";
           };
 

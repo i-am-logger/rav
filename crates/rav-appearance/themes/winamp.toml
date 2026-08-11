@@ -1,7 +1,7 @@
-# rav skin — see docs/skins.md for the format.
+# rav theme — see docs/themes.md for the format.
 
 name = "winamp"
-description = "The classic green-to-red analyser, from Winamp's default skin."
+description = "The classic green-to-red analyser, from Winamp's default theme."
 
 [about]
 source = "https://github.com/captbaritone/webamp"
@@ -12,7 +12,7 @@ The colour values are transcribed from base-2.91's VISCOLOR.TXT as redistributed
 by Webamp, a reimplementation of Winamp 2.9 whose visualiser was reverse
 engineered from the original binaries. Webamp's MIT licence permits this, and
 its permission notice travels with the values: see LICENSE-MIT.txt alongside.
-The data originates as Nullsoft's Winamp default skin; both are credited.
+The data originates as Nullsoft's Winamp default theme; both are credited.
 """
 
 [colors]
@@ -37,11 +37,11 @@ bars = [
   "#ef3110",  # 2, tip
 ]
 
-# One colour, used for every row. A skin may give 16 instead, to match `bars`
+# One colour, used for every row. A theme may give 16 instead, to match `bars`
 # stop for stop - see `terminal.toml`.
 grid = "#182129"
 
-# The peak caps. Grey in this skin, not white.
+# The peak caps. Grey in this theme, not white.
 peak = "#969696"
 
 # The oscilloscope, 5 levels, centre of the trace first. The trace is brightest

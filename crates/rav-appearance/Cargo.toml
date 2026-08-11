@@ -1,0 +1,24 @@
+[package]
+name = "rav-appearance"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "What rav's abstract steps look like: themes, ramps and colour, for any surface"
+license-file = "../../LICENSE"
+keywords = ["audio", "visualizer", "theme", "no-std", "embedded"]
+categories = ["multimedia::audio", "no-std", "visualization"]
+
+# Only the core. Nothing here may name a terminal, a rasteriser or a display
+# driver: the same theme has to dress a glyph grid, a window and an LED strip,
+# or an ESP32 with a screen would work and not look like rav.
+[build-dependencies]
+# Build time only: the generated consts carry no parser onto the target.
+toml = "0.8"
+
+[dependencies]
+rav-core = { workspace = true }
+
+[lints.rust]
+unused = "deny"

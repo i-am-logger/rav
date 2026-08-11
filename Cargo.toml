@@ -1,17 +1,40 @@
-[package]
-name = "rav"
+# rav is both the workspace root and the binary. rav-core is a member rather
+# than a directory of modules because the boundary has to hold mechanically: it
+# is `no_std` and allocation-free, and a crate cannot acquire a dependency on an
+# allocator, a clock or a terminal by accident where a module can.
+[workspace]
+members = ["crates/rav-core", "crates/rav-appearance"]
+
+# Stated once, inherited by every member. The crates ship together and their
+# versions have to move together - a rav built against a different rav-core is
+# not a configuration anyone should be able to reach by editing one file.
+[workspace.package]
 version = "1.0.0-beta.6"
-# There are two binaries, so `cargo run` cannot guess. Without this it errors
-# out and tells you to pass --bin, which is a poor first impression.
-default-run = "rav"
 edition = "2024"
 # The floor the dependency graph imposes, not rav's own source: instability
 # (reached through ratatui) and the darling family all declare 1.88.
 rust-version = "1.88"
 authors = ["RAV Team <i-am-logger@users.noreply.github.com>"]
+repository = "https://github.com/i-am-logger/rav"
+
+# Both a path and a version: the path is what the workspace builds against, and
+# the version is what a published rav requires, so the two cannot drift.
+[workspace.dependencies]
+rav-core = { path = "crates/rav-core", version = "1.0.0-beta.6" }
+rav-appearance = { path = "crates/rav-appearance", version = "1.0.0-beta.6" }
+
+[package]
+name = "rav"
+version.workspace = true
+# There are two binaries, so `cargo run` cannot guess. Without this it errors
+# out and tells you to pass --bin, which is a poor first impression.
+default-run = "rav"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
 description = "Rust audio visualiser: a real-time spectrum analyser with bars, peak caps and an oscilloscope, in truecolour"
 license-file = "LICENSE"
-repository = "https://github.com/i-am-logger/rav"
+repository.workspace = true
 homepage = "https://github.com/i-am-logger/rav"
 documentation = "https://github.com/i-am-logger/rav#readme"
 readme = "README.md"
@@ -28,6 +51,13 @@ exclude = ["assets/demo.gif", ".github/", "devenv.nix", "devenv.yaml", "devenv.l
 unused = "deny"
 
 [dependencies]
+# The mechanics: levels, steps, geometry, and what a display can show. no_std and
+# allocation-free, so the same crate builds for a microcontroller unchanged.
+rav-core = { workspace = true }
+# Themes, ramps and colour - what an abstract step looks like. no_std, and it
+# names no rasteriser, so the same theme dresses every surface.
+rav-appearance = { workspace = true }
+
 # Terminal User Interface
 ratatui = "0.28"
 crossterm = "0.28"
@@ -39,6 +69,15 @@ cpal = "0.15"
 # Signal processing and FFT
 rustfft = "6.2"
 realfft = "3.3"
+
+# Rasterising, for the surfaces that draw pixels rather than glyphs.
+#
+# CPU rather than a GPU crate: every surface needs the frame in main memory
+# anyway - the terminal writes it to a file the terminal reads, and a window can
+# blit it - so rendering on the GPU would mean a readback stall on the path that
+# matters most. It also pairs with resvg for the SVG skins later, and works with
+# no device or surface, which is what makes a frame testable at all.
+tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }
 
 # Configuration and serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -69,6 +108,12 @@ path = "src/main.rs"
 [[bin]]
 name = "test_audio_pipeline"
 path = "src/bin/test_audio_pipeline.rs"
+
+# Measures whether a terminal can carry rav's frames as pixels, ahead of the
+# renderer that would depend on it. See issue #65.
+[[bin]]
+name = "kitty_spike"
+path = "src/bin/kitty_spike.rs"
 
 [profile.release]
 lto = true

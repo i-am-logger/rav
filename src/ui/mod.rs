@@ -2,10 +2,12 @@ pub mod analyzer;
 pub mod help;
 pub mod scale;
 pub mod scope;
+pub mod status;
 
 use crate::{
     audio::AudioData,
     config::Config,
+    render::Ink,
     signal::{
         ballistics::{BAR_FALL_SPEEDS, Ballistics, DEFAULT_PEAK_FALL},
         mapping::{
@@ -13,15 +15,17 @@ use crate::{
         },
         spectrum::{MAX_HEIGHT, Spectrum},
     },
-    visual::{Skin, Theme},
+    units::{Curve, Level},
+    visual::{Palette, Theme},
 };
 use analyzer::{Analyzer, BarLayout, BarStyle, Peaks, grid_colors, row_colors};
 use anyhow::Result;
-use crossterm::event::KeyCode;
+// The event types are named by the render loop whichever backend it is driving,
+// so only the parts that touch a real terminal are gated.
+use crossterm::event::{Event, KeyCode, KeyEventKind};
 #[cfg(not(test))]
 use crossterm::{
-    ExecutableCommand,
-    event::{self, Event, KeyEventKind},
+    ExecutableCommand, event,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use flume::Receiver;
@@ -32,31 +36,67 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::backend::TestBackend;
 use ratatui::{Terminal, style::Color};
 use scope::{Scope, ScopeStyle};
+use status::Status;
 #[cfg(not(test))]
 use std::io::{self, Stdout};
 use std::time::{Duration, Instant};
-use tokio::time::interval;
-use tracing::info;
+use tokio::time::{MissedTickBehavior, interval};
+use tracing::{debug, info};
 
 #[cfg(test)]
 type AppTerminal = Terminal<TestBackend>;
 #[cfg(not(test))]
 type AppTerminal = Terminal<CrosstermBackend<Stdout>>;
 
+/// The only place a theme's colour meets the terminal's idea of one.
+///
+/// A named colour stays named all the way here and is handed over as a *slot*,
+/// so the terminal paints it from whatever palette the user runs - which is the
+/// whole reason the `terminal` and `mono` themes exist. Resolving it to RGB
+/// earlier would replace their colours with ones rav chose.
+///
+/// ratatui spells slot 7 `Gray` and slot 15 `White`; a theme calls them `white`
+/// and `bright-white`, which is what the author reads off their configuration.
+/// The disagreement is about naming, not about which colour, and it is confined
+/// to this table.
+pub fn to_color(ink: Ink) -> Color {
+    match ink {
+        Ink::Rgb(r, g, b) => Color::Rgb(r, g, b),
+        Ink::Ansi(slot) => match slot & 0x0f {
+            0 => Color::Black,
+            1 => Color::Red,
+            2 => Color::Green,
+            3 => Color::Yellow,
+            4 => Color::Blue,
+            5 => Color::Magenta,
+            6 => Color::Cyan,
+            7 => Color::Gray,
+            8 => Color::DarkGray,
+            9 => Color::LightRed,
+            10 => Color::LightGreen,
+            11 => Color::LightYellow,
+            12 => Color::LightBlue,
+            13 => Color::LightMagenta,
+            14 => Color::LightCyan,
+            _ => Color::White,
+        },
+    }
+}
+
 /// Which visualisation is on screen. The original showed one at a time, full area,
 /// switched by clicking the panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum View {
+pub enum Visualisation {
     #[default]
     Analyzer,
     Oscilloscope,
 }
 
-impl View {
+impl Visualisation {
     fn next(self) -> Self {
         match self {
-            View::Analyzer => View::Oscilloscope,
-            View::Oscilloscope => View::Analyzer,
+            Visualisation::Analyzer => Visualisation::Oscilloscope,
+            Visualisation::Oscilloscope => Visualisation::Analyzer,
         }
     }
 }
@@ -67,7 +107,7 @@ impl View {
 pub enum Action {
     None,
     Quit,
-    ToggleView,
+    CycleVisualisation,
     TogglePeaks,
     ToggleGrid,
     CycleBandwidth,
@@ -75,28 +115,34 @@ pub enum Action {
     CycleFrequencyLimit,
     ToggleHelp,
     CycleBarStyle,
-    CycleSkin,
+    CycleTheme,
     /// Trim in whole dB steps; kept an integer so `Action` stays `Eq`.
     Gain(i8),
     ResetGain,
+    /// Widen or narrow the bars. Integral for the same reason as `Gain`.
+    BarSize(i8),
 }
 
 pub fn map_key(code: KeyCode) -> Action {
     match code {
         KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => Action::Quit,
         KeyCode::Char(' ') | KeyCode::Char('o') | KeyCode::Char('O') | KeyCode::Tab => {
-            Action::ToggleView
+            Action::CycleVisualisation
         }
         KeyCode::Char('p') | KeyCode::Char('P') => Action::TogglePeaks,
         KeyCode::Char('g') | KeyCode::Char('G') => Action::ToggleGrid,
         KeyCode::Char('w') | KeyCode::Char('W') => Action::CycleBandwidth,
         KeyCode::Char('b') | KeyCode::Char('B') => Action::CycleBarStyle,
-        KeyCode::Char('s') | KeyCode::Char('S') => Action::CycleSkin,
+        KeyCode::Char('t') | KeyCode::Char('T') => Action::CycleTheme,
         KeyCode::Char('f') | KeyCode::Char('F') => Action::CycleBarFall,
         KeyCode::Char('r') | KeyCode::Char('R') => Action::CycleFrequencyLimit,
         KeyCode::Up => Action::Gain(1),
         KeyCode::Down => Action::Gain(-1),
         KeyCode::Char('0') => Action::ResetGain,
+        // `=` as well as `+`: `+` needs Shift on most layouts, and every browser
+        // and terminal already takes `=` for zoom-in.
+        KeyCode::Char('+') | KeyCode::Char('=') => Action::BarSize(1),
+        KeyCode::Char('-') => Action::BarSize(-1),
         KeyCode::Char('h') | KeyCode::Char('H') | KeyCode::Char('?') | KeyCode::F(1) => {
             Action::ToggleHelp
         }
@@ -128,24 +174,32 @@ pub struct App {
     /// reference to however loud you actually listen.
     gain_db: f32,
 
+    /// How a measured amplitude becomes a level to draw, from the preset.
+    ///
+    /// Linear on every screen rav ships for. It is a field rather than a
+    /// constant because a four-light strip cannot afford linear - three of its
+    /// four rungs would sit in the top 12 dB - and that is a property of the
+    /// hardware a preset is written for, not of the renderer.
+    curve: Curve,
+
     /// Reused every frame so the render path does not allocate.
     sampled: Vec<f32>,
     bands: Vec<f32>,
 
-    skin: Skin,
-    /// A skin loaded from disk by `--skin`, kept so the `s` cycle returns to it.
-    loaded_skin: Option<Skin>,
-    row_colors: Vec<Color>,
-    /// Backdrop colour per row, cached with `row_colors` and rebuilt with it.
-    grid_colors: Vec<Color>,
-    /// The terminal's own palette, read once at startup. A skin that names a
-    /// colour rather than spelling it out needs this to be adjustable at all.
     theme: Theme,
+    /// A theme loaded from disk by `--theme`, kept so the `t` cycle returns to it.
+    loaded_theme: Option<Theme>,
+    row_colors: Vec<Ink>,
+    /// Backdrop colour per row, cached with `row_colors` and rebuilt with it.
+    grid_colors: Vec<Ink>,
+    /// The terminal's own palette, read once at startup. A theme that names a
+    /// colour rather than spelling it out needs this to be adjustable at all.
+    palette: Palette,
     layout: BarLayout,
     /// Size the cached mapping and colours were built for.
     sized_for: (u16, u16),
 
-    view: View,
+    visualisation: Visualisation,
     scope_style: ScopeStyle,
     peaks: Peaks,
     show_grid: bool,
@@ -181,6 +235,19 @@ impl App {
         let window = vec![0.0; spectrum.size()];
         let bar_map = BarMap::new(1, spectrum.bins(), DEFAULT_SCALE);
 
+        // Everything about how rav looks and feels on startup comes from one
+        // place. Four constants scattered through this constructor is how they
+        // drift from the preset that claims to describe them - and how a
+        // "default" ends up meaning something different in two files.
+        let preset = rav_appearance::preset::RAV;
+        // The dial starts where the preset sits, so cycling `f` moves from what
+        // rav actually opened with rather than from a hardcoded index that
+        // happens to agree today.
+        let bar_fall_index = BAR_FALL_SPEEDS
+            .iter()
+            .position(|&speed| speed == preset.ballistics.bar_fall)
+            .unwrap_or(0);
+
         Ok(Self {
             config,
             terminal,
@@ -188,22 +255,25 @@ impl App {
             channels: channels.max(1) as usize,
             spectrum,
             bar_map,
-            ballistics: Ballistics::new(0),
+            ballistics: Ballistics::new(0)
+                .with_speeds(preset.ballistics.bar_fall, preset.ballistics.peak_fall)
+                .with_reference_fps(preset.ballistics.reference_fps),
             bandwidth: Bandwidth::Wide,
-            bar_fall_index: 2, // 12.0, the original default
+            bar_fall_index,
             limit_index: DEFAULT_LIMIT_INDEX,
             sample_rate,
             gain_db: 0.0,
+            curve: preset.curve,
             sampled: Vec::new(),
             bands: Vec::new(),
-            skin: Skin::default(),
-            loaded_skin: None,
+            theme: Theme::from(preset.theme),
+            loaded_theme: None,
             row_colors: Vec::new(),
             grid_colors: Vec::new(),
-            theme: Theme::default(),
+            palette: Palette::default(),
             layout: BarLayout::default(),
             sized_for: (0, 0),
-            view: View::default(),
+            visualisation: Visualisation::default(),
             scope_style: ScopeStyle::default(),
             peaks: Peaks::default(),
             show_grid: true,
@@ -223,18 +293,18 @@ impl App {
         })
     }
 
-    /// Use `skin` from now on, and put it in the `s` cycle if it is not one of
+    /// Use `theme` from now on, and put it in the `s` cycle if it is not one of
     /// the built-ins. Colours are cached per height, so the cache is dropped.
-    pub fn set_skin(&mut self, skin: Skin) {
-        if Skin::built_in_names().all(|n| n != skin.name) {
-            self.loaded_skin = Some(skin.clone());
+    pub fn set_theme(&mut self, theme: Theme) {
+        if Theme::built_in_names().all(|n| n != theme.name) {
+            self.loaded_theme = Some(theme.clone());
         }
-        // Read the terminal's palette the first time a skin actually needs it -
-        // once, and never for a skin that spells its colours out.
-        if skin.needs_terminal_palette() && self.theme == Theme::default() {
-            self.theme = Theme::query(true);
+        // Read the terminal's palette the first time a theme actually needs it -
+        // once, and never for a theme that spells its colours out.
+        if theme.needs_terminal_palette() && self.palette == Palette::default() {
+            self.palette = crate::visual::palette::query(true);
         }
-        self.skin = skin;
+        self.theme = theme;
         self.sized_for = (0, 0);
     }
 
@@ -272,8 +342,8 @@ impl App {
         } else {
             height.saturating_sub(1).max(1)
         };
-        self.row_colors = row_colors(ramp_height, &self.skin);
-        self.grid_colors = grid_colors(ramp_height, &self.skin, &self.theme);
+        self.row_colors = row_colors(ramp_height, &self.theme);
+        self.grid_colors = grid_colors(ramp_height, &self.theme, &self.palette);
         self.sized_for = (width, height);
     }
 
@@ -331,11 +401,11 @@ impl App {
     fn apply(&mut self, action: Action) {
         match action {
             Action::Quit => self.should_quit = true,
-            Action::ToggleView => {
-                self.view = self.view.next();
-                self.note(match self.view {
-                    View::Analyzer => "analyser".to_string(),
-                    View::Oscilloscope => "oscilloscope".to_string(),
+            Action::CycleVisualisation => {
+                self.visualisation = self.visualisation.next();
+                self.note(match self.visualisation {
+                    Visualisation::Analyzer => "analyser".to_string(),
+                    Visualisation::Oscilloscope => "oscilloscope".to_string(),
                 });
             }
             Action::TogglePeaks => {
@@ -383,10 +453,10 @@ impl App {
                 self.bar_style = self.bar_style.next();
                 self.note(format!("bars {}", self.bar_style.label()));
             }
-            Action::CycleSkin => {
-                let next = self.next_skin();
-                self.set_skin(next);
-                self.note(format!("skin {}", self.skin.name));
+            Action::CycleTheme => {
+                let next = self.next_theme();
+                self.set_theme(next);
+                self.note(format!("theme {}", self.theme.name));
             }
             Action::Gain(delta) => {
                 self.gain_db = (self.gain_db + delta as f32).clamp(-40.0, 40.0);
@@ -396,26 +466,34 @@ impl App {
                 self.gain_db = 0.0;
                 self.note("gain +0 dB".to_string());
             }
+            Action::BarSize(delta) => {
+                self.layout.resize(delta);
+                // Bar width decides how many bands fit, so the mapping, the
+                // ballistics and both colour ramps are all stale now. Zeroing
+                // this is what forces the next frame through `resize`.
+                self.sized_for = (0, 0);
+                self.note(format!("bar size {}", self.layout.bar_width));
+            }
             Action::ToggleHelp => self.show_help = !self.show_help,
             Action::None => {}
         }
     }
 
-    /// The next skin in the `s` rotation.
+    /// The next theme in the `s` rotation.
     ///
-    /// The built-ins in file order, with a `--skin` one inserted after the
+    /// The built-ins in file order, with a `--theme` one inserted after the
     /// default so cycling always comes back to it rather than dropping it after
     /// the first press.
-    fn next_skin(&self) -> Skin {
-        let mut order: Vec<Skin> = Skin::built_in_names()
-            .filter_map(|n| Skin::built_in(n).and_then(|r| r.ok()))
+    fn next_theme(&self) -> Theme {
+        let mut order: Vec<Theme> = Theme::built_in_names()
+            .filter_map(Theme::built_in)
             .collect();
-        if let Some(loaded) = &self.loaded_skin {
+        if let Some(loaded) = &self.loaded_theme {
             order.insert(1, loaded.clone());
         }
         let at = order
             .iter()
-            .position(|s| s.name == self.skin.name)
+            .position(|s| s.name == self.theme.name)
             .unwrap_or(0);
         order[(at + 1) % order.len()].clone()
     }
@@ -427,9 +505,9 @@ impl App {
             Some(hz) => format!("up to {} kHz", hz / 1000),
             None => "full range".to_string(),
         };
-        let view = match self.view {
-            View::Analyzer => "analyser",
-            View::Oscilloscope => "oscilloscope",
+        let showing = match self.visualisation {
+            Visualisation::Analyzer => "analyser",
+            Visualisation::Oscilloscope => "oscilloscope",
         };
         let bandwidth = match self.bandwidth {
             Bandwidth::Wide => "wide",
@@ -438,8 +516,8 @@ impl App {
         vec![
             HelpRow {
                 key: "space",
-                description: "switch view",
-                value: Some(view.to_string()),
+                description: "switch visualisation",
+                value: Some(showing.to_string()),
             },
             HelpRow {
                 key: "r",
@@ -462,9 +540,14 @@ impl App {
                 value: Some(self.peaks.label().to_string()),
             },
             HelpRow {
-                key: "s",
-                description: "skin",
-                value: Some(self.skin.name.clone()),
+                key: "t",
+                description: "theme",
+                value: Some(self.theme.name.clone()),
+            },
+            HelpRow {
+                key: "+ / -",
+                description: "bar size",
+                value: Some(self.layout.bar_width.to_string()),
             },
             HelpRow {
                 key: "b",
@@ -512,22 +595,108 @@ impl App {
         self.terminal.clear()?;
         info!("🎨 Starting analyser");
 
+        // The audio device is the clock. Every wake below is something actually
+        // happening - a buffer arriving, a key, or the watchdog - so the loop
+        // never renders a frame nobody asked for, and a buffer is drawn as it
+        // lands rather than waiting out the remainder of a tick.
+        let keys = key_reader();
+
+        // A ceiling, not a cadence. A device with very small buffers could
+        // deliver faster than the terminal can usefully repaint; audio is still
+        // ingested on every wake, only the drawing is coalesced.
+        //
+        // Kept as a moving deadline rather than "has `min_frame` passed since
+        // the last frame", because that form quantises to the wake interval and
+        // loses whatever does not divide it: buffers arriving every 5.2ms take
+        // four to clear a 16.7ms gap, which turns a 60fps ceiling into 48. The
+        // deadline carries the remainder instead, so the average comes out at
+        // the rate that was asked for.
         let fps = self.config.display.refresh_rate.clamp(1, 240) as f64;
-        let mut frame_interval = interval(Duration::from_secs_f64(1.0 / fps));
+        let min_frame = Duration::from_secs_f64(1.0 / fps);
+        let mut next_frame = Instant::now();
+
+        // Only for a device that stops delivering *entirely*. A running device
+        // sends silent buffers while nothing is playing, so the ballistics keep
+        // falling on their own; this is what stops the display freezing
+        // mid-decay if the stream dies, and it is deliberately slow because in
+        // every healthy case it never fires.
+        let mut watchdog = interval(WATCHDOG);
+        watchdog.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        watchdog.tick().await; // the first tick is immediate
+
+        #[cfg(target_os = "macos")]
+        let tapped = self.tap.is_some();
+        #[cfg(not(target_os = "macos"))]
+        let tapped = false;
+
+        // Wakes and frames a second, at debug level. They differ on purpose - a
+        // wake landing inside the frame ceiling is coalesced - and the gap
+        // between them is the only way to see the ceiling doing its job. The
+        // frame count is also the audio device's buffer rate, so this answers
+        // "why is it running at that speed" without a profiler.
+        let mut wakes = 0u64;
+        let mut frames = 0u64;
+        let mut counted_from = Instant::now();
 
         loop {
-            self.handle_events().await?;
             if self.should_quit {
                 break;
             }
 
-            // Drain every pending buffer so the window holds the newest audio. A
-            // backlog is absorbed rather than rendered late.
-            #[cfg(target_os = "macos")]
-            let tapped = self.tap.is_some();
-            #[cfg(not(target_os = "macos"))]
-            let tapped = false;
+            if counted_from.elapsed() >= Duration::from_secs(1) {
+                debug!("{frames} frames from {wakes} wakes");
+                wakes = 0;
+                frames = 0;
+                counted_from = Instant::now();
+            }
+            wakes += 1;
 
+            // Wait for something to happen. No sleep, no polling: each arm is a
+            // source that wakes the loop when it has something, and the OS does
+            // the waiting.
+            #[cfg(target_os = "macos")]
+            let tap_ready = async {
+                match &self.tap {
+                    Some(tap) => tap.ready().await,
+                    // A pending future, so this arm simply never fires when
+                    // there is no tap rather than spinning on a ready `()`.
+                    None => std::future::pending().await,
+                }
+            };
+            #[cfg(not(target_os = "macos"))]
+            let tap_ready = std::future::pending::<()>();
+
+            tokio::select! {
+                // Biased so a quit key is not left waiting behind a backlog of
+                // audio on a loaded machine.
+                biased;
+                Ok(event) = keys.recv_async() => {
+                    if let Event::Key(key) = event
+                        && key.kind == KeyEventKind::Press
+                    {
+                        self.apply(map_key(key.code));
+                    }
+                }
+                () = tap_ready => {}
+                Ok(data) = audio_receiver.recv_async(), if !tapped => {
+                    self.push_samples(&data.samples);
+                }
+                _ = watchdog.tick() => {}
+            }
+
+            // Drain the rest of the burst. A held key repeats faster than the
+            // display needs to change, and taking one per pass would spend a
+            // frame on each instead of settling and drawing the result once.
+            while let Ok(event) = keys.try_recv() {
+                if let Event::Key(key) = event
+                    && key.kind == KeyEventKind::Press
+                {
+                    self.apply(map_key(key.code));
+                }
+            }
+
+            // Drain whatever else is queued, so a backlog is absorbed into the
+            // window rather than rendered one stale frame at a time.
             #[cfg(target_os = "macos")]
             if let Some(tap) = &self.tap {
                 let mut scratch = std::mem::take(&mut self.tap_scratch);
@@ -551,28 +720,67 @@ impl App {
                 }
             }
 
-            frame_interval.tick().await;
+            if self.should_quit {
+                break;
+            }
 
             let area = self.terminal.size()?;
             if (area.width, area.height) != self.sized_for {
                 self.resize(area.width, area.height);
             }
 
+            // Measure on the audio's schedule, not the display's.
+            //
+            // This used to sit below the frame ceiling, so a coalesced wake
+            // skipped the analysis with it. That is harmless while the only
+            // consumer is an animation, but it makes the *interval between
+            // spectra* a property of the display - frame rate, a terminal
+            // stall, whether two buffers happened to arrive inside one frame.
+            // Anything that measures across time rather than within one frame,
+            // an onset detector above all, would inherit that jitter into its
+            // measurement rather than into how it looks.
+            //
+            // The ballistics step comes with it, for the same reason and a
+            // plainer one: it is framerate-independent because it integrates
+            // dt, and stepping it on the display's cadence rather than the
+            // signal's threw away the accuracy that buys.
             let magnitudes = self.spectrum.analyse(&self.window);
             self.bar_map.sample(magnitudes, &mut self.sampled);
             self.bandwidth.group(&self.sampled, &mut self.bands);
             // Gain is applied before the clip, so full scale always means
             // exactly full scale whatever the trim.
             let gain = 10f32.powf(self.gain_db / 20.0);
-            let scope_gain = gain;
             for v in self.bands.iter_mut() {
-                *v = (*v * gain / MAX_HEIGHT).min(1.0);
+                // The preset's response curve, applied where the measured
+                // amplitude becomes a level to draw. Linear for every preset
+                // rav ships on a screen, which is rav's documented choice and
+                // what makes a quiet passage read quiet; a short LED bar needs
+                // otherwise, and says so in its own preset rather than here.
+                *v = self
+                    .curve
+                    .apply(Level::new(*v * gain / MAX_HEIGHT))
+                    .fraction();
             }
 
-            let now = Instant::now();
-            let dt = now.duration_since(self.last_frame).as_secs_f32();
-            self.last_frame = now;
+            let measured_at = Instant::now();
+            let dt = measured_at.duration_since(self.last_frame).as_secs_f32();
+            self.last_frame = measured_at;
             self.ballistics.step(&self.bands, dt);
+
+            // Only the drawing is capped. Everything above ran on the signal.
+            if measured_at < next_frame {
+                continue;
+            }
+            next_frame += min_frame;
+            // A device slower than the ceiling, or a stall, would otherwise
+            // leave the deadline in the past and owing frames it would then take
+            // back to back. There is no debt worth paying here: the next frame
+            // shows the current state either way.
+            if next_frame < measured_at {
+                next_frame = measured_at + min_frame;
+            }
+            frames += 1;
+            let scope_gain = gain;
 
             // Both borrow all of `self`, so they are taken before the destructure.
             // The warning outranks a transient note: a settings message that
@@ -593,21 +801,21 @@ impl App {
                 ballistics,
                 row_colors,
                 grid_colors,
-                skin,
+                theme,
                 layout,
                 window,
-                view,
+                visualisation,
                 scope_style,
                 peaks,
                 show_grid,
                 bar_style,
                 ..
             } = self;
-            let cap_color = skin.peak;
+            let cap_color = theme.peak;
             let grid = show_grid.then_some(grid_colors.as_slice());
             terminal.draw(|f| {
-                match view {
-                    View::Analyzer => f.render_widget(
+                match visualisation {
+                    Visualisation::Analyzer => f.render_widget(
                         Analyzer {
                             bars: ballistics.bars(),
                             peaks: ballistics.peaks(),
@@ -620,10 +828,10 @@ impl App {
                         },
                         f.area(),
                     ),
-                    View::Oscilloscope => f.render_widget(
+                    Visualisation::Oscilloscope => f.render_widget(
                         Scope {
                             samples: window,
-                            skin,
+                            theme,
                             style: *scope_style,
                             gain: scope_gain,
                         },
@@ -633,8 +841,16 @@ impl App {
                 // The transient note still fires on every settings key; the
                 // overlay is the full picture when you want it.
                 if let Some(text) = &status {
-                    let area = f.area();
-                    draw_status(f.buffer_mut(), area, text);
+                    f.render_widget(
+                        Status {
+                            text,
+                            foreground: Color::Rgb(222, 222, 222),
+                            // The floor of the *active* theme, so the note sits
+                            // on the backdrop the user is looking at.
+                            background: to_color(theme.grid[0]),
+                        },
+                        f.area(),
+                    );
                 }
                 if let Some(rows) = &help_rows {
                     f.render_widget(Help { rows, title: "rav" }, f.area());
@@ -651,48 +867,39 @@ impl App {
         info!("👋 Analyser shut down");
         Ok(())
     }
-
-    async fn handle_events(&mut self) -> Result<()> {
-        #[cfg(test)]
-        {
-            Ok(())
-        }
-        #[cfg(not(test))]
-        {
-            // Drain the whole burst; a held key should not queue up frames.
-            while event::poll(Duration::ZERO)? {
-                if let Event::Key(key) = event::read()?
-                    && key.kind == KeyEventKind::Press
-                {
-                    let action = map_key(key.code);
-                    self.apply(action);
-                }
-            }
-            Ok(())
-        }
-    }
 }
 
-/// Draw a short message in the top-left corner.
+/// How long the display may go without an audio buffer before it redraws anyway.
 ///
-/// Written straight into the buffer rather than as a widget so it overlays the
-/// visualisation without reserving a row for a status bar that is empty most of
-/// the time.
-fn draw_status(buf: &mut ratatui::buffer::Buffer, area: ratatui::layout::Rect, text: &str) {
-    if area.is_empty() {
-        return;
-    }
-    let label = format!(" {text} ");
-    for (i, ch) in label.chars().enumerate() {
-        let x = area.x + i as u16;
-        if x >= area.x + area.width {
-            break;
+/// Long on purpose. A running device delivers silent buffers when nothing is
+/// playing, so this never fires in a healthy session - it exists so a stream
+/// that dies outright leaves the bars resting on the floor rather than frozen
+/// part-way down.
+const WATCHDOG: Duration = Duration::from_millis(250);
+
+/// Terminal events, on a channel the render loop can wait on.
+///
+/// A thread rather than a poll: `event::read` blocks until there is genuinely a
+/// key, so the OS does the waiting and no cadence has to be guessed. crossterm's
+/// own `EventStream` is this same thread with a `Stream` around it, and would
+/// cost a futures dependency to await.
+///
+/// Never joined. It is parked in a read on a terminal that outlives the loop,
+/// and there is nothing to clean up: the channel closes when the receiver drops
+/// and the thread ends at the next keystroke, or with the process.
+fn key_reader() -> flume::Receiver<Event> {
+    let (tx, rx) = flume::unbounded();
+    #[cfg(not(test))]
+    std::thread::spawn(move || {
+        while let Ok(event) = event::read() {
+            if tx.send(event).is_err() {
+                break;
+            }
         }
-        buf[(x, area.y)]
-            .set_symbol(&ch.to_string())
-            .set_fg(Color::Rgb(222, 222, 222))
-            .set_bg(Skin::default().grid[0]);
-    }
+    });
+    #[cfg(test)]
+    drop(tx);
+    rx
 }
 
 #[cfg(test)]
@@ -701,6 +908,53 @@ mod tests {
 
     fn app() -> App {
         App::new(Config::default(), 2, 48_000).expect("app should build")
+    }
+
+    #[test]
+    fn everything_rav_opens_with_comes_from_the_preset() {
+        // Four constants scattered through the constructor is how a "default"
+        // ends up meaning one thing in the preset and another in the app. Each
+        // of these is asserted against the preset rather than a literal, so
+        // editing the preset moves rav and editing rav alone cannot.
+        let a = app();
+        let preset = rav_appearance::preset::RAV;
+        assert_eq!(a.theme.name, preset.theme.name, "colours");
+        assert_eq!(a.curve, preset.curve, "response");
+        assert_eq!(
+            BAR_FALL_SPEEDS[a.bar_fall_index], preset.ballistics.bar_fall,
+            "the fall dial starts where the preset sits"
+        );
+    }
+
+    #[test]
+    fn the_response_curve_comes_from_the_preset_and_is_linear() {
+        // A field nothing reads is not a feature, so this pins both halves: the
+        // app takes its curve from the preset rather than hardcoding one, and
+        // the preset rav ships is linear - which is its documented choice and
+        // what makes a quiet passage read quiet.
+        assert_eq!(app().curve, rav_appearance::preset::RAV.curve);
+        assert_eq!(app().curve, Curve::Linear);
+    }
+
+    #[test]
+    fn a_curve_changes_what_a_quiet_band_draws() {
+        // The mechanism the field exists for, exercised end to end rather than
+        // asserted on the type: the same measured amplitude reaches the display
+        // as a different level once the preset asks for a window.
+        let quiet = Level::new(0.1); // -20 dBFS
+        let linear = Curve::Linear.apply(quiet);
+        let windowed = Curve::Decibel { floor: -48.0 }.apply(quiet);
+        assert!(
+            windowed > linear,
+            "a window should lift a quiet band, got {windowed:?} from {linear:?}"
+        );
+        // And full scale is still full scale either way, so the top of the
+        // display means the same thing whatever the curve.
+        assert_eq!(Curve::Linear.apply(Level::FULL), Level::FULL);
+        assert_eq!(
+            Curve::Decibel { floor: -48.0 }.apply(Level::FULL),
+            Level::FULL
+        );
     }
 
     #[test]
@@ -761,7 +1015,7 @@ mod tests {
         assert_eq!(a.row_colors.len(), 4, "ramp spans the bar's visible rows");
         assert_eq!(
             *a.row_colors.last().unwrap(),
-            *Skin::default().bars.last().unwrap(),
+            *Theme::default().bars.last().unwrap(),
             "topmost visible bar row must be red"
         );
 
@@ -772,7 +1026,7 @@ mod tests {
         assert_eq!(a.row_colors.len(), 5);
         assert_eq!(
             *a.row_colors.last().unwrap(),
-            *Skin::default().bars.last().unwrap()
+            *Theme::default().bars.last().unwrap()
         );
     }
 
@@ -865,17 +1119,25 @@ mod tests {
     #[test]
     fn the_view_toggles_between_analyser_and_scope() {
         let mut a = app();
-        assert_eq!(a.view, View::Analyzer, "analyser is the default");
-        a.apply(Action::ToggleView);
-        assert_eq!(a.view, View::Oscilloscope);
-        a.apply(Action::ToggleView);
-        assert_eq!(a.view, View::Analyzer, "toggling twice returns");
+        assert_eq!(
+            a.visualisation,
+            Visualisation::Analyzer,
+            "analyser is the default"
+        );
+        a.apply(Action::CycleVisualisation);
+        assert_eq!(a.visualisation, Visualisation::Oscilloscope);
+        a.apply(Action::CycleVisualisation);
+        assert_eq!(
+            a.visualisation,
+            Visualisation::Analyzer,
+            "toggling twice returns"
+        );
     }
 
     #[test]
     fn tab_and_o_both_switch_view() {
-        assert_eq!(map_key(KeyCode::Tab), Action::ToggleView);
-        assert_eq!(map_key(KeyCode::Char('o')), Action::ToggleView);
+        assert_eq!(map_key(KeyCode::Tab), Action::CycleVisualisation);
+        assert_eq!(map_key(KeyCode::Char('o')), Action::CycleVisualisation);
     }
 
     #[test]
@@ -917,7 +1179,7 @@ mod tests {
         assert_eq!(value_for(&a, "r"), Some("up to 20 kHz".to_string()));
 
         assert_eq!(value_for(&a, "space"), Some("analyser".to_string()));
-        a.apply(Action::ToggleView);
+        a.apply(Action::CycleVisualisation);
         assert_eq!(value_for(&a, "space"), Some("oscilloscope".to_string()));
 
         a.apply(Action::ToggleHelp);
@@ -972,40 +1234,167 @@ mod tests {
 
     #[test]
     fn s_cycles_the_colours_and_b_the_bar_style() {
-        assert_eq!(map_key(KeyCode::Char('s')), Action::CycleSkin);
+        assert_eq!(map_key(KeyCode::Char('t')), Action::CycleTheme);
         assert_eq!(map_key(KeyCode::Char('b')), Action::CycleBarStyle);
     }
 
     #[test]
     fn cycling_colours_rebuilds_the_row_ramp() {
-        // The cached ramp is a function of the skin, so a change that did not
+        // The cached ramp is a function of the theme, so a change that did not
         // invalidate it would leave the old colours on screen until a resize.
         let mut a = app();
         a.resize(80, 24);
         // rav and winamp share a ramp and differ only in the backdrop, so that
         // is what has to change here - the bars deliberately do not.
         let before = a.grid_colors.clone();
-        a.apply(Action::CycleSkin);
-        assert_eq!(a.skin.name, "winamp");
+        a.apply(Action::CycleTheme);
+        assert_eq!(a.theme.name, "winamp");
         assert_eq!(a.sized_for, (0, 0), "the ramp cache must be invalidated");
         a.resize(80, 24);
         assert_ne!(a.grid_colors, before, "colours did not change");
-        assert_eq!(a.active_status(), Some("skin winamp"));
+        assert_eq!(a.active_status(), Some("theme winamp"));
     }
 
     #[test]
-    fn a_loaded_skin_stays_in_the_cycle() {
-        // --skin puts a fourth entry in the rotation; cycling all the way round
+    fn a_named_colour_reaches_the_terminal_still_named() {
+        // The whole reason the `terminal` and `mono` themes work. A name is a
+        // deferral - "whatever green is here" - so it has to arrive at ratatui
+        // as a slot the terminal paints, not as an RGB value rav chose. Resolve
+        // it anywhere earlier and those themes quietly stop following the
+        // user's colours while still looking plausible.
+        assert_eq!(to_color(Ink::from_name("green").unwrap()), Color::Green);
+        assert_eq!(
+            to_color(Ink::from_name("bright-white").unwrap()),
+            Color::White
+        );
+        // ratatui calls slot 7 `Gray`; a theme calls it `white`. Same slot.
+        assert_eq!(to_color(Ink::from_name("white").unwrap()), Color::Gray);
+        assert_eq!(to_color(Ink::Rgb(1, 2, 3)), Color::Rgb(1, 2, 3));
+    }
+
+    #[test]
+    fn an_unanswered_palette_leaves_a_named_backdrop_named() {
+        // `Palette::default()` is a terminal that said nothing, which is the
+        // common case. Darkening has no number to work with, so the colour must
+        // pass through untouched rather than being replaced by a guess.
+        let theme = crate::visual::theme::load("terminal").expect("built in");
+        assert!(theme.needs_terminal_palette());
+        let grid = grid_colors(16, &theme, &Palette::default());
+        assert!(
+            grid.iter().all(|c| !c.is_exact()),
+            "an unanswered palette must not turn names into RGB"
+        );
+    }
+
+    #[test]
+    fn bar_size_keys_widen_and_narrow() {
+        assert_eq!(map_key(KeyCode::Char('+')), Action::BarSize(1));
+        // `=` shares the key with `+` on most layouts, so it means the same.
+        assert_eq!(map_key(KeyCode::Char('=')), Action::BarSize(1));
+        assert_eq!(map_key(KeyCode::Char('-')), Action::BarSize(-1));
+
+        let mut a = app();
+        let started = a.layout.bar_width;
+        a.apply(Action::BarSize(1));
+        assert_eq!(a.layout.bar_width, started + 1);
+        a.apply(Action::BarSize(-1));
+        assert_eq!(a.layout.bar_width, started);
+    }
+
+    #[test]
+    fn bar_size_stops_at_both_ends() {
+        // Narrower than one column is not a bar, and past the maximum a normal
+        // terminal holds so few bands it stops being a spectrum.
+        let mut a = app();
+        for _ in 0..64 {
+            a.apply(Action::BarSize(-1));
+        }
+        assert_eq!(a.layout.bar_width, analyzer::MIN_BAR_WIDTH);
+        for _ in 0..64 {
+            a.apply(Action::BarSize(1));
+        }
+        assert_eq!(a.layout.bar_width, analyzer::MAX_BAR_WIDTH);
+    }
+
+    #[test]
+    fn resizing_the_bars_invalidates_the_cached_layout() {
+        // Bar width decides the band count, so the mapping, the ballistics and
+        // both colour ramps are stale afterwards. Forgetting this leaves the
+        // old ramp on screen until the terminal itself is resized, which is the
+        // kind of bug that only shows up on someone else's machine.
+        let mut a = app();
+        a.resize(80, 24);
+        assert_eq!(a.sized_for, (80, 24));
+        a.apply(Action::BarSize(1));
+        assert_eq!(a.sized_for, (0, 0), "the next frame must rebuild");
+    }
+
+    #[test]
+    fn a_wider_bar_means_fewer_of_them() {
+        // Against the layout rather than `bands`, which the frame loop fills.
+        let mut a = app();
+        let narrow = a.layout.bar_count(80);
+        a.apply(Action::BarSize(4));
+        let wide = a.layout.bar_count(80);
+        assert!(
+            wide < narrow,
+            "80 columns held {narrow} bars, then {wide} after widening"
+        );
+    }
+
+    #[test]
+    fn cycling_themes_walks_the_bundled_order_and_returns() {
+        // The path a user without --theme presses constantly, and the one that
+        // exercises the generated consts end to end: the themes are no longer
+        // parsed at startup, they are static data, and this is where a wrong
+        // order or a missing entry would actually be seen.
+        //
+        // Four presses must return to where they started, or the cycle has
+        // dropped an entry or gained one.
+        let mut a = app();
+        assert_eq!(a.theme.name, "rav", "rav is the default");
+
+        let seen: Vec<String> = (0..4)
+            .map(|_| {
+                let label = a.theme.name.clone();
+                a.apply(Action::CycleTheme);
+                label
+            })
+            .collect();
+        assert_eq!(seen, vec!["rav", "winamp", "terminal", "mono"]);
+        assert_eq!(a.theme.name, "rav", "the fourth press comes back round");
+    }
+
+    #[test]
+    fn a_cycled_theme_is_the_same_data_the_parser_would_have_produced() {
+        // The consts replaced a parse at startup, so this checks the swap did
+        // not change what reaches the display - not that the two agree in
+        // isolation, which theme.rs already covers, but that the app hands on
+        // exactly what a user loading the same file by path would get.
+        let mut a = app();
+        a.apply(Action::CycleTheme);
+        let cycled = a.theme.clone();
+        let from_disk = crate::visual::theme::load(&format!(
+            "crates/rav-appearance/themes/{}.toml",
+            cycled.name
+        ))
+        .expect("the bundled file is beside the crate");
+        assert_eq!(cycled, from_disk);
+    }
+
+    #[test]
+    fn a_loaded_theme_stays_in_the_cycle() {
+        // --theme puts a fourth entry in the rotation; cycling all the way round
         // has to come back to it rather than dropping it after the first change.
         let mut a = app();
-        a.set_skin(Skin {
+        a.set_theme(Theme {
             name: "custom".into(),
-            ..Skin::default()
+            ..Theme::default()
         });
         let seen: Vec<String> = (0..4)
             .map(|_| {
-                let label = a.skin.name.clone();
-                a.apply(Action::CycleSkin);
+                let label = a.theme.name.clone();
+                a.apply(Action::CycleTheme);
                 label
             })
             .collect();

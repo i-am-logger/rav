@@ -217,7 +217,7 @@ mod tests {
         let rows = vec![
             HelpRow {
                 key: "space",
-                description: "switch view",
+                description: "switch visualisation",
                 value: Some("analyser".into()),
             },
             HelpRow {

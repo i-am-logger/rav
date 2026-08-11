@@ -1,14 +1,14 @@
-# Writing a skin
+# Writing a theme
 
-A skin is a TOML file. Every skin rav ships is one — none of the palette lives in
+A theme is a TOML file. Every theme rav ships is one — none of the palette lives in
 code — so adding one means writing a file, not touching Rust.
 
 ```
-rav --skin ./sunset.toml     # a path
-rav --skin sunset            # a name, looked up in ./skins then ~/.config/rav/skins
+rav --theme ./sunset.toml     # a path
+rav --theme sunset            # a name, looked up in ./themes then ~/.config/rav/themes
 ```
 
-Press `s` in rav to cycle the built-ins; a skin loaded with `--skin` joins the
+Press `t` in rav to cycle the built-ins; a theme loaded with `--theme` joins the
 rotation.
 
 | built-in | |
@@ -19,7 +19,7 @@ rotation.
 | `mono` | greys only |
 
 `rav.toml` and `winamp.toml` share a ramp and differ only in the backdrop, which
-is the shortest possible demonstration of what a skin file changes.
+is the shortest possible demonstration of what a theme file changes.
 
 ## The file
 
@@ -83,7 +83,7 @@ Two kinds, and you can mix them:
 The sixteen names are `black`, `red`, `green`, `yellow`, `blue`, `magenta`,
 `cyan`, `white`, and each with a `bright-` prefix.
 
-Which you choose is the whole difference between a skin that reproduces a
+Which you choose is the whole difference between a theme that reproduces a
 specific look and one that follows whatever the user already runs. `winamp.toml`
 is all hex, because the point of it is to reproduce one exact look.
 `terminal.toml` is all names, because the point of it is to look like *your*
@@ -99,7 +99,7 @@ as a rendering bug, not as a broken file.
 `bars` and `grid` are 16 stops, `scope` is 5.
 
 The ramp is **stretched** to the window, so the foot of a bar is always stop 0
-and a full-height bar is always stop 15 — a skin does not have to think about how
+and a full-height bar is always stop 15 — a theme does not have to think about how
 tall the terminal is. Below 16 rows the selection is skewed towards the top of
 the ramp, so a short window still sweeps the hues instead of showing only the
 first few.
@@ -113,15 +113,21 @@ the built-ins.
 
 **`grid` can be a ladder, and that is often better than one colour.** Every ANSI
 colour has a dark twin — `green` is the dim version of `bright-green` — so a
-theme-following skin can make an unlit row the dark version of the colour it
+theme-following theme can make an unlit row the dark version of the colour it
 lights up in. That is what `terminal.toml` does: dark green low down, dark yellow
 through the middle, dark red at the top.
 
 ## Contributing one
 
-Drop it in `skins/`, add it to `BUILT_IN` in `src/visual/skin.rs` if it should
-ship, and open a PR. `cargo test` checks every built-in skin parses, has ramps of
-the right length, and keeps its backdrop distinguishable from its bars.
+Drop it in `crates/rav-appearance/themes/`, and if it should ship, add its name
+to `ORDER` in that crate's `build.rs` — that list is the order `t` cycles, so
+where you put it is where it lands. A theme file missing from `ORDER` fails the
+build rather than being silently ignored.
+
+Then open a PR. `cargo test --workspace` checks that every bundled theme has
+ramps of the right length, that its backdrop stays distinguishable from its bars,
+and that the consts the build script generates match what the runtime parser
+produces from the same file.
 
 If the colours come from someone else's work, put an `[about]` block in the file
 naming the source and its licence — `winamp.toml` is the worked example.

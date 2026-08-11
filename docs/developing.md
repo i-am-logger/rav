@@ -57,7 +57,7 @@ github:i-am-logger/rav` is the install path in the README.
 `record-demo` screen-records the frontmost window and quantises it to a GIF, and
 it drives rav while filming rather than capturing one static view.
 `RAV_DEMO_TOUR` is a list of `seconds:key` steps — hold that long, then send that
-key, with `-` for "send nothing". The default walks the three skins, the
+key, with `-` for "send nothing". The default walks the three themes, the
 oscilloscope and the help overlay, then returns to the defaults so the loop is
 seamless.
 
@@ -100,17 +100,28 @@ the window geometry and the keystrokes; both are per-terminal. Linux uses
 
 ## Layout
 
+Three crates. The split is not organisation for its own sake: `rav-core` and
+`rav-appearance` are `no_std`, so neither can acquire a terminal, a clock or an
+allocator by accident — which a module and a doc comment demonstrably could not
+prevent.
+
 | Path | |
 |---|---|
+| `crates/rav-core/` | **`no_std`, no allocator.** The mechanics: `Level`, `Step`, `Fill`, `Length`, geometry, and what a display can show. Knows *how many* and *which one*, never what any of them look like |
+| `crates/rav-appearance/` | **`no_std`.** What a step looks like: inks, colours, ramps, the scene, and themes. Names no rasteriser, so one theme dresses a glyph grid, a window and an LED strip alike |
+| `crates/rav-appearance/themes/` | the bundled themes, TOML, turned into consts by that crate's `build.rs` — see [themes.md](themes.md) |
 | `src/audio/` | cpal capture, and the macOS CoreAudio process tap — see [audio.md](audio.md) |
 | `src/signal/` | FFT front end, bin-to-bar mapping, bar and cap ballistics |
-| `src/visual/` | the skin format: parsing, colours, the built-ins |
-| `src/ui/` | the `App` event loop and the analyser, scope and help widgets |
-| `skins/` | the bundled skins, TOML, compiled in — see [skins.md](skins.md) |
+| `src/visual/` | reading a theme a *user* wrote, and asking the terminal for its palette — the halves that need a filesystem and a terminal |
+| `src/ui/` | the `App` event loop and the analyser, scope, status and help widgets |
+| `src/render/` | the pixel surface: a `Canvas` over tiny-skia, and the one impl that puts a scene onto it |
 
 Everything lives in the library — `src/main.rs` is argument parsing and wiring —
 so the binary and the tests compile one copy of the tree rather than two that can
 drift apart.
+
+`cargo test` and `cargo clippy` need `--workspace`, or they take only the root
+package and the member crates go untested and unlinted.
 
 ## Releasing
 

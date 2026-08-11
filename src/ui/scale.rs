@@ -9,6 +9,8 @@
 //! but `as usize` on a negative float saturates silently rather than failing, and
 //! a helper that trusts its caller eventually gets a bad value.
 
+use crate::units::Level;
+
 /// Solid-bar height in eighths of a cell. **Truncates.**
 ///
 /// Sub-cell resolution comes from the ⅛ block glyphs, so a bar of 3.4 cells is
@@ -87,7 +89,7 @@ pub fn cap_row(peak: f32, height: u16) -> u16 {
 ///
 /// The value is chosen so a four-row display lands on one green, one yellow,
 /// one orange and one red - a full hue sweep in the smallest window worth
-/// drawing. It is a display judgement, not a value any API or skin owns.
+/// drawing. It is a display judgement, not a value any API or theme owns.
 ///
 /// The alternative - sampling at uniform *perceptual* distance - gives red,
 /// yellow, yellow-green, green at four rows, with no orange at all.
@@ -97,10 +99,10 @@ pub fn cap_row(peak: f32, height: u16) -> u16 {
 /// across hues. Spanning the hues is what reads as a spectrum.
 ///
 /// Applied *only* while subsampling; once there is a row per stop the ramp is
-/// used exactly as the skin has it.
+/// used exactly as the theme has it.
 const SUBSAMPLE_SKEW: f32 = 0.57;
 
-/// Map a screen row (counted from the bottom) onto a stop in the skin's ramp.
+/// Map a screen row (counted from the bottom) onto a stop in the theme's ramp.
 ///
 /// The ramp is **stretched** to fit, so the bottom row always takes the first
 /// stop and the top row the last, at any height. The original panel was always
@@ -108,7 +110,7 @@ const SUBSAMPLE_SKEW: f32 = 0.57;
 /// choose, and sampling a fixed 16-stop ramp positionally means a display
 /// shorter than 16 rows never reaches red.
 ///
-/// Stops stay discrete rather than interpolated: they are 16 colours the skin
+/// Stops stay discrete rather than interpolated: they are 16 colours the theme
 /// actually contains, and blending would invent ones it does not.
 #[inline]
 pub fn ramp_index(row_from_bottom: u16, height: u16, bands: usize) -> usize {
@@ -118,15 +120,23 @@ pub fn ramp_index(row_from_bottom: u16, height: u16, bands: usize) -> usize {
         // is the only answer that is not arbitrary.
         return last_band / 2;
     }
+    // Stretched, not positional: row 0 is the floor of the ramp and row
+    // `height - 1` its ceiling, whatever the height. A continuous surface has no
+    // rows to stretch between and measures from the floor instead - which is the
+    // one genuine difference between the two, and is why this computes a
+    // fraction rather than reaching for the stop itself.
     let t = row_from_bottom.min(height - 1) as f32 / (height - 1) as f32;
     // Only skew while stops are being skipped. With a row per stop every colour
-    // is reachable anyway and the ramp should be used exactly as the skin has it.
+    // is reachable anyway and the ramp should be used exactly as the theme has it.
     let t = if (height as usize) < bands {
         t.powf(SUBSAMPLE_SKEW)
     } else {
         t
     };
-    ((t * last_band as f32).round() as usize).min(last_band)
+    // The selection rule itself lives in `units`, so the terminal and every
+    // pixel surface share one implementation of "which stop is this". They had
+    // two, and the two disagreed on 679 of 19980 row/height pairs.
+    Level::new(t).nearest_step(bands).index()
 }
 
 #[cfg(test)]
@@ -223,7 +233,7 @@ mod tests {
     }
 
     #[test]
-    fn a_tall_display_uses_the_ramp_exactly_as_the_skin_has_it() {
+    fn a_tall_display_uses_the_ramp_exactly_as_the_theme_has_it() {
         // No skew once there is a row per stop.
         let rows: Vec<usize> = (0..16).map(|r| ramp_index(r, 16, 16)).collect();
         assert_eq!(rows, (0..16).collect::<Vec<_>>());

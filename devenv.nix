@@ -39,7 +39,7 @@
   # Development scripts
   scripts.dev-test.exec = ''
     echo "🧪 Running development tests..."
-    cargo test --all-features
+    cargo test --workspace --all-features
   '';
 
   scripts.dev-run.exec = ''
@@ -156,7 +156,7 @@
   # the same size as the committed one and drops straight into the README.
   #
   # The recording is a guided tour rather than a static shot - it drives rav from
-  # the outside while filming, so the GIF shows the three skins and then the
+  # the outside while filming, so the GIF shows the three themes and then the
   # oscilloscope instead of one view for the whole clip. RAV_DEMO_TOUR is a list
   # of `seconds:key` steps: hold for that many seconds, then send that key.
   # `-` sends nothing, which is how the last segment gets its screen time.
@@ -182,11 +182,11 @@
     # re-record at a higher rate is pending.
     FPS="''${RAV_DEMO_FPS:-25}"
     LEAD="''${RAV_DEMO_LEAD:-5}"
-    # Every skin, then the oscilloscope, then the help overlay - and back to the
+    # Every theme, then the oscilloscope, then the help overlay - and back to the
     # defaults, so the GIF loops from the same frame it started on. There is one
-    # `s` per skin: the last press is what returns to the first, and leaving it
+    # `t` per theme: the last press is what returns to the first, and leaving it
     # out is how the tour quietly stops ending where it began.
-    TOUR="''${RAV_DEMO_TOUR:-3:s 3:s 3:s 3:s 1:space 4:space 1:h 4:h 2:-}"
+    TOUR="''${RAV_DEMO_TOUR:-3:t 3:t 3:t 3:t 1:space 4:space 1:h 4:h 2:-}"
     # Total duration is the sum of the tour's holds, so the two never drift.
     # SETTLE covers the second avfoundation spends opening the capture device -
     # without it the first key lands before filming starts and that segment is
@@ -402,11 +402,17 @@
       statix check .
     '';
     "test:clippy" = {
-      exec = "cargo clippy --all-targets --all-features -- -D warnings";
+      # --workspace, or the member crates are silently unlinted: without it cargo
+      # takes only the root package, and rav-core and rav-appearance would be
+      # checked by nothing.
+      exec = "cargo clippy --workspace --all-targets --all-features -- -D warnings";
       after = [ "test:fmt" "test:nix" ];
     };
     "test:unit" = {
-      exec = "cargo test --all-features";
+      # --workspace for the same reason as clippy. Without it the 54 tests in
+      # rav-core and rav-appearance never run in CI, and a green build would
+      # mean the binary compiled rather than that the mechanics work.
+      exec = "cargo test --workspace --all-features";
       after = [ "test:clippy" ];
     };
   };

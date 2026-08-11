@@ -3,7 +3,7 @@
 //! Deliberately small: only what rav reads at startup and cannot ask the
 //! terminal or the audio device for. Everything about the *look* - bar style,
 //! peaks, frequency range, gain - is a runtime key, and the colours come from a
-//! skin file, so none of it belongs here.
+//! theme file, so none of it belongs here.
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};

@@ -2,9 +2,9 @@
 # decides what gets released once there.
 
 [workspace]
-# Matches the tag format already in the repository's history.
-git_tag_name = "rav-v{{ version }}"
-
+# Defaults for every member; the per-package blocks at the end override what has
+# to differ. Without them both crates would claim the same tag, since the name is
+# a literal rather than a template over the package.
 git_release_enable = true
 
 # "auto" marks a version carrying a pre-release suffix as a GitHub pre-release,
@@ -21,7 +21,7 @@ semver_check = true
 release_always = false
 
 # A release is triggered by changes to packaged files. README.md, docs/, LICENSE,
-# skins/ and src/ ship inside the crate, so editing any of them needs a new
+# themes and src/ ship inside the crates, so editing any of them needs a new
 # version before crates.io shows it. .github/ is not packaged.
 
 pr_labels = ["release", "automated"]
@@ -49,3 +49,27 @@ commit_parsers = [
     { message = "^doc", group = "Documentation" },
     { message = ".*", skip = true },
 ]
+
+# rav is the crate anyone installs, so it keeps the tag format already in this
+# repository's history and it is the one that gets a GitHub release.
+[[package]]
+name = "rav"
+git_tag_name = "rav-v{{ version }}"
+git_release_enable = true
+
+# rav-core is published because cargo requires it, not because anyone installs
+# it: a crate cannot go to crates.io with a path dependency that is not there,
+# so `rav` is unpublishable unless `rav-core` is published alongside. It is
+# tagged separately to keep the histories apart, and gets no GitHub release -
+# there is nothing to download, and a second entry on the releases page would
+# suggest otherwise.
+[[package]]
+name = "rav-core"
+git_tag_name = "rav-core-v{{ version }}"
+git_release_enable = false
+
+# Published for the same reason as rav-core, and no more user-facing than it is.
+[[package]]
+name = "rav-appearance"
+git_tag_name = "rav-appearance-v{{ version }}"
+git_release_enable = false

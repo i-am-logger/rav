@@ -23,6 +23,7 @@ use objc2::{class, msg_send};
 use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSString};
 use std::ffi::c_void;
 use std::sync::{Arc, Mutex};
+use tokio::sync::Notify;
 
 type OSStatus = i32;
 type AudioObjectID = u32;
@@ -183,7 +184,22 @@ pub struct TapBuffer {
     pub saw_signal: bool,
 }
 
-type Shared = Arc<Mutex<TapBuffer>>;
+/// The buffer, plus the means to say something has arrived in it.
+///
+/// The signal is what lets the render loop wait on the audio device rather than
+/// poll it on a timer. `notify_one` is not strictly realtime-safe - it can take
+/// a short internal lock when a waiter is parked - and it is used anyway,
+/// deliberately: this IOProc is a *tap*, reading a copy of what other processes
+/// play. It is in nobody's output path, so being late costs rav a frame and
+/// costs no one else a glitch. The callback already takes a `try_lock` on the
+/// same reasoning.
+#[derive(Default)]
+pub struct TapChannel {
+    pub buffer: Mutex<TapBuffer>,
+    pub ready: Notify,
+}
+
+type Shared = Arc<TapChannel>;
 
 /// A running process tap and the private aggregate device that reads it.
 pub struct Tap {
@@ -191,7 +207,7 @@ pub struct Tap {
     device_id: AudioObjectID,
     proc_id: AudioDeviceIOProcID,
     /// The `Arc` handed to the IOProc as its context, reclaimed on teardown.
-    context: *const Mutex<TapBuffer>,
+    context: *const TapChannel,
     buffer: Shared,
     sample_rate: u32,
     channels: u16,
@@ -263,15 +279,29 @@ impl Tap {
     /// Whether any non-zero sample has arrived. False for a long stretch while
     /// audio is playing means the recording permission was refused.
     pub fn has_signal(&self) -> bool {
-        self.buffer.lock().map(|b| b.saw_signal).unwrap_or(false)
+        self.buffer
+            .buffer
+            .lock()
+            .map(|b| b.saw_signal)
+            .unwrap_or(false)
     }
 
     /// Take everything captured since the last call.
     pub fn drain(&self, out: &mut Vec<f32>) {
-        if let Ok(mut b) = self.buffer.lock() {
+        if let Ok(mut b) = self.buffer.buffer.lock() {
             out.clear();
             out.append(&mut b.samples);
         }
+    }
+
+    /// Resolves when the device has delivered another buffer.
+    ///
+    /// The render loop's clock. `Notify` holds one permit, so a buffer that
+    /// arrives while the loop is busy is not missed - the next wait returns at
+    /// once. It does not count, which is right here: the loop drains everything
+    /// queued, so two buffers and one wake are the same amount of work.
+    pub async fn ready(&self) {
+        self.buffer.ready.notified().await;
     }
 }
 
@@ -401,7 +431,7 @@ fn aggregate_reading(
     AudioObjectID,
     AudioDeviceIOProcID,
     Shared,
-    *const Mutex<TapBuffer>,
+    *const TapChannel,
 )> {
     let sub_tap =
         NSDictionary::from_slices(&[&*NSString::from_str("uid")], &[tap_uid as &AnyObject]);
@@ -438,10 +468,13 @@ fn aggregate_reading(
     // Preallocated so the realtime callback never grows the Vec. Allocating on
     // the audio thread can take the allocator lock, which is exactly what a
     // realtime callback must not do.
-    let buffer: Shared = Arc::new(Mutex::new(TapBuffer {
-        samples: Vec::with_capacity(MAX_QUEUED * 2),
-        saw_signal: false,
-    }));
+    let buffer: Shared = Arc::new(TapChannel {
+        buffer: Mutex::new(TapBuffer {
+            samples: Vec::with_capacity(MAX_QUEUED * 2),
+            saw_signal: false,
+        }),
+        ready: Notify::new(),
+    });
     // Leaked deliberately: the IOProc runs on a realtime thread that outlives
     // this call, and the pointer is reclaimed when the Tap is dropped.
     let context = Arc::into_raw(Arc::clone(&buffer)) as *mut c_void;
@@ -465,12 +498,7 @@ fn aggregate_reading(
         bail!("AudioDeviceStart failed (OSStatus {status})");
     }
 
-    Ok((
-        device_id,
-        proc_id,
-        buffer,
-        context as *const Mutex<TapBuffer>,
-    ))
+    Ok((device_id, proc_id, buffer, context as *const TapChannel))
 }
 
 /// Realtime callback. Copies interleaved float samples into the shared buffer.
@@ -491,7 +519,7 @@ extern "C" fn io_proc(
     }
     // SAFETY: `context` is the Arc we passed to AudioDeviceCreateIOProcID and is
     // valid until the Tap is dropped, which happens after AudioDeviceStop.
-    let shared = unsafe { &*(context as *const Mutex<TapBuffer>) };
+    let shared = unsafe { &*(context as *const TapChannel) };
 
     let list = unsafe { &*input };
     if list.number_buffers == 0 {
@@ -504,7 +532,7 @@ extern "C" fn io_proc(
     let count = buffer.data_byte_size as usize / std::mem::size_of::<f32>();
     let samples = unsafe { std::slice::from_raw_parts(buffer.data as *const f32, count) };
 
-    if let Ok(mut out) = shared.try_lock() {
+    if let Ok(mut out) = shared.buffer.try_lock() {
         if !out.saw_signal && samples.iter().any(|s| *s != 0.0) {
             out.saw_signal = true;
         }
@@ -515,6 +543,10 @@ extern "C" fn io_proc(
         }
         out.samples.extend_from_slice(samples);
     }
+    // Outside the lock, so the woken loop never arrives to find it still held.
+    // A wake with nothing behind it - the `try_lock` above having failed - costs
+    // one drain of an empty buffer, which is cheaper than missing a buffer.
+    shared.ready.notify_one();
     0
 }
 
