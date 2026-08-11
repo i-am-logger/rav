@@ -51,6 +51,120 @@ impl Level {
     pub fn is_silent(self) -> bool {
         self.0 <= 0.0
     }
+
+    /// Which of `count` steps this level is nearest.
+    ///
+    /// What a colour ramp asks: a height picks the stop closest to it, which is
+    /// why the first and last stops hold only half a stripe each. Rounding
+    /// rather than truncating is the rule the terminal renderer already uses,
+    /// and changing it would move every colour boundary in the picture.
+    pub fn nearest_step(self, count: usize) -> Step {
+        let last = count.saturating_sub(1);
+        Step::new((self.0 * last as f32).round() as usize, count)
+    }
+
+    /// How far this level fills a ladder of `rungs`, each divisible into `steps`.
+    ///
+    /// What a glyph ladder asks: how many whole cells are lit, and how full the
+    /// one above them is. Truncating rather than rounding, because a cell is
+    /// only as lit as the signal actually reached.
+    pub fn fill(self, rungs: usize, steps: usize) -> Fill {
+        if rungs == 0 || steps == 0 {
+            return Fill {
+                whole: 0,
+                part: Step::new(0, steps.max(1)),
+            };
+        }
+        let total = self.0 * (rungs * steps) as f32;
+        let filled = (total.floor() as usize).min(rungs * steps);
+        Fill {
+            whole: filled / steps,
+            part: Step::new(filled % steps, steps),
+        }
+    }
+}
+
+/// One of a fixed number of steps a skin or a theme offers.
+///
+/// The whole of what the core knows about either: **how many, and which one -
+/// never what any of them look like.** A skin says it has eight steps; the core
+/// answers "step five" and the terminal surface turns that into `▅`, the pixel
+/// surface into a shape, an LED strip into a brightness. A theme says its ramp
+/// has sixteen stops; the core answers "stop eleven" and each surface resolves
+/// it in the only way it can.
+///
+/// That boundary is what keeps `terminal` and `mono` working: those themes exist
+/// to defer the colour to whatever palette the user runs, which is impossible if
+/// the core has already decided it. It is also what lets a skin be swapped
+/// without touching any arithmetic - a sixteen-step skin and an eight-step one
+/// differ here by one integer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Step {
+    index: usize,
+    count: usize,
+}
+
+impl Step {
+    /// Held inside the range, so an index can never address past a skin's
+    /// glyphs or a theme's stops however it was arrived at.
+    pub fn new(index: usize, count: usize) -> Self {
+        let count = count.max(1);
+        Self {
+            index: index.min(count - 1),
+            count,
+        }
+    }
+
+    pub const fn index(self) -> usize {
+        self.index
+    }
+
+    pub const fn count(self) -> usize {
+        self.count
+    }
+
+    pub fn is_first(self) -> bool {
+        self.index == 0
+    }
+
+    pub fn is_last(self) -> bool {
+        self.index + 1 == self.count
+    }
+
+    /// The same position expressed against a different number of steps.
+    ///
+    /// How one setting drives surfaces that disagree about resolution: an
+    /// eight-step glyph ladder and a two-hundred-step LED strip are the same
+    /// fraction at different granularities.
+    pub fn rescaled(self, count: usize) -> Self {
+        if self.count <= 1 {
+            return Self::new(0, count);
+        }
+        let fraction = self.index as f32 / (self.count - 1) as f32;
+        Self::new(
+            (fraction * count.max(1).saturating_sub(1) as f32).round() as usize,
+            count,
+        )
+    }
+}
+
+/// How far a level fills a ladder: whole rungs, plus how full the next one is.
+///
+/// A bar in a terminal is this - three whole rows lit and the fourth five
+/// eighths full - without the core ever knowing what an eighth looks like.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Fill {
+    /// Rungs completely filled.
+    pub whole: usize,
+    /// How far into the rung above them.
+    pub part: Step,
+}
+
+impl Fill {
+    /// Whether the rung above the whole ones carries anything at all.
+    pub fn has_part(self) -> bool {
+        !self.part.is_first()
+    }
 }
 
 /// A distance across the display.
@@ -259,6 +373,70 @@ mod tests {
         // Not merely tidy: a NaN reaches the rasteriser as an area that draws
         // nothing, and nothing about the resulting picture says why.
         assert_eq!(Level::new(f32::NAN), Level::SILENT);
+    }
+
+    #[test]
+    fn a_level_picks_the_nearest_stop() {
+        // Rounding, not truncating: the rule the terminal renderer already uses,
+        // and the reason a ramp's first and last stops hold half a stripe each.
+        assert_eq!(Level::SILENT.nearest_step(3).index(), 0);
+        assert_eq!(Level::new(0.5).nearest_step(3).index(), 1);
+        assert_eq!(Level::FULL.nearest_step(3).index(), 2);
+        // Just past the halfway point of the first stop, it tips to the second.
+        assert_eq!(Level::new(0.26).nearest_step(3).index(), 1);
+        assert_eq!(Level::new(0.24).nearest_step(3).index(), 0);
+    }
+
+    #[test]
+    fn a_step_can_never_address_past_what_a_skin_offers() {
+        // The invariant that makes swapping a skin safe: however an index was
+        // arrived at, it indexes something that exists.
+        assert_eq!(Step::new(99, 8).index(), 7);
+        assert_eq!(Step::new(0, 0).count(), 1, "a skin always has one step");
+        assert!(Step::new(7, 8).is_last());
+        assert!(Step::new(0, 8).is_first());
+    }
+
+    #[test]
+    fn a_level_fills_whole_rungs_and_part_of_the_next() {
+        // A bar in a terminal: three rows lit and the fourth part-full, with the
+        // core never knowing what an eighth looks like.
+        let fill = Level::new(0.5).fill(8, 8);
+        assert_eq!(fill.whole, 4, "half of eight rows");
+        assert!(
+            !fill.has_part(),
+            "landing on a boundary leaves no remainder"
+        );
+
+        // One step of one of eight rows is 1/64, so 0.51 still floors onto the
+        // boundary and 0.55 is the first level that lights part of the next.
+        let fill = Level::new(0.51).fill(8, 8);
+        assert!(!fill.has_part(), "0.51 is still short of a whole step");
+        let fill = Level::new(0.55).fill(8, 8);
+        assert_eq!(fill.whole, 4);
+        assert!(fill.has_part(), "past the boundary lights the next rung");
+
+        // Truncating, not rounding: a cell is only as lit as the signal reached.
+        assert_eq!(Level::new(0.99).fill(1, 8).part.index(), 7);
+        assert_eq!(Level::FULL.fill(1, 8).whole, 1);
+        assert_eq!(Level::SILENT.fill(8, 8).whole, 0);
+    }
+
+    #[test]
+    fn a_ladder_with_no_rungs_is_not_a_division_by_zero() {
+        assert_eq!(Level::FULL.fill(0, 8).whole, 0);
+        assert_eq!(Level::FULL.fill(8, 0).whole, 0);
+    }
+
+    #[test]
+    fn a_step_rescales_between_surfaces_that_disagree_on_resolution() {
+        // One setting driving an eight-step glyph ladder and a long LED strip:
+        // the same fraction, at whatever granularity each can manage.
+        assert_eq!(Step::new(7, 8).rescaled(200).index(), 199);
+        assert_eq!(Step::new(0, 8).rescaled(200).index(), 0);
+        assert_eq!(Step::new(4, 9).rescaled(9).index(), 4, "a no-op rescale");
+        // Coarsening loses precision without ever escaping the range.
+        assert!(Step::new(150, 200).rescaled(8).index() < 8);
     }
 
     #[test]

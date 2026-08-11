@@ -10,4 +10,4 @@ pub mod visual;
 
 // Re-export commonly used types
 pub use config::Config;
-pub use units::{CellSize, Cells, Elapsed, Hz, Length, Level, SampleRate};
+pub use units::{CellSize, Cells, Elapsed, Fill, Hz, Length, Level, SampleRate, Step};
