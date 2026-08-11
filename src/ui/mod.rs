@@ -1303,6 +1303,83 @@ mod tests {
     }
 
     #[test]
+    fn every_key_that_should_change_the_picture_changes_it() {
+        // A key wired to a field nothing reads is a key that does nothing, and
+        // the help overlay would still cheerfully report its new value. So each
+        // of these is pressed and the frame compared, rather than the setting
+        // being read back - which is the test agreeing with itself.
+        let frame = |a: &mut App| {
+            let mut terminal = Terminal::new(TestBackend::new(60, 16)).unwrap();
+            // Gated exactly as the render loop gates it. Resizing unconditionally
+            // rebuilds the caches whatever the key did, so a key that forgot to
+            // invalidate `sized_for` - which in a real run leaves the picture
+            // stale - would still change the frame here and pass.
+            if (60, 16) != a.sized_for {
+                a.resize(60, 16);
+            }
+            let analyzer = Analyzer {
+                bars: a.ballistics.bars(),
+                peaks: a.ballistics.peaks(),
+                row_colors: &a.row_colors,
+                cap_color: a.theme.peak,
+                grid: a.show_grid.then_some(a.grid_colors.as_slice()),
+                bar_style: a.bar_style,
+                layout: a.layout,
+                peaks_style: a.peaks,
+            };
+            terminal
+                .draw(|f| f.render_widget(analyzer, f.area()))
+                .unwrap();
+            terminal.backend().buffer().clone()
+        };
+
+        // A signal, so there is something on screen to change.
+        let mut a = app();
+        a.resize(60, 16);
+        let bands: Vec<f32> = (0..a.bands.len())
+            .map(|i| 0.3 + (i % 5) as f32 / 8.0)
+            .collect();
+        a.ballistics.step(&bands, 1.0 / 60.0);
+
+        for key in [
+            Action::CycleTheme,
+            Action::CycleBarStyle,
+            Action::TogglePeaks,
+            Action::ToggleGrid,
+            Action::BarSize(1),
+        ] {
+            let before = frame(&mut a);
+            a.apply(key);
+            let after = frame(&mut a);
+            assert_ne!(before, after, "{key:?} changed nothing on screen");
+        }
+
+        // Bandwidth and the frequency range change how many bins are sampled
+        // and which, which shows in the mapping rather than in one frame of a
+        // fixed signal. `bands` is filled by the analysis, so it is empty here.
+        // Gated for the same reason as `frame`: forcing a rebuild here would
+        // hide a key that never asked for one.
+        let settle = |a: &mut App| {
+            if (60, 16) != a.sized_for {
+                a.resize(60, 16);
+            }
+        };
+        let sampled_before = a.bar_map.len();
+        a.apply(Action::CycleBandwidth);
+        settle(&mut a);
+        assert_ne!(sampled_before, a.bar_map.len(), "bandwidth changed nothing");
+
+        let top_before = a.bar_map.positions().last().copied();
+        a.apply(Action::CycleFrequencyLimit);
+        settle(&mut a);
+        assert_ne!(
+            top_before,
+            a.bar_map.positions().last().copied(),
+            "the frequency range changed nothing",
+        );
+    }
+
+    #[test]
     fn settings_keys_still_leave_a_transient_note() {
         // The overlay is the full picture; the note is the at-a-glance one.
         let mut a = app();
