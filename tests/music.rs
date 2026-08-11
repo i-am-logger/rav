@@ -11,10 +11,10 @@
 //! light is derivable. Taking it from an audio file instead would mean running
 //! an FFT to decide what the FFT should have found.
 //!
-//! What is *not* here is timing - when a spike arrives relative to when a note
-//! starts. That needs the rolling window advanced frame by frame, and the
-//! analysis is currently inline in the render loop with no seam to drive it
-//! from. These are steady tones, and what they test is where the energy lands.
+//! These are steady tones, and what they test is where the energy lands. When a
+//! spike arrives relative to when the note starts needs the rolling window
+//! advanced frame by frame, so that half is driven through `App::measure` and
+//! lives beside it in `src/ui/`.
 
 use rav::signal::mapping::{BarMap, DEFAULT_SCALE, bin_for_hz};
 use rav::signal::spectrum::Spectrum;
