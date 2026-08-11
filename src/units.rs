@@ -170,6 +170,72 @@ impl Fill {
     }
 }
 
+/// A count that refuses to be outside its range.
+///
+/// Rust has no bounded integers, so this is the newtype-with-a-checked-
+/// constructor that stands in for one - with the bounds as const generics, so
+/// the range is part of the type rather than a comment near it. Two different
+/// ranges are two different types and cannot be swapped by accident.
+///
+/// **Refuses rather than clamps.** [`Level`] clamps because an out-of-range
+/// magnitude is a measurement that overshot and silence is a sane reading of it.
+/// A count is different: a caller asking for a two-light strip when the mode
+/// needs four has made a mistake, and clamping to four would draw a picture that
+/// misrepresents the hardware. `None` makes them deal with it.
+///
+/// ```
+/// use rav::units::Bounded;
+/// type Rungs = Bounded<4, 4096>;
+/// assert!(Rungs::new(3).is_none(), "too few to say anything");
+/// assert_eq!(Rungs::new(5).map(Bounded::get), Some(5));
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(transparent)]
+pub struct Bounded<const MIN: usize, const MAX: usize>(usize);
+
+impl<const MIN: usize, const MAX: usize> Bounded<MIN, MAX> {
+    /// The smallest value this type admits.
+    pub const MIN: usize = MIN;
+    /// The largest.
+    pub const MAX: usize = MAX;
+
+    /// `None` when out of range, so an impossible count cannot be built at all.
+    pub const fn new(value: usize) -> Option<Self> {
+        if value < MIN || value > MAX {
+            None
+        } else {
+            Some(Self(value))
+        }
+    }
+
+    /// For a value known good at compile time - a literal in a const, or a
+    /// bound this type already guarantees. Panics rather than returning, since
+    /// there is no runtime to hand a `None` to.
+    pub const fn known(value: usize) -> Self {
+        assert!(value >= MIN && value <= MAX, "outside the bounds");
+        Self(value)
+    }
+
+    /// The nearest admissible value.
+    ///
+    /// For the case where clamping genuinely is right - fitting a request to
+    /// hardware that has what it has - so the choice is made at the call site
+    /// with a name on it rather than by a constructor that always clamps.
+    pub const fn nearest(value: usize) -> Self {
+        if value < MIN {
+            Self(MIN)
+        } else if value > MAX {
+            Self(MAX)
+        } else {
+            Self(value)
+        }
+    }
+
+    pub const fn get(self) -> usize {
+        self.0
+    }
+}
+
 /// A distance across the display.
 ///
 /// Device pixels in a terminal or a window, and one light on an LED strip. What
@@ -382,6 +448,52 @@ mod tests {
         // Not merely tidy: a NaN reaches the rasteriser as an area that draws
         // nothing, and nothing about the resulting picture says why.
         assert_eq!(Level::new(f32::NAN), Level::SILENT);
+    }
+
+    /// Enough rungs to say anything at all - the four-light bar is the floor.
+    type Rungs = Bounded<4, 4096>;
+
+    #[test]
+    fn a_bounded_count_refuses_what_is_out_of_range() {
+        // The point of the type: a three-light strip cannot be built where four
+        // is the floor, so a mode never has to check at the point of drawing.
+        assert_eq!(Rungs::new(3), None);
+        assert_eq!(Rungs::new(0), None);
+        assert_eq!(Rungs::new(9999), None);
+        assert_eq!(Rungs::new(4).map(Bounded::get), Some(4));
+        assert_eq!(Rungs::new(4096).map(Bounded::get), Some(4096));
+    }
+
+    #[test]
+    fn clamping_is_available_but_has_to_be_asked_for_by_name() {
+        // Refusing is the default because clamping a count silently draws a
+        // picture that misrepresents the hardware. Where clamping *is* right -
+        // fitting a request to whatever the strip actually has - the call site
+        // says so.
+        assert_eq!(Rungs::nearest(3).get(), 4);
+        assert_eq!(Rungs::nearest(99999).get(), 4096);
+        assert_eq!(Rungs::nearest(60).get(), 60);
+    }
+
+    #[test]
+    fn two_ranges_are_two_types() {
+        // What the const generics buy: a count bounded one way cannot be passed
+        // where a count bounded another way belongs. This compiles only because
+        // the values are unwrapped to usize first - the types themselves do not
+        // interconvert, which is the guarantee.
+        type Channels = Bounded<1, 2>;
+        assert_eq!(Channels::new(2).map(Bounded::get), Some(2));
+        assert_eq!(Channels::new(4), None, "there is no four-channel rav");
+        assert_eq!(Rungs::MIN, 4);
+        assert_eq!(Channels::MAX, 2);
+    }
+
+    #[test]
+    fn a_known_good_value_is_const_constructible() {
+        // So a preset or a board definition can state its geometry as a const,
+        // with no allocator and no runtime check.
+        const STRIP: Rungs = Rungs::known(5);
+        assert_eq!(STRIP.get(), 5);
     }
 
     #[test]
