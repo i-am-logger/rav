@@ -89,6 +89,23 @@ impl Colour {
     pub fn is_transparent(self) -> bool {
         self.alpha == 0
     }
+
+    /// Perceived brightness, by the Rec. 709 weights.
+    ///
+    /// For a surface that has to render this colour in grey - a monochrome
+    /// screen, or a photograph of one.
+    ///
+    /// **Not for driving a single-colour LED bar.** The eye weights green far
+    /// above red, so a green-to-red ramp *falls* from 0.71 to 0.21 as the bar
+    /// rises, and peak level would come out the dimmest part of the display.
+    /// Intensity on a bar has to follow the step's height rather than its hue;
+    /// that is a separate decision from what colour the step is.
+    pub fn luminance(self) -> f32 {
+        (0.2126 * f32::from(self.red)
+            + 0.7152 * f32::from(self.green)
+            + 0.0722 * f32::from(self.blue))
+            / 255.0
+    }
 }
 
 /// The sixteen ANSI colours as a terminal that will not say paints them.
@@ -171,6 +188,22 @@ impl Ink {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rising_ramp_loses_luminance_which_is_why_brightness_is_not_derived_from_it() {
+        // The trap this test exists to pin. A green-to-red ramp reads as rising
+        // to the eye, but green weighs more than red in perceived brightness, so
+        // its luminance falls - and a single-colour LED bar driven from these
+        // numbers would be dimmest at peak level.
+        let floor = Colour::GREEN.luminance();
+        let ceiling = Colour::RED.luminance();
+        assert!(
+            floor > ceiling,
+            "green {floor} should out-weigh red {ceiling}"
+        );
+        assert!(Colour::WHITE.luminance() > 0.99);
+        assert!(Colour::BLACK.luminance() < 0.01);
+    }
 
     #[test]
     fn a_name_round_trips_through_its_slot() {
