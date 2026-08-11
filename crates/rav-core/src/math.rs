@@ -1,17 +1,27 @@
-//! The floating-point operations `core` does not have.
+//! Arithmetic every surface needs, and the operations `core` does not have.
 //!
-//! Public because the sibling crates need the same ones, and two shims would be
-//! two chances to disagree - which is the failure this workspace exists to make
-//! impossible.
+//! Two things live here, and the difference matters.
 //!
-//! `f32::floor`, `round`, `log10` and `powf` are `std` methods, not `core` ones,
-//! so a `no_std` crate cannot call them however ordinary they look. They are
-//! gathered here rather than spread as `libm::floorf` calls through the
-//! arithmetic, so the call sites still read as maths and the dependency is
-//! visible in one place.
+//! **The shims.** `f32::floor`, `round`, `ceil`, `log10` and `powf` are `std`
+//! methods, not `core` ones, so a `no_std` crate cannot call them however
+//! ordinary they look. They are gathered here rather than spread as
+//! `libm::floorf` calls through the arithmetic, so the call sites still read as
+//! maths and the dependency is visible in one place. Same results as the `std`
+//! methods on every value rav produces; `libm` is the rust-lang port of musl's,
+//! which is what `std` itself uses on many targets.
 //!
-//! Same results as the `std` methods on every value rav produces; `libm` is the
-//! rust-lang port of musl's, which is what `std` itself uses on many targets.
+//! **The equations.** Arithmetic that is the same on a terminal, a window and a
+//! strip of LEDs, and that a microcontroller needs verbatim. The bar is high:
+//! it must be pure, allocate nothing, and answer a question nothing else in
+//! this crate already answers. A survey of all sixty-one equations in rav
+//! proposed twenty-seven for this module and twenty-five turned out to be
+//! duplicates of [`crate::units`] or [`crate::geometry`] - which is the outcome
+//! the crate boundary exists to prevent, not one it should collect.
+//!
+//! Everything else stays where it is used. A rate written per frame, a ramp's
+//! stripe placement, how much of the width a display spends on the bass: those
+//! are judgements about a picture, and this crate answers how many and which
+//! one, never what anything looks like.
 
 /// Toward negative infinity.
 pub fn floor(value: f32) -> f32 {
