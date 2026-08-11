@@ -14,7 +14,7 @@
 //! Two things about it are easy to get wrong.
 //!
 //! **There is no hold timer.** The cap looks like it hangs at the top, but that is
-//! emergent: velocity starts at `3/4096` of full scale and only compounds into
+//! emergent: velocity starts at `3/3840` of full scale and only compounds into
 //! visible motion after a few dozen frames. Coding an explicit hold followed by a
 //! linear fall gives a visibly different feel.
 //!
@@ -64,8 +64,11 @@ pub const DEFAULT_PEAK_FALL: f32 = rav_core::ballistics::WINAMP.peak_fall;
 ///
 /// The original's vis timer is not documented in the material we have; Webamp drives
 /// its painter from `requestAnimationFrame`, i.e. the display rate. 60 reproduces
-/// Webamp's behaviour and drops a full-scale cap in ~0.86s; 30 stretches the same
-/// curve to ~1.72s. Configurable because it is a genuine choice, not a fact.
+/// Webamp's behaviour and drops a full-scale cap in 0.85s; 30 stretches the same
+/// curve to 1.70s. Configurable because it is a genuine choice, not a fact.
+///
+/// Both numbers are measured, and `the_numbers_in_the_module_note_are_the_ones_it_uses`
+/// keeps them that way.
 pub const DEFAULT_REFERENCE_FPS: f32 = rav_core::ballistics::WINAMP.reference_fps;
 
 /// Per-bar bar and cap motion.
@@ -261,6 +264,37 @@ mod tests {
         for _ in 0..600 {
             b.step(&[0.7], 1.0 / 60.0);
             assert!(b.peaks()[0] >= b.bars()[0] - 1e-6);
+        }
+    }
+
+    #[test]
+    fn the_numbers_in_the_module_note_are_the_ones_it_uses() {
+        // The note at the top of this file quotes figures, and nothing checked
+        // them. One had drifted: it said the cap's velocity starts at `3/4096`
+        // of full scale, which is 3 over 256 x *16* - the analyser's row count,
+        // not the clip. `FULL_SCALE_PIXELS` warns about exactly that confusion
+        // two dozen lines below, and says it costs 6.7%. 4096/3840 is 6.7%.
+        //
+        // The code was right and only the prose was wrong, so nothing looked
+        // different - which is why it needed a test rather than a reading.
+        let seed = Ballistics::new(1).velocity_seed();
+        assert_eq!(
+            seed,
+            PEAK_VELOCITY_SEED / (PEAK_FIXED_POINT * FULL_SCALE_PIXELS),
+        );
+        assert!(
+            (3.0 / seed - 3840.0).abs() < 0.5,
+            "the note says 3/3840, the code says 3/{:.0}",
+            3.0 / seed,
+        );
+
+        // And the fall times it quotes, which decide how the thing feels.
+        for (fps, expected) in [(60.0f32, 0.85f32), (30.0, 1.70)] {
+            let measured = fall_seconds(fps, true);
+            assert!(
+                (measured - expected).abs() < 0.02,
+                "at {fps}fps a cap falls in {measured:.3}s, not the {expected}s quoted",
+            );
         }
     }
 
