@@ -1146,6 +1146,86 @@ mod tests {
     }
 
     #[test]
+    fn every_key_the_readme_documents_is_bound() {
+        // The README is where a user learns the keys, and `map_key`'s catch-all
+        // `_ => Action::None` means an unbound key is a keypress that does
+        // nothing rather than a build failure. So a binding can be renamed or
+        // dropped and the only symptom is a documented key that does not work.
+        let readme = std::fs::read_to_string("README.md").expect("beside the source");
+        let table = readme
+            .split("| Key | |")
+            .nth(1)
+            .expect("the key table is still in the README");
+
+        let code_for = |spelling: &str| match spelling {
+            "Esc" => Some(KeyCode::Esc),
+            "Space" => Some(KeyCode::Char(' ')),
+            "Tab" => Some(KeyCode::Tab),
+            "↑" => Some(KeyCode::Up),
+            "↓" => Some(KeyCode::Down),
+            other => other
+                .chars()
+                .next()
+                .filter(|_| other.chars().count() == 1)
+                .map(KeyCode::Char),
+        };
+
+        let mut checked = 0;
+        // `skip(1)` steps over what is left of the header line itself, which is
+        // empty and would end the run before it started - the count below is
+        // what caught that, having happily checked nothing at all.
+        for row in table
+            .lines()
+            .skip(1)
+            .take_while(|line| line.starts_with('|'))
+        {
+            // Only the first column: later columns name values, not keys.
+            let keys = row.split('|').nth(1).unwrap_or_default();
+            for spelling in keys.split('`').skip(1).step_by(2) {
+                let code = code_for(spelling)
+                    .unwrap_or_else(|| panic!("the test cannot spell {spelling:?}"));
+                assert_ne!(
+                    map_key(code),
+                    Action::None,
+                    "the README documents {spelling:?} and nothing is bound to it",
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked >= 15, "only {checked} keys found - the table moved");
+    }
+
+    #[test]
+    fn the_readme_lists_the_values_the_code_offers() {
+        // These are what drift: adding a fall speed or a theme is a one-line
+        // change in one file, and the README is in another. Each list here is
+        // built from the code, so the assertion is that the document agrees with
+        // it rather than that both agree with something written twice.
+        let readme = std::fs::read_to_string("README.md").expect("beside the source");
+
+        let speeds = BAR_FALL_SPEEDS
+            .iter()
+            .map(|speed| format!("{speed}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        assert!(readme.contains(&speeds), "fall speeds: expected {speeds:?}");
+
+        let themes = Theme::built_in_names().collect::<Vec<_>>().join(", ");
+        assert!(readme.contains(&themes), "themes: expected {themes:?}");
+
+        // Bar styles in the order `b` actually walks them, from the default.
+        let mut style = BarStyle::default();
+        let mut styles = Vec::new();
+        for _ in 0..6 {
+            styles.push(style.label());
+            style = style.next();
+        }
+        assert_eq!(style, BarStyle::default(), "the cycle did not come home");
+        let styles = styles.join(", ");
+        assert!(readme.contains(&styles), "bar styles: expected {styles:?}");
+    }
+
+    #[test]
     fn keys_map_to_the_actions_the_app_actually_uses() {
         assert_eq!(map_key(KeyCode::Char('q')), Action::Quit);
         assert_eq!(map_key(KeyCode::Esc), Action::Quit);
