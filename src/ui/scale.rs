@@ -224,12 +224,31 @@ mod tests {
     #[test]
     fn four_rows_sweep_green_yellow_orange_red() {
         // One green, one yellow, one orange, one red - a full hue sweep in the
-        // smallest window worth drawing. Even index spacing would pick stops 0
-        // and 5 for the bottom two rows, both green, and the window would read
-        // as a single colour.
-        let rows: Vec<usize> = (0..4).map(|r| ramp_index(r, 4, 16)).collect();
+        // smallest window worth drawing, and the only place `SUBSAMPLE_SKEW`'s
+        // value is answerable. Even index spacing would pick stops 0 and 5 for
+        // the bottom two rows, both green, and the window would read as a
+        // single colour.
+        let ramp = &crate::visual::Theme::default().bars;
+        let rows: Vec<usize> = (0..4).map(|r| ramp_index(r, 4, ramp.len())).collect();
         assert_eq!(rows, vec![0, 8, 12, 15]);
         assert!(rows[1] > 5, "second row must clear the green block");
+
+        // And they are those hues, rather than four indices trusted to be. Green
+        // to red is the red channel gaining on the green one - which holds
+        // across the yellow in the middle, where neither channel alone does,
+        // since yellow is a *brighter* green than green is.
+        let toward_red = |stop: usize| match ramp[stop] {
+            crate::render::Ink::Rgb(red, green, _) => f32::from(red) / f32::from(green.max(1)),
+            _ => panic!("the rav ramp spells its colours out"),
+        };
+        for pair in rows.windows(2) {
+            assert!(
+                toward_red(pair[1]) > toward_red(pair[0]),
+                "stop {} is no further towards red than stop {}",
+                pair[1],
+                pair[0],
+            );
+        }
     }
 
     #[test]
