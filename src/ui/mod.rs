@@ -203,6 +203,9 @@ pub struct App {
 
     /// Sends frames to the terminal when the surface is pixels.
     painter: crate::surface::pixels::Pixels,
+    /// What the overlay wrote over the last pixel frame, so the cells can be
+    /// taken back when it changes.
+    painted_cells: String,
 
     /// Which surface rav would draw on, and why.
     ///
@@ -294,6 +297,7 @@ impl App {
             layout: BarLayout::default(),
             sized_for: (0, 0),
             painter: crate::surface::pixels::Pixels::new(),
+            painted_cells: String::new(),
             surface: Chosen::UNASKED,
             visualisation: Visualisation::default(),
             scope_style: ScopeStyle::default(),
@@ -447,6 +451,37 @@ impl App {
             return Ok(false);
         };
 
+        let grid = ratatui::layout::Rect::new(0, 0, size.columns, size.rows);
+        let mut cells = String::new();
+        if let Some(text) = status {
+            cells.push_str(&overlay::of(
+                Status {
+                    text,
+                    foreground: Color::Rgb(222, 222, 222),
+                    background: to_color(self.theme.grid[0]),
+                },
+                grid,
+            ));
+        }
+        if let Some(rows) = help {
+            cells.push_str(&overlay::of(Help { rows, title: "rav" }, grid));
+        }
+
+        // A cell the overlay wrote is a cell, and cells stay until something
+        // takes them away - a new image will not, since a written cell wins over
+        // the picture beneath it. So closing the help panel would leave it on
+        // screen for good. Erasing puts the cells back to empty, which is not
+        // the same as writing spaces over them: an empty cell lets the picture
+        // through and a space does not.
+        //
+        // Only when the overlay changes, which is a keypress rather than a
+        // frame. The image is sent immediately afterwards, so the clear is never
+        // a frame the user sees.
+        if cells != self.painted_cells {
+            write!(out, "\x1b[2J")?;
+            self.painted_cells = cells.clone();
+        }
+
         write!(out, "\x1b[H")?;
         self.painter.send(
             out,
@@ -455,22 +490,7 @@ impl App {
             u32::from(size.height),
             staging,
         )?;
-
-        let grid = ratatui::layout::Rect::new(0, 0, size.columns, size.rows);
-        if let Some(text) = status {
-            let panel = overlay::of(
-                Status {
-                    text,
-                    foreground: Color::Rgb(222, 222, 222),
-                    background: to_color(self.theme.grid[0]),
-                },
-                grid,
-            );
-            out.write_all(panel.as_bytes())?;
-        }
-        if let Some(rows) = help {
-            out.write_all(overlay::of(Help { rows, title: "rav" }, grid).as_bytes())?;
-        }
+        out.write_all(cells.as_bytes())?;
         out.flush()?;
         Ok(true)
     }
@@ -1671,6 +1691,48 @@ mod tests {
         let sent = String::from_utf8_lossy(&out);
         assert!(sent.contains("a=T"), "no frame");
         assert!(!sent.contains("\x1b[0m"), "a cell was written: {sent:?}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn closing_the_help_panel_takes_its_text_off_the_picture() {
+        // A cell the overlay wrote is a cell, and cells outlive the frame under
+        // them - a new image does not remove one, because a written cell wins
+        // over the picture. Without erasing, closing the panel would leave it
+        // sitting there for the rest of the session.
+        let mut a = app();
+        a.resize(80, 24);
+        let dir = scratch("closing");
+        let rows = a.help_rows();
+
+        let mut opened = Vec::new();
+        a.painted(&mut opened, window(), &dir, None, Some(&rows))
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&opened).contains("\x1b[0m"),
+            "the panel was never drawn",
+        );
+
+        let mut closed = Vec::new();
+        a.painted(&mut closed, window(), &dir, None, None).unwrap();
+        let sent = String::from_utf8_lossy(&closed);
+        assert!(
+            sent.contains("\x1b[2J"),
+            "the panel was left on the picture"
+        );
+        assert!(
+            sent.find("\x1b[2J") < sent.find("a=T"),
+            "the frame was sent before the screen was cleared, so it was wiped",
+        );
+
+        // And a frame with the overlay unchanged does not clear again, or every
+        // frame would be a full repaint.
+        let mut steady = Vec::new();
+        a.painted(&mut steady, window(), &dir, None, None).unwrap();
+        assert!(
+            !String::from_utf8_lossy(&steady).contains("\x1b[2J"),
+            "it cleared a screen nothing had changed on",
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
