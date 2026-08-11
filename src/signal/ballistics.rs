@@ -47,11 +47,16 @@ const PEAK_VELOCITY_SEED: f32 = 3.0;
 
 /// The selectable fall speeds, in pixels-per-frame numerators over 16. Bound to
 /// a key; the cap's own multiplier is not, so it stays at its default.
-pub const BAR_FALL_SPEEDS: [f32; 5] = [3.0, 6.0, 12.0, 16.0, 32.0];
+///
+/// From `rav-core`, where the numbers belong: they are what a preset carries,
+/// and a second copy here would be a second thing to change. This module keeps
+/// the integrator - what a level *does* between frames - which is the part that
+/// needs somewhere to hold state.
+pub use rav_core::ballistics::FALL_SPEEDS as BAR_FALL_SPEEDS;
 
-/// The defaults on a fresh install.
-pub const DEFAULT_BAR_FALL: f32 = 12.0;
-pub const DEFAULT_PEAK_FALL: f32 = 1.1;
+/// The defaults on a fresh install, read off the preset rav ships with.
+pub const DEFAULT_BAR_FALL: f32 = rav_core::ballistics::WINAMP.bar_fall;
+pub const DEFAULT_PEAK_FALL: f32 = rav_core::ballistics::WINAMP.peak_fall;
 
 /// Frame rate the per-frame constants are interpreted against.
 ///
@@ -59,7 +64,7 @@ pub const DEFAULT_PEAK_FALL: f32 = 1.1;
 /// its painter from `requestAnimationFrame`, i.e. the display rate. 60 reproduces
 /// Webamp's behaviour and drops a full-scale cap in ~0.86s; 30 stretches the same
 /// curve to ~1.72s. Configurable because it is a genuine choice, not a fact.
-pub const DEFAULT_REFERENCE_FPS: f32 = 60.0;
+pub const DEFAULT_REFERENCE_FPS: f32 = rav_core::ballistics::WINAMP.reference_fps;
 
 /// Per-bar bar and cap motion.
 #[derive(Debug, Clone)]
