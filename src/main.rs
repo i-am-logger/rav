@@ -149,7 +149,7 @@ async fn main() -> Result<()> {
     // A named theme that cannot be read is an error rather than a silent fall
     // back to the default: the display would look right and be the wrong theme.
     if let Some(theme) = args.theme.as_deref() {
-        app.set_theme(rav::visual::Theme::load(theme)?);
+        app.set_theme(rav::visual::theme::load(theme)?);
         info!("Using theme: {theme}");
     }
 

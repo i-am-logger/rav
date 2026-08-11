@@ -139,24 +139,7 @@ pub const DEFAULT_ANSI: [Colour; 16] = [
 /// and `bright-white` is slot 15, which is what a theme author sees in their
 /// configuration. A library that calls those `Gray` and `White` is describing
 /// its own type, not the terminal.
-pub const ANSI_NAMES: [&str; 16] = [
-    "black",
-    "red",
-    "green",
-    "yellow",
-    "blue",
-    "magenta",
-    "cyan",
-    "white",
-    "bright-black",
-    "bright-red",
-    "bright-green",
-    "bright-yellow",
-    "bright-blue",
-    "bright-magenta",
-    "bright-cyan",
-    "bright-white",
-];
+pub use crate::names::ANSI_NAMES;
 
 impl Ink {
     /// The slot an ANSI name refers to.

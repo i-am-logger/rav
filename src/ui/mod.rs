@@ -461,7 +461,7 @@ impl App {
     /// the first press.
     fn next_theme(&self) -> Theme {
         let mut order: Vec<Theme> = Theme::built_in_names()
-            .filter_map(|n| Theme::built_in(n).and_then(|r| r.ok()))
+            .filter_map(Theme::built_in)
             .collect();
         if let Some(loaded) = &self.loaded_theme {
             order.insert(1, loaded.clone());
@@ -1197,7 +1197,7 @@ mod tests {
         // `Palette::default()` is a terminal that said nothing, which is the
         // common case. Darkening has no number to work with, so the colour must
         // pass through untouched rather than being replaced by a guess.
-        let theme = Theme::load("terminal").expect("built in");
+        let theme = crate::visual::theme::load("terminal").expect("built in");
         assert!(theme.needs_terminal_palette());
         let grid = grid_colors(16, &theme, &Palette::default());
         assert!(

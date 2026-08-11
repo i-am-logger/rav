@@ -38,11 +38,14 @@ extern crate alloc;
 extern crate std;
 
 pub mod ink;
+mod names;
 pub mod palette;
 pub mod ramp;
 pub mod scene;
+pub mod theme;
 
 pub use ink::{ANSI_NAMES, Colour, DEFAULT_ANSI, Ink};
 pub use palette::Palette;
 pub use ramp::{Ramp, Stripe};
 pub use scene::{Band, CapStyle, Scene, Style, StyleId};
+pub use theme::{SCOPE_LEVELS, STOPS, StaticTheme, Theme};
