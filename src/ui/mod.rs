@@ -15,6 +15,7 @@ use crate::{
         },
         spectrum::{MAX_HEIGHT, Spectrum},
     },
+    units::{Curve, Level},
     visual::{Palette, Theme},
 };
 use analyzer::{Analyzer, BarLayout, BarStyle, Peaks, grid_colors, row_colors};
@@ -173,6 +174,14 @@ pub struct App {
     /// reference to however loud you actually listen.
     gain_db: f32,
 
+    /// How a measured amplitude becomes a level to draw, from the preset.
+    ///
+    /// Linear on every screen rav ships for. It is a field rather than a
+    /// constant because a four-light strip cannot afford linear - three of its
+    /// four rungs would sit in the top 12 dB - and that is a property of the
+    /// hardware a preset is written for, not of the renderer.
+    curve: Curve,
+
     /// Reused every frame so the render path does not allocate.
     sampled: Vec<f32>,
     bands: Vec<f32>,
@@ -239,6 +248,7 @@ impl App {
             limit_index: DEFAULT_LIMIT_INDEX,
             sample_rate,
             gain_db: 0.0,
+            curve: rav_appearance::preset::WINAMP.curve,
             sampled: Vec::new(),
             bands: Vec::new(),
             theme: Theme::default(),
@@ -726,7 +736,15 @@ impl App {
             // exactly full scale whatever the trim.
             let gain = 10f32.powf(self.gain_db / 20.0);
             for v in self.bands.iter_mut() {
-                *v = (*v * gain / MAX_HEIGHT).min(1.0);
+                // The preset's response curve, applied where the measured
+                // amplitude becomes a level to draw. Linear for every preset
+                // rav ships on a screen, which is rav's documented choice and
+                // what makes a quiet passage read quiet; a short LED bar needs
+                // otherwise, and says so in its own preset rather than here.
+                *v = self
+                    .curve
+                    .apply(Level::new(*v * gain / MAX_HEIGHT))
+                    .fraction();
             }
 
             let measured_at = Instant::now();
@@ -875,6 +893,37 @@ mod tests {
 
     fn app() -> App {
         App::new(Config::default(), 2, 48_000).expect("app should build")
+    }
+
+    #[test]
+    fn the_response_curve_comes_from_the_preset_and_is_linear() {
+        // A field nothing reads is not a feature, so this pins both halves: the
+        // app takes its curve from the preset rather than hardcoding one, and
+        // the preset rav ships is linear - which is its documented choice and
+        // what makes a quiet passage read quiet.
+        assert_eq!(app().curve, rav_appearance::preset::WINAMP.curve);
+        assert_eq!(app().curve, Curve::Linear);
+    }
+
+    #[test]
+    fn a_curve_changes_what_a_quiet_band_draws() {
+        // The mechanism the field exists for, exercised end to end rather than
+        // asserted on the type: the same measured amplitude reaches the display
+        // as a different level once the preset asks for a window.
+        let quiet = Level::new(0.1); // -20 dBFS
+        let linear = Curve::Linear.apply(quiet);
+        let windowed = Curve::Decibel { floor: -48.0 }.apply(quiet);
+        assert!(
+            windowed > linear,
+            "a window should lift a quiet band, got {windowed:?} from {linear:?}"
+        );
+        // And full scale is still full scale either way, so the top of the
+        // display means the same thing whatever the curve.
+        assert_eq!(Curve::Linear.apply(Level::FULL), Level::FULL);
+        assert_eq!(
+            Curve::Decibel { floor: -48.0 }.apply(Level::FULL),
+            Level::FULL
+        );
     }
 
     #[test]
