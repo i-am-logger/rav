@@ -162,7 +162,7 @@ pub fn multiplexed() -> bool {
 /// Ask the terminal whether it speaks the kitty graphics protocol.
 ///
 /// Must run before the alternate screen is entered and while nothing else is
-/// reading stdin. Costs one round trip, bounded by [`PROBE_TIMEOUT`].
+/// reading stdin. Costs one round trip, bounded by `PROBE_TIMEOUT`.
 ///
 /// **No test reaches this body** - it needs a pty, so the raw-mode handling and
 /// its restore are exercised by running rav and by nothing else. [`answered`] is
