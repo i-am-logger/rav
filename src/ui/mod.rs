@@ -1303,6 +1303,43 @@ mod tests {
     }
 
     #[test]
+    fn r_and_w_walk_their_whole_list_and_come_home() {
+        // The other cycles are covered one by one; these two were not. A cycle
+        // that skips an entry hides a setting the help panel still offers, and
+        // one that does not come home leaves a key you can press for ever
+        // without getting back to where you started.
+        let mut a = app();
+        // Read from `limit_index` and the table it indexes, not from the note:
+        // the note times out after a couple of seconds, so a loaded machine
+        // would collapse two presses into one empty string and the dedupe
+        // below would fail for a reason that has nothing to do with the cycle.
+        let ranges: Vec<Option<u32>> = (0..FREQUENCY_LIMITS.len())
+            .map(|_| {
+                a.apply(Action::CycleFrequencyLimit);
+                FREQUENCY_LIMITS[a.limit_index]
+            })
+            .collect();
+        assert_eq!(
+            ranges
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            FREQUENCY_LIMITS.len(),
+            "the range cycle repeats itself: {ranges:?}",
+        );
+        let home = a.limit_index;
+        a.apply(Action::CycleFrequencyLimit);
+        assert_ne!(a.limit_index, home, "and it still moves after a full turn");
+
+        // Bandwidth is two, so one press each way must return.
+        let start = a.bandwidth;
+        a.apply(Action::CycleBandwidth);
+        assert_ne!(a.bandwidth, start, "w changed nothing");
+        a.apply(Action::CycleBandwidth);
+        assert_eq!(a.bandwidth, start, "w does not come home");
+    }
+
+    #[test]
     fn every_key_that_should_change_the_picture_changes_it() {
         // A key wired to a field nothing reads is a key that does nothing, and
         // the help overlay would still cheerfully report its new value. So each
