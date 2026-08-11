@@ -8,6 +8,6 @@ pub mod geometry;
 pub mod ink;
 pub mod raster;
 
-pub use geometry::{Layout, Rect, Viewport};
+pub use geometry::{BarLayout, Column, Rectangle, Screen};
 pub use ink::{Colour, Ink};
-pub use raster::{Canvas, Ramp, Scene, draw};
+pub use raster::{Band, Canvas, CapStyle, Ramp, Scene, Stripe};

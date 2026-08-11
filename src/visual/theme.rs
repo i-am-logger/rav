@@ -295,6 +295,7 @@ fn parse_color(text: &str) -> Result<Ink> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::units::Length;
 
     /// A theme with `bars`, `grid` and `peak` set to what the test needs.
     fn themed(grid: &str, darken: Option<f32>) -> Theme {
@@ -326,8 +327,8 @@ mod tests {
         assert_ne!(plain, dimmed, "darken must reach a named colour");
 
         // Scaled, not replaced: still green, just less of it.
-        let lit = plain.at(0.0, 1.0);
-        let dim = dimmed.at(0.0, 1.0);
+        let lit = plain.at(Length::NONE, Length(1.0));
+        let dim = dimmed.at(Length::NONE, Length(1.0));
         assert!(
             dim.green < lit.green,
             "{dim:?} should be dimmer than {lit:?}"
@@ -341,7 +342,7 @@ mod tests {
         let palette = Palette::default();
         let theme = themed("#40a060", None);
         assert_eq!(
-            theme.grid_ramp(&palette).at(0.0, 1.0),
+            theme.grid_ramp(&palette).at(Length::NONE, Length(1.0)),
             Colour::rgb(0x40, 0xa0, 0x60)
         );
     }

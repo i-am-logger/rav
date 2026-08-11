@@ -26,7 +26,8 @@
 //! cargo run --bin kitty_spike -- --occlusion
 //! ```
 
-use rav::render::geometry::{Layout, Rect, Viewport, backdrop, bars, caps};
+use rav::render::{Band, BarLayout, Canvas, CapStyle, Colour, Ramp, Scene, Screen};
+use rav::units::{Length, Level};
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::time::{Duration, Instant};
@@ -435,61 +436,47 @@ fn measure(args: &Args) -> std::process::ExitCode {
     std::process::ExitCode::SUCCESS
 }
 
-/// A moving band, so a stalled pipeline is visible rather than silent.
+/// A moving wave, so a stalled pipeline is visible rather than silent.
+///
+/// Drawn through the real renderer rather than a copy of it: a spike painting
+/// its own rectangles would measure a transport against pixels rav does not
+/// actually produce.
 fn paint(frame: &mut [u8], width: u32, tick: u64) {
     let height = (frame.len() / 4) as u32 / width.max(1);
-    let view = Viewport::new(width as f32, height as f32);
-    let layout = Layout::new(12.0, 4.0);
-    let count = layout.count(view.width);
+    let screen = Screen::new(Length(width as f32), Length(height as f32));
+    let layout = BarLayout::new(Length(12.0), Length(4.0));
 
     // A travelling wave rather than a still frame, so a stalled pipeline is
-    // obvious rather than silent - and it moves slowly enough to read.
+    // obvious - and it moves slowly enough to read.
     let phase = tick as f32 * 0.08;
-    let values: Vec<f32> = (0..count)
+    let bands: Vec<Band> = (0..layout.fitting_across(&screen))
         .map(|i| {
-            let t = phase + i as f32 * 0.4;
-            (t.sin() * 0.5 + 0.5).clamp(0.05, 1.0)
+            let level = Level::new(((phase + i as f32 * 0.4).sin() * 0.5 + 0.5).max(0.05));
+            // The cap rides above its bar, which is what makes the compositing
+            // visible: in a terminal it would have to erase the backdrop to be
+            // drawn at all.
+            Band::new(level, Level::new(level.fraction() + 0.08))
         })
         .collect();
-    // Caps ride above the bars, which is what makes the compositing visible:
-    // in a terminal they would have to erase the backdrop to be drawn at all.
-    let peaks: Vec<f32> = values.iter().map(|v| (v + 0.08).min(1.0)).collect();
 
-    frame.fill(0);
-    for px in frame.chunks_exact_mut(4) {
-        px[3] = 0xff;
+    let mut canvas = match Canvas::for_screen(&screen) {
+        Some(canvas) => canvas,
+        None => return,
+    };
+    Scene {
+        bands: &bands,
+        layout,
+        screen,
+        bar_ramp: &Ramp::new(vec![Colour::rgb(0xe0, 0x22, 0x18)]),
+        grid_ramp: Some(&Ramp::new(vec![Colour::rgb(0x22, 0x04, 0x04)])),
+        cap: Some(CapStyle {
+            colour: Colour::rgb(0xff, 0xc0, 0xb0),
+            thickness: Length(3.0),
+        }),
     }
-    for rect in backdrop(count, &layout, &view) {
-        fill(frame, width, height, &rect, [0x22, 0x04, 0x04]);
-    }
-    for rect in bars(&values, &layout, &view) {
-        fill(frame, width, height, &rect, [0xe0, 0x22, 0x18]);
-    }
-    for rect in caps(&peaks, 3.0, &layout, &view) {
-        fill(frame, width, height, &rect, [0xff, 0xc0, 0xb0]);
-    }
-}
+    .draw(&mut canvas);
 
-/// Paint one rectangle into the frame, opaque.
-///
-/// Nothing antialiases here - the rasteriser is Stage 4's job, and a spike that
-/// blurred its edges would make a transport problem look like a drawing one.
-fn fill(frame: &mut [u8], width: u32, height: u32, rect: &Rect, rgb: [u8; 3]) {
-    let x0 = rect.x.max(0.0) as u32;
-    let y0 = rect.y.max(0.0) as u32;
-    let x1 = ((rect.x + rect.w) as u32).min(width);
-    let y1 = ((rect.y + rect.h) as u32).min(height);
-    for y in y0..y1 {
-        for x in x0..x1 {
-            let at = ((y * width + x) * 4) as usize;
-            if let Some(px) = frame.get_mut(at..at + 4) {
-                px[0] = rgb[0];
-                px[1] = rgb[1];
-                px[2] = rgb[2];
-                px[3] = 0xff;
-            }
-        }
-    }
+    frame.copy_from_slice(&canvas.to_rgba());
 }
 
 fn transmit(
@@ -1044,14 +1031,21 @@ mod tests {
     }
 
     #[test]
-    fn a_painted_frame_is_opaque_everywhere() {
-        // The kitty payload is sent as f32 RGBA and rav paints its own backdrop
-        // across the whole area, so any transparent pixel is a bug in `paint`
-        // rather than a design choice.
-        let (w, h) = (16u32, 4u32);
-        let mut frame = vec![0u8; (w * h * 4) as usize];
-        paint(&mut frame, w, 3);
-        assert!(frame.chunks_exact(4).all(|px| px[3] == 0xff));
+    fn a_painted_frame_is_opaque_where_it_draws_and_clear_where_it_does_not() {
+        // The gaps between columns are deliberately transparent, so the
+        // terminal's own background shows through them rather than rav painting
+        // a slab over whatever theme the user runs. That makes the alpha channel
+        // part of what the transport has to carry correctly, not padding.
+        let (width, height) = (200u32, 60u32);
+        let mut frame = vec![0u8; (width * height * 4) as usize];
+        paint(&mut frame, width, 3);
+
+        let alphas: Vec<u8> = frame.chunks_exact(4).map(|pixel| pixel[3]).collect();
+        assert!(alphas.contains(&0xff), "the bars must be opaque");
+        assert!(
+            alphas.contains(&0x00),
+            "the gaps between columns must stay clear"
+        );
     }
 
     #[test]

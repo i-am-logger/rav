@@ -1,4 +1,4 @@
-//! Where the bars, caps and backdrop go, in continuous coordinates.
+//! Where the bars, caps and backdrop go.
 //!
 //! The terminal renderer works in cells, so every measurement is rounded to one
 //! before it is drawn: a bar is a whole number of rows plus an eighth, a cap
@@ -9,192 +9,294 @@
 //!
 //! Here a bar is a fraction of the height and nothing rounds until the
 //! rasteriser antialiases it. The eighths are even at every size because they
-//! were never eighths of anything - `value * height` is the answer.
+//! were never eighths of anything - `height * level` is the answer.
 //!
-//! Origin is top-left with y increasing downward, which is what every raster
-//! target expects. The bars still grow upward; that is what `y = height - h`
-//! below is doing.
+//! Everything is measured in [`Length`] and driven by [`Level`], so a caller
+//! cannot pass a column count where a distance belongs, or an unnormalised
+//! magnitude where a bar height belongs. Both were possible when these were bare
+//! `f32`s, and both produce a wrong picture rather than a failed build.
+//!
+//! The placing rules live on [`Column`] rather than in the caller, so drawing a
+//! frame is asking each column what its bar and cap are - not arithmetic spread
+//! across whichever surface happens to be drawing.
+//!
+//! Origin is top-left with the vertical axis growing downward, which is what
+//! every raster target expects. Bars still grow upward; that is what
+//! `height - risen` below is doing.
 
-/// The area being drawn into, in device pixels.
+use crate::units::{Length, Level};
+
+/// The area being drawn into.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Viewport {
-    pub width: f32,
-    pub height: f32,
+pub struct Screen {
+    width: Length,
+    height: Length,
 }
 
-impl Viewport {
-    pub fn new(width: f32, height: f32) -> Self {
+impl Screen {
+    pub fn new(width: Length, height: Length) -> Self {
         Self {
-            width: width.max(0.0),
-            height: height.max(0.0),
+            width: width.or_none(),
+            height: height.or_none(),
         }
     }
-}
 
-/// An axis-aligned rectangle in device pixels.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Rect {
-    pub x: f32,
-    pub y: f32,
-    pub w: f32,
-    pub h: f32,
-}
-
-impl Rect {
-    /// The lowest edge, which for a bar sitting on the floor is the viewport's.
-    pub fn bottom(&self) -> f32 {
-        self.y + self.h
+    pub fn width(&self) -> Length {
+        self.width
     }
 
-    /// Whether this rectangle overlaps `other` at all.
+    pub fn height(&self) -> Length {
+        self.height
+    }
+
+    /// A screen with no area draws nothing - a terminal mid-resize, not a bug.
+    pub fn is_empty(&self) -> bool {
+        self.width <= Length::NONE || self.height <= Length::NONE
+    }
+
+    /// How far above the floor a level stands.
+    pub fn risen_to(&self, level: Level) -> Length {
+        self.height * level
+    }
+
+    /// The whole screen.
+    pub fn bounds(&self) -> Rectangle {
+        Rectangle::new(Length::NONE, Length::NONE, self.width, self.height)
+    }
+}
+
+/// An axis-aligned rectangle on the screen.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Rectangle {
+    left: Length,
+    top: Length,
+    width: Length,
+    height: Length,
+}
+
+impl Rectangle {
+    pub fn new(left: Length, top: Length, width: Length, height: Length) -> Self {
+        Self {
+            left,
+            top,
+            width: width.or_none(),
+            height: height.or_none(),
+        }
+    }
+
+    pub fn left(&self) -> Length {
+        self.left
+    }
+
+    pub fn top(&self) -> Length {
+        self.top
+    }
+
+    pub fn width(&self) -> Length {
+        self.width
+    }
+
+    pub fn height(&self) -> Length {
+        self.height
+    }
+
+    pub fn right(&self) -> Length {
+        self.left + self.width
+    }
+
+    /// The lowest edge, which for a bar standing on the floor is the screen's.
+    pub fn bottom(&self) -> Length {
+        self.top + self.height
+    }
+
+    /// Nothing to draw. A bar at rest is this, every frame of a silent passage,
+    /// so it is an ordinary state rather than an error.
+    pub fn is_empty(&self) -> bool {
+        self.width <= Length::NONE || self.height <= Length::NONE
+    }
+
+    /// Whether the two overlap at all.
     ///
     /// Touching edges do not count: a cap resting exactly on top of a bar shares
-    /// an edge and is not overlapping it.
-    pub fn intersects(&self, other: &Rect) -> bool {
-        self.x < other.x + other.w
-            && other.x < self.x + self.w
-            && self.y < other.bottom()
-            && other.y < self.bottom()
+    /// an edge with it and is not overlapping it.
+    pub fn overlaps(&self, other: &Rectangle) -> bool {
+        self.left < other.right()
+            && other.left < self.right()
+            && self.top < other.bottom()
+            && other.top < self.bottom()
+    }
+
+    /// Whether this sits entirely above `other`, sharing an edge at most.
+    pub fn sits_above(&self, other: &Rectangle) -> bool {
+        self.bottom() <= other.top
+    }
+
+    /// The part of this rectangle lying between two heights, if any.
+    ///
+    /// What clipping a bar to a colour band is, so neither the rasteriser nor a
+    /// surface has to do it with `max` and `min` and get the empty case wrong.
+    pub fn between(&self, top: Length, bottom: Length) -> Option<Rectangle> {
+        let top = top.largest(self.top);
+        let bottom = bottom.smallest(self.bottom());
+        (bottom > top).then(|| Rectangle::new(self.left, top, self.width, bottom - top))
     }
 }
 
-/// Bar width and the gap beside it, in device pixels.
+/// How wide bars are and how far apart they sit.
 ///
 /// The same two numbers the terminal layout carries, in a unit that does not
-/// have to be a whole cell. That is what lets one `+`/`-` setting drive both
-/// surfaces: the terminal reads them as columns, a pixel surface as pixels.
+/// have to be a whole cell. That is what lets one `+`/`-` setting drive every
+/// surface: the terminal reads them as columns, a pixel surface as distances.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Layout {
-    pub bar: f32,
-    pub gap: f32,
+pub struct BarLayout {
+    width: Length,
+    gap: Length,
 }
 
-impl Layout {
-    pub fn new(bar: f32, gap: f32) -> Self {
+impl BarLayout {
+    pub fn new(width: Length, gap: Length) -> Self {
         Self {
-            bar: bar.max(1.0),
-            gap: gap.max(0.0),
+            width: width.largest(Length(1.0)),
+            gap: gap.or_none(),
         }
     }
 
-    /// How many bars fit across `width`. The last one needs no trailing gap.
-    pub fn count(&self, width: f32) -> usize {
-        if width <= 0.0 {
+    pub fn bar_width(&self) -> Length {
+        self.width
+    }
+
+    pub fn gap(&self) -> Length {
+        self.gap
+    }
+
+    /// How many bars fit across a screen. The last one needs no trailing gap.
+    pub fn fitting_across(&self, screen: &Screen) -> usize {
+        if screen.width() <= Length::NONE {
             return 0;
         }
-        (((width + self.gap) / (self.bar + self.gap)).floor() as usize).max(1)
+        let stride = self.width + self.gap;
+        (((screen.width() + self.gap).get() / stride.get()).floor() as usize).max(1)
     }
 
-    /// Left edge of bar `i`.
-    pub fn x_of(&self, i: usize) -> f32 {
-        i as f32 * (self.bar + self.gap)
+    /// The slot the band at `index` occupies.
+    pub fn column(&self, index: usize) -> Column {
+        Column {
+            left: (self.width + self.gap) * index as f32,
+            width: self.width,
+        }
+    }
+
+    /// Every slot that fits, in order.
+    pub fn columns(&self, screen: &Screen) -> impl Iterator<Item = Column> + '_ {
+        (0..self.fitting_across(screen)).map(|index| self.column(index))
     }
 }
 
-/// The lit part of each bar, as rectangles.
-///
-/// `values` are 0..=1, already through the ballistics. A value of 0 produces a
-/// rectangle of zero height rather than being skipped, so the caller can rely on
-/// one rectangle per bar and index them alongside the colours.
-pub fn bars(values: &[f32], layout: &Layout, view: &Viewport) -> Vec<Rect> {
-    values
-        .iter()
-        .enumerate()
-        .map(|(i, &v)| {
-            let h = v.clamp(0.0, 1.0) * view.height;
-            Rect {
-                x: layout.x_of(i),
-                // Bars grow upward from the floor, so the top edge moves.
-                y: view.height - h,
-                w: layout.bar,
-                h,
-            }
-        })
-        .collect()
+/// The vertical slot one frequency band occupies, and the rules for placing
+/// things in it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Column {
+    left: Length,
+    width: Length,
 }
 
-/// The peak caps, as rectangles.
-///
-/// `thickness` is in device pixels. A cap is drawn *above* the level it marks,
-/// so it never covers the bar it belongs to, and it is held inside the viewport
-/// at both ends: at full scale it would otherwise sit half off the top, and at
-/// rest it would sit half below the floor.
-pub fn caps(peaks: &[f32], thickness: f32, layout: &Layout, view: &Viewport) -> Vec<Rect> {
-    let thickness = thickness.clamp(1.0, view.height.max(1.0));
-    // A viewport shorter than the cap leaves nowhere to put it, and `clamp`
-    // panics outright when its lower bound exceeds its upper - so the range is
-    // collapsed to zero rather than inverted.
-    let lowest = (view.height - thickness).max(0.0);
-    peaks
-        .iter()
-        .enumerate()
-        .map(|(i, &p)| {
-            let level = p.clamp(0.0, 1.0) * view.height;
-            let y = (view.height - level - thickness).clamp(0.0, lowest);
-            Rect {
-                x: layout.x_of(i),
-                y,
-                w: layout.bar,
-                h: thickness,
-            }
-        })
-        .collect()
-}
+impl Column {
+    pub fn left(&self) -> Length {
+        self.left
+    }
 
-/// The unlit backdrop behind each bar: the full column.
-///
-/// A separate layer rather than a hole left in the bars. In a terminal the cap
-/// and the backdrop compete for one cell, so drawing the cap destroys the grid
-/// glyph under it; here they are two rectangles and the cap simply sits on top.
-pub fn backdrop(count: usize, layout: &Layout, view: &Viewport) -> Vec<Rect> {
-    (0..count)
-        .map(|i| Rect {
-            x: layout.x_of(i),
-            y: 0.0,
-            w: layout.bar,
-            h: view.height,
-        })
-        .collect()
+    pub fn width(&self) -> Length {
+        self.width
+    }
+
+    /// The lit part of the bar.
+    ///
+    /// A silent band gives a rectangle of no height rather than nothing at all,
+    /// so a caller can rely on one per band and index them alongside colours.
+    pub fn bar(&self, level: Level, screen: &Screen) -> Rectangle {
+        let risen = screen.risen_to(level);
+        // Bars grow upward from the floor, so it is the top edge that moves.
+        Rectangle::new(self.left, screen.height() - risen, self.width, risen)
+    }
+
+    /// The peak cap.
+    ///
+    /// Drawn *above* the level it marks, so it never covers the bar it belongs
+    /// to, and held inside the screen at both ends: at full scale it would
+    /// otherwise sit half off the top, and at rest half below the floor.
+    pub fn cap(&self, peak: Level, thickness: Length, screen: &Screen) -> Rectangle {
+        let thickness = thickness.held_between(Length(1.0), screen.height().largest(Length(1.0)));
+        // A screen shorter than the cap leaves nowhere to put it; `held_between`
+        // collapses rather than panicking as `f32::clamp` would.
+        let lowest = (screen.height() - thickness).or_none();
+        let top = (screen.height() - screen.risen_to(peak) - thickness)
+            .held_between(Length::NONE, lowest);
+        Rectangle::new(self.left, top, self.width, thickness)
+    }
+
+    /// The unlit backdrop: the whole column.
+    ///
+    /// Its own layer rather than a hole left in the bars. In a terminal the cap
+    /// and the backdrop compete for one cell, so drawing the cap destroys the
+    /// grid glyph beneath it; here they are two rectangles and the cap sits on
+    /// top without consuming what is under it.
+    pub fn backdrop(&self, screen: &Screen) -> Rectangle {
+        Rectangle::new(self.left, Length::NONE, self.width, screen.height())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn view(w: f32, h: f32) -> Viewport {
-        Viewport::new(w, h)
+    fn screen(width: f32, height: f32) -> Screen {
+        Screen::new(Length(width), Length(height))
+    }
+
+    fn layout(width: f32, gap: f32) -> BarLayout {
+        BarLayout::new(Length(width), Length(gap))
+    }
+
+    /// The first column, which every placement test uses.
+    fn first(width: f32, gap: f32) -> Column {
+        layout(width, gap).column(0)
     }
 
     #[test]
-    fn a_bar_is_its_value_times_the_height() {
-        let v = view(100.0, 60.0);
-        let l = Layout::new(3.0, 1.0);
-        let rects = bars(&[0.0, 0.5, 1.0], &l, &v);
-        assert_eq!(rects[0].h, 0.0);
-        assert_eq!(rects[1].h, 30.0);
-        assert_eq!(rects[2].h, 60.0);
-        // Growing upward: a full bar starts at the top, an empty one at the floor.
-        assert_eq!(rects[2].y, 0.0);
-        assert_eq!(rects[0].y, 60.0);
+    fn a_bar_stands_as_high_as_its_level() {
+        let screen = screen(100.0, 60.0);
+        let column = first(3.0, 1.0);
+        assert_eq!(column.bar(Level::SILENT, &screen).height(), Length::NONE);
+        assert_eq!(column.bar(Level::new(0.5), &screen).height(), Length(30.0));
+        assert_eq!(column.bar(Level::FULL, &screen).height(), Length(60.0));
+        // Growing upward: a full bar starts at the ceiling, a silent one at the floor.
+        assert_eq!(column.bar(Level::FULL, &screen).top(), Length::NONE);
+        assert_eq!(column.bar(Level::SILENT, &screen).top(), Length(60.0));
     }
 
     #[test]
     fn the_eighth_ladder_is_even_at_every_height() {
         // The defect in #63, asserted dead. WezTerm fills a block from
         // `(8-n)*h/8` and snaps to whole pixels, so a 60px cell steps 7,8,7,8.
-        // Nothing rounds here, so the steps are equal at every height - including
-        // the ones that are not divisible by eight.
-        let l = Layout::new(3.0, 1.0);
+        // Nothing rounds here, so the steps are equal at every height -
+        // including the ones not divisible by eight.
+        let column = first(3.0, 1.0);
         for height in [7.0, 15.0, 20.0, 29.0, 40.0, 59.0, 60.0, 149.0] {
-            let v = view(10.0, height);
-            let eighths: Vec<f32> = (0..=8).map(|n| n as f32 / 8.0).collect();
-            let rects = bars(&eighths, &l, &v);
-            let steps: Vec<f32> = rects.windows(2).map(|w| w[1].h - w[0].h).collect();
-            let first = steps[0];
+            let screen = screen(10.0, height);
+            let heights: Vec<f32> = (0..=8)
+                .map(|n| {
+                    column
+                        .bar(Level::new(n as f32 / 8.0), &screen)
+                        .height()
+                        .get()
+                })
+                .collect();
+            let steps: Vec<f32> = heights.windows(2).map(|pair| pair[1] - pair[0]).collect();
+            let first_step = steps[0];
             for (i, step) in steps.iter().enumerate() {
                 assert!(
-                    (step - first).abs() < 1e-4,
-                    "height {height}: step {i} was {step}, expected {first}"
+                    (step - first_step).abs() < 1e-4,
+                    "height {height}: step {i} was {step}, expected {first_step}"
                 );
             }
         }
@@ -202,111 +304,141 @@ mod tests {
 
     #[test]
     fn a_cap_never_sinks_below_the_bar_it_marks() {
-        // In a cell grid the cap and the bar contend for the same row, and the
-        // fix is a fudge that lifts the cap when the top cell is partly filled.
-        // Here the cap simply starts at or above the bar's top edge.
+        // In a cell grid the cap and the bar contend for one row, and the fix is
+        // a fudge that lifts the cap when the top cell is partly filled. Here
+        // the cap simply starts at or above the bar's top edge.
         //
         // At full scale it rests *on* the bar rather than above it - there is no
         // room above - which is the terminal renderer's behaviour too, and the
         // reason this asserts the top edge rather than the bottom.
-        let v = view(100.0, 60.0);
-        let l = Layout::new(3.0, 1.0);
+        let screen = screen(100.0, 60.0);
+        let column = first(3.0, 1.0);
         for value in [0.0f32, 0.13, 0.5, 0.87, 1.0] {
-            let bar = bars(&[value], &l, &v)[0];
-            let cap = caps(&[value], 2.0, &l, &v)[0];
+            let level = Level::new(value);
+            let bar = column.bar(level, &screen);
+            let cap = column.cap(level, Length(2.0), &screen);
             assert!(
-                cap.y <= bar.y + 1e-4,
-                "value {value}: cap top {} sank below bar top {}",
-                cap.y,
-                bar.y
+                cap.top() <= bar.top() + Length(1e-4),
+                "level {value}: cap top {:?} sank below bar top {:?}",
+                cap.top(),
+                bar.top()
             );
         }
         // Below full scale it clears the bar entirely, so the two never merge
         // into one block.
-        let bar = bars(&[0.5], &l, &v)[0];
-        let cap = caps(&[0.5], 2.0, &l, &v)[0];
-        assert!(cap.bottom() <= bar.y + 1e-4, "a mid bar must show its cap");
+        let level = Level::new(0.5);
+        assert!(
+            column
+                .cap(level, Length(2.0), &screen)
+                .sits_above(&column.bar(level, &screen)),
+            "a mid bar must show its cap"
+        );
     }
 
     #[test]
-    fn a_cap_stays_inside_the_viewport_at_both_ends() {
-        let v = view(100.0, 60.0);
-        let l = Layout::new(3.0, 1.0);
-        // At rest it sits on the floor rather than half below it, which is how
-        // a silent band still shows where it would rise from.
-        let resting = caps(&[0.0], 3.0, &l, &v)[0];
-        assert_eq!(resting.bottom(), 60.0);
+    fn a_cap_stays_inside_the_screen_at_both_ends() {
+        let screen = screen(100.0, 60.0);
+        let column = first(3.0, 1.0);
+        // At rest it sits on the floor rather than half below it, which is how a
+        // silent band still shows where it would rise from.
+        assert_eq!(
+            column.cap(Level::SILENT, Length(3.0), &screen).bottom(),
+            Length(60.0)
+        );
         // At full scale it sits under the ceiling rather than half above it.
-        let full = caps(&[1.0], 3.0, &l, &v)[0];
-        assert_eq!(full.y, 0.0);
+        assert_eq!(
+            column.cap(Level::FULL, Length(3.0), &screen).top(),
+            Length::NONE
+        );
     }
 
     #[test]
-    fn a_cap_composites_over_the_backdrop_instead_of_replacing_it() {
+    fn a_cap_lies_over_the_backdrop_instead_of_replacing_it() {
         // The defect that cannot be fixed in a terminal: a cell holds one glyph,
         // so writing the cap destroys the backdrop under it. As geometry they
-        // are two rectangles in the same column, and the cap overlaps the
-        // backdrop without consuming it.
-        let v = view(100.0, 60.0);
-        let l = Layout::new(3.0, 1.0);
-        let grid = backdrop(1, &l, &v)[0];
-        let cap = caps(&[0.5], 2.0, &l, &v)[0];
+        // are two rectangles in one column, and the cap overlaps the backdrop
+        // without consuming it.
+        let screen = screen(100.0, 60.0);
+        let column = first(3.0, 1.0);
+        let backdrop = column.backdrop(&screen);
+        let cap = column.cap(Level::new(0.5), Length(2.0), &screen);
         assert!(
-            cap.intersects(&grid),
-            "the cap should sit over the backdrop"
+            cap.overlaps(&backdrop),
+            "the cap should lie over the backdrop"
         );
-        assert_eq!(grid.h, 60.0, "the backdrop is still the whole column");
-        assert_eq!(grid.y, 0.0);
+        assert_eq!(backdrop.height(), Length(60.0), "still the whole column");
+        assert_eq!(backdrop.top(), Length::NONE);
     }
 
     #[test]
-    fn bar_height_never_decreases_as_the_value_rises() {
-        let v = view(100.0, 37.0);
-        let l = Layout::new(3.0, 1.0);
-        let values: Vec<f32> = (0..=100).map(|i| i as f32 / 100.0).collect();
-        let rects = bars(&values, &l, &v);
-        for pair in rects.windows(2) {
-            assert!(pair[1].h >= pair[0].h, "{} then {}", pair[0].h, pair[1].h);
+    fn a_bar_never_shrinks_as_its_level_rises() {
+        let screen = screen(100.0, 37.0);
+        let column = first(3.0, 1.0);
+        let heights: Vec<Length> = (0..=100)
+            .map(|i| column.bar(Level::new(i as f32 / 100.0), &screen).height())
+            .collect();
+        for pair in heights.windows(2) {
+            assert!(pair[1] >= pair[0], "{:?} then {:?}", pair[0], pair[1]);
         }
     }
 
     #[test]
-    fn values_outside_the_range_are_held_at_the_edges() {
-        // The ballistics clamp, but a bar that drew past the viewport would
-        // corrupt neighbouring rows rather than merely look wrong.
-        let v = view(100.0, 60.0);
-        let l = Layout::new(3.0, 1.0);
-        let rects = bars(&[-0.5, 1.5], &l, &v);
-        assert_eq!(rects[0].h, 0.0);
-        assert_eq!(rects[1].h, 60.0);
-        let capped = caps(&[-0.5, 1.5], 2.0, &l, &v);
-        assert!(capped.iter().all(|c| c.y >= 0.0 && c.bottom() <= 60.0));
+    fn a_level_past_full_scale_cannot_draw_past_the_screen() {
+        // `Level` clamps on construction, so a magnitude that escaped the
+        // ballistics cannot corrupt the rows around it. The type enforces this
+        // now, rather than every call site remembering to.
+        let screen = screen(100.0, 60.0);
+        let column = first(3.0, 1.0);
+        assert_eq!(column.bar(Level::new(-0.5), &screen).height(), Length::NONE);
+        assert_eq!(column.bar(Level::new(1.5), &screen).height(), Length(60.0));
+        let cap = column.cap(Level::new(1.5), Length(2.0), &screen);
+        assert!(cap.top() >= Length::NONE && cap.bottom() <= Length(60.0));
     }
 
     #[test]
-    fn bars_are_laid_out_edge_to_edge_with_their_gap() {
-        let l = Layout::new(3.0, 1.0);
-        assert_eq!(l.x_of(0), 0.0);
-        assert_eq!(l.x_of(1), 4.0);
-        assert_eq!(l.x_of(2), 8.0);
-        // The last bar needs no trailing gap, so 100 wide holds 25 of them.
-        assert_eq!(l.count(100.0), 25);
-        assert_eq!(l.count(0.0), 0);
+    fn columns_sit_edge_to_edge_with_their_gap_between() {
+        let layout = layout(3.0, 1.0);
+        assert_eq!(layout.column(0).left(), Length::NONE);
+        assert_eq!(layout.column(1).left(), Length(4.0));
+        assert_eq!(layout.column(2).left(), Length(8.0));
+        // The last bar needs no trailing gap, so 100 across holds 25 of them.
+        assert_eq!(layout.fitting_across(&screen(100.0, 10.0)), 25);
+        assert_eq!(layout.fitting_across(&screen(0.0, 10.0)), 0);
+        assert_eq!(layout.columns(&screen(100.0, 10.0)).count(), 25);
     }
 
     #[test]
     fn a_wider_bar_means_fewer_of_them() {
-        // The property `+`/`-` relies on, in pixels rather than cells.
-        let narrow = Layout::new(2.0, 1.0).count(100.0);
-        let wide = Layout::new(8.0, 1.0).count(100.0);
+        // The property `+`/`-` relies on, in distances rather than cells.
+        let screen = screen(100.0, 10.0);
+        let narrow = layout(2.0, 1.0).fitting_across(&screen);
+        let wide = layout(8.0, 1.0).fitting_across(&screen);
         assert!(wide < narrow, "{narrow} then {wide}");
     }
 
     #[test]
-    fn a_zero_height_viewport_produces_nothing_that_panics() {
-        let v = view(0.0, 0.0);
-        let l = Layout::new(3.0, 1.0);
-        assert!(bars(&[0.5], &l, &v).iter().all(|r| r.h == 0.0));
-        assert!(caps(&[0.5], 2.0, &l, &v).iter().all(|r| r.y >= 0.0));
+    fn slicing_a_rectangle_between_two_heights_keeps_only_the_overlap() {
+        // What clipping a bar to a colour band is. Doing it with `max` and `min`
+        // at the call site is how the empty case gets forgotten.
+        let bar = Rectangle::new(Length::NONE, Length(20.0), Length(10.0), Length(40.0));
+        let middle = bar.between(Length(30.0), Length(50.0)).expect("overlaps");
+        assert_eq!(middle.top(), Length(30.0));
+        assert_eq!(middle.bottom(), Length(50.0));
+        // Clipped to the rectangle's own bounds, never beyond them.
+        let all = bar.between(Length::NONE, Length(100.0)).expect("overlaps");
+        assert_eq!(all.top(), Length(20.0));
+        assert_eq!(all.bottom(), Length(60.0));
+        // No overlap is None rather than a rectangle of negative height.
+        assert_eq!(bar.between(Length(70.0), Length(80.0)), None);
+        assert_eq!(bar.between(Length(20.0), Length(20.0)), None);
+    }
+
+    #[test]
+    fn a_screen_with_no_area_produces_nothing_that_panics() {
+        let screen = screen(0.0, 0.0);
+        let column = first(3.0, 1.0);
+        assert!(screen.is_empty());
+        assert!(column.bar(Level::new(0.5), &screen).is_empty());
+        assert!(column.cap(Level::new(0.5), Length(2.0), &screen).top() >= Length::NONE);
     }
 }
