@@ -178,6 +178,10 @@ async fn rav_main() -> Result<()> {
         audio_capture.channels(),
         audio_capture.sample_rate(),
     )?;
+    // The device for now; the tap below replaces it if it starts. Said here and
+    // corrected there rather than announced once in the middle, because the
+    // answer is not settled until the tap has had its turn.
+    app.listening_to(audio_capture.device_name());
 
     // A named theme that cannot be read is an error rather than a silent fall
     // back to the default: the display would look right and be the wrong theme.

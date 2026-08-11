@@ -193,6 +193,46 @@ mod tests {
     }
 
     #[test]
+    fn a_row_with_no_key_still_reads_as_a_line() {
+        // What rav is listening to is reported, not offered, so it carries no
+        // key - and the key column is shared, so an empty one has to leave the
+        // description where every other row's sits rather than sliding left.
+        let rows = vec![
+            HelpRow {
+                key: "q",
+                description: "quit",
+                value: None,
+            },
+            HelpRow {
+                key: "",
+                description: "listening to",
+                value: Some("MacBook Pro Microphone".into()),
+            },
+        ];
+        let area = Rect::new(0, 0, 60, 12);
+        let mut buf = Buffer::empty(area);
+        Help {
+            rows: &rows,
+            title: "rav",
+        }
+        .render(area, &mut buf);
+        let out = text_of(&buf);
+
+        assert!(out.contains("listening to"), "missing the row:\n{out}");
+        assert!(
+            out.contains("MacBook Pro Microphone"),
+            "the source is the whole point of the row:\n{out}",
+        );
+
+        let column = |needle: &str| out.lines().find_map(|l| l.find(needle));
+        assert_eq!(
+            column("listening to"),
+            column("quit"),
+            "the keyless row is not aligned with the rest:\n{out}",
+        );
+    }
+
+    #[test]
     fn the_panel_is_centred_and_framed() {
         let buf = render(60, 12);
         let out = text_of(&buf);

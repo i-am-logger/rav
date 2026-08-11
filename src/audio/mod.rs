@@ -183,6 +183,17 @@ impl AudioCapture {
         self.config.channels
     }
 
+    /// What the display is being fed from, for saying so on screen.
+    ///
+    /// The name the device reports, not the one that was asked for: `-d` takes
+    /// a partial name, and rav falls back to the default input when it finds no
+    /// loopback, so the two differ exactly when it matters.
+    pub fn device_name(&self) -> String {
+        self.device
+            .name()
+            .unwrap_or_else(|_| "an unnamed device".to_string())
+    }
+
     /// Every input device with its name, enumerated **once**.
     ///
     /// Worth its own function because enumeration is not cheap: cpal's ALSA
