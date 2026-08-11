@@ -248,7 +248,7 @@ impl App {
             limit_index: DEFAULT_LIMIT_INDEX,
             sample_rate,
             gain_db: 0.0,
-            curve: rav_appearance::preset::WINAMP.curve,
+            curve: rav_appearance::preset::RAV.curve,
             sampled: Vec::new(),
             bands: Vec::new(),
             theme: Theme::default(),
@@ -901,7 +901,7 @@ mod tests {
         // app takes its curve from the preset rather than hardcoding one, and
         // the preset rav ships is linear - which is its documented choice and
         // what makes a quiet passage read quiet.
-        assert_eq!(app().curve, rav_appearance::preset::WINAMP.curve);
+        assert_eq!(app().curve, rav_appearance::preset::RAV.curve);
         assert_eq!(app().curve, Curve::Linear);
     }
 
