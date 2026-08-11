@@ -42,7 +42,13 @@ rav --theme winamp    # rav, winamp, terminal, mono, or a path to a theme
 rav --list-devices    # what rav can capture from
 rav -d "<name>"       # capture from a named device
 rav --clean           # keep logging out of the display
+rav --surface kitty   # auto, glyphs, kitty or window
 ```
+
+`--surface` is reported and not yet obeyed: `h` shows which one rav *would* draw
+on, and block glyphs draw the frame either way. It is out early so the startup
+probe behind it — which asks your terminal a question and waits 120ms for an
+answer — gets a release of exposure before anything depends on it.
 
 Everything else is a keypress, and `h` shows the lot with their current values:
 
