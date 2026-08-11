@@ -6,6 +6,8 @@
 //! class in this area, so it ships first with its only possible symptom being a
 //! wrong label.
 
+pub mod pixels;
+
 use crate::render::Capabilities;
 use rav_core::units::Cells;
 use std::io::{Read, Write};
