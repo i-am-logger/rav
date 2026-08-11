@@ -39,7 +39,7 @@
   # Development scripts
   scripts.dev-test.exec = ''
     echo "🧪 Running development tests..."
-    cargo test --all-features
+    cargo test --workspace --all-features
   '';
 
   scripts.dev-run.exec = ''
@@ -402,11 +402,17 @@
       statix check .
     '';
     "test:clippy" = {
-      exec = "cargo clippy --all-targets --all-features -- -D warnings";
+      # --workspace, or the member crates are silently unlinted: without it cargo
+      # takes only the root package, and rav-core and rav-appearance would be
+      # checked by nothing.
+      exec = "cargo clippy --workspace --all-targets --all-features -- -D warnings";
       after = [ "test:fmt" "test:nix" ];
     };
     "test:unit" = {
-      exec = "cargo test --all-features";
+      # --workspace for the same reason as clippy. Without it the 54 tests in
+      # rav-core and rav-appearance never run in CI, and a green build would
+      # mean the binary compiled rather than that the mechanics work.
+      exec = "cargo test --workspace --all-features";
       after = [ "test:clippy" ];
     };
   };
