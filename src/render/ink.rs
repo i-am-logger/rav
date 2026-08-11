@@ -183,6 +183,34 @@ impl Ink {
     pub fn is_exact(self) -> bool {
         matches!(self, Self::Rgb(..))
     }
+
+    /// This ink as a theme's `darken` asks for it.
+    ///
+    /// `keep` is `None` when the theme gave **no instruction**, which is not the
+    /// same as keeping all of the brightness. A theme that says nothing gets its
+    /// ink handed on untouched, so a named colour stays named and the terminal
+    /// still paints it from the user's palette - `mono` declares no `darken` and
+    /// a `grid` of `bright-black`, and folding "absent" into `Some(1.0)` would
+    /// resolve it against a snapshot of the palette taken at startup.
+    ///
+    /// `known` is what the terminal said this ink is, if it said anything. There
+    /// is nothing to scale otherwise, and inventing a value would replace the
+    /// theme rather than dim it.
+    ///
+    /// Returns an `Ink` rather than a `Colour` so each surface still resolves at
+    /// its own boundary: the terminal hands a name back as a name, a pixel
+    /// surface falls back to the standard values.
+    pub fn dimmed(self, keep: Option<f32>, known: Option<(u8, u8, u8)>) -> Self {
+        match (keep, known) {
+            (None, _) | (Some(_), None) => self,
+            (Some(keep), Some((r, g, b))) => {
+                // All three channels together, which keeps the hue. Per channel
+                // drains a saturated colour to black by way of brown.
+                let scale = |c: u8| (f32::from(c) * keep).round().clamp(0.0, 255.0) as u8;
+                Self::Rgb(scale(r), scale(g), scale(b))
+            }
+        }
+    }
 }
 
 #[cfg(test)]

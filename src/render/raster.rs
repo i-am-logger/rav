@@ -63,6 +63,11 @@ impl Ramp {
         self.stops.len()
     }
 
+    /// The stops themselves, floor first.
+    pub fn stops(&self) -> &[Colour] {
+        &self.stops
+    }
+
     pub fn is_empty(&self) -> bool {
         false
     }

@@ -80,21 +80,17 @@ impl Theme {
 
     /// The backdrop ramp, with `darken` applied.
     ///
-    /// Where this deliberately parts company with the glyph renderer: there,
-    /// `darken` is skipped for a name the terminal will not resolve, because
-    /// there is no value to scale and inventing one would replace the theme
-    /// rather than dim it. A pixel surface always has a value - the standard
-    /// one, if nothing better - so it can honour what the theme asked for.
-    ///
-    /// The two therefore differ only on a terminal that ignores OSC 4, and such
-    /// a terminal is drawing glyphs anyway: the pixel surfaces are chosen for
-    /// kitty-protocol terminals, all of which answer.
+    /// Dims through the same [`Ink::dimmed`] the glyph renderer uses, so the two
+    /// surfaces cannot disagree about what a theme asked for - they had two
+    /// implementations of this and the difference was invisible. Only the last
+    /// step differs, and legitimately: a pixel surface has no terminal to defer
+    /// to, so it resolves a name to the standard value where the glyph renderer
+    /// hands the name onward.
     pub fn grid_ramp(&self, palette: &Palette) -> Ramp {
-        let keep = self.darken.unwrap_or(1.0);
         Ramp::new(
             self.grid
                 .iter()
-                .map(|&ink| palette.resolve(ink).dimmed(keep))
+                .map(|&ink| palette.resolve(ink.dimmed(self.darken, palette.rgb(ink))))
                 .collect(),
         )
     }
@@ -314,27 +310,85 @@ mod tests {
         assert_eq!(theme.grid_ramp(&palette).len(), STOPS);
     }
 
+    /// Sixteen slots a terminal might report, distinct enough to tell apart.
+    fn answering() -> Palette {
+        let mut slots = [(0u8, 0u8, 0u8); 16];
+        for (i, slot) in slots.iter_mut().enumerate() {
+            *slot = (10 * i as u8, 200 - 5 * i as u8, 40);
+        }
+        Palette::answering(slots)
+    }
+
     #[test]
-    fn a_pixel_ramp_darkens_a_named_colour_the_terminal_never_answered() {
-        // The deliberate divergence from the glyph renderer. There, a name the
-        // terminal will not resolve is left alone because there is no value to
-        // scale. Here there is always a value, so the theme's request is
-        // honoured - and the two can only differ on a terminal that ignores
-        // OSC 4, which is drawing glyphs anyway.
-        let palette = Palette::default();
+    fn darken_scales_a_colour_the_terminal_answered_for() {
+        let palette = answering();
         let plain = themed("green", None).grid_ramp(&palette);
         let dimmed = themed("green", Some(0.25)).grid_ramp(&palette);
-        assert_ne!(plain, dimmed, "darken must reach a named colour");
+        assert_ne!(plain, dimmed, "darken must reach an answered colour");
 
-        // Scaled, not replaced: still green, just less of it.
+        // Scaled, not replaced: the hue survives, there is just less of it.
         let lit = plain.at(Length::NONE, Length(1.0));
         let dim = dimmed.at(Length::NONE, Length(1.0));
         assert!(
             dim.green < lit.green,
             "{dim:?} should be dimmer than {lit:?}"
         );
-        assert_eq!(dim.red, 0, "the hue must survive darkening");
-        assert_eq!(dim.blue, 0);
+        assert!(dim.red <= lit.red && dim.blue <= lit.blue);
+    }
+
+    #[test]
+    fn a_theme_that_asks_for_no_darken_keeps_its_ink_named() {
+        // The mono regression this exists to prevent. `mono` declares no
+        // `darken` and a `grid` of `bright-black`, and it is one of the two
+        // themes whose whole purpose is to follow the user's palette.
+        //
+        // Folding "no instruction" into `Some(1.0)` would resolve that ink
+        // against whatever the palette said at startup, freezing it - and it is
+        // reachable, because cycling `t` reaches mono *through* `terminal`,
+        // which is the theme that triggers the OSC 4 query. So mono would render
+        // one way with `--theme mono` and another after three keypresses.
+        //
+        // The palette here *answers*, which is the case a default palette cannot
+        // test: with nothing to resolve against, any implementation passes.
+        let palette = answering();
+        let mono = Theme::built_in("mono").expect("built in").expect("parses");
+        assert_eq!(mono.darken, None, "mono asks for no darkening");
+        for &ink in &mono.grid {
+            assert!(
+                !ink.dimmed(mono.darken, palette.rgb(ink)).is_exact(),
+                "a theme that said nothing must keep {ink:?} deferred to the terminal"
+            );
+        }
+    }
+
+    #[test]
+    fn both_surfaces_dim_by_the_same_rule() {
+        // They had two implementations of darken and the difference was
+        // invisible. Only the final resolution may differ now: the glyph
+        // renderer hands a name onward, a pixel surface resolves it.
+        // A real theme, whose sixteen grid stops differ from each other - a
+        // single repeated colour would pass whatever the ordering, which is no
+        // test at all.
+        let palette = answering();
+        let theme = Theme::built_in("terminal")
+            .expect("built in")
+            .expect("parses");
+        assert!(
+            theme.grid.windows(2).any(|pair| pair[0] != pair[1]),
+            "the fixture must have distinct stops or this proves nothing"
+        );
+
+        // At exactly one row per stop the terminal takes them in order, so row r
+        // from the floor is stop r, and the two lists line up directly.
+        let glyph = crate::ui::analyzer::grid_colors(STOPS as u16, &theme, &palette);
+        let pixels = theme.grid_ramp(&palette);
+        for (row, ink) in glyph.iter().enumerate() {
+            assert_eq!(
+                palette.resolve(*ink),
+                pixels.stops()[row],
+                "row {row} disagrees between the surfaces"
+            );
+        }
     }
 
     #[test]

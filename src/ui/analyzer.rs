@@ -390,24 +390,11 @@ pub fn row_colors(height: u16, theme: &Theme) -> Vec<Ink> {
 /// will not say what its green is leaves the colour alone; there is nothing to
 /// scale, and inventing one would replace the theme rather than dim it.
 pub fn grid_colors(height: u16, theme: &Theme, palette: &Palette) -> Vec<Ink> {
-    let stops: Vec<Ink> = match theme.darken {
-        None => theme.grid.clone(),
-        Some(floor) => theme
-            .grid
-            .iter()
-            .map(|&c| match palette.rgb(c) {
-                // All three channels scale together, which keeps the hue.
-                // Scaling per channel drains a saturated colour towards black by
-                // way of brown.
-                Some((r, g, b)) => Ink::Rgb(
-                    (r as f32 * floor).round() as u8,
-                    (g as f32 * floor).round() as u8,
-                    (b as f32 * floor).round() as u8,
-                ),
-                None => c,
-            })
-            .collect(),
-    };
+    let stops: Vec<Ink> = theme
+        .grid
+        .iter()
+        .map(|&ink| ink.dimmed(theme.darken, palette.rgb(ink)))
+        .collect();
     stretch(&stops, height)
 }
 

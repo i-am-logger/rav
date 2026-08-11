@@ -30,6 +30,19 @@ pub struct Palette {
 }
 
 impl Palette {
+    /// A palette that answered, for tests.
+    ///
+    /// `Palette::default()` is the terminal that said nothing, and a test built
+    /// on it exercises the transform rather than what the running app feeds it -
+    /// which is how a `mono` regression stayed invisible: the case that breaks
+    /// the theme is the one where the terminal *did* answer.
+    #[cfg(test)]
+    pub fn answering(slots: [(u8, u8, u8); 16]) -> Self {
+        Self {
+            slots: slots.map(Some),
+        }
+    }
+
     /// Ask the terminal for its palette, if `needed`.
     ///
     /// Asking is not free and it is not invisible: it writes escape sequences and
