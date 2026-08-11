@@ -1178,6 +1178,7 @@ name = "rav-appearance"
 version = "1.0.0-beta.6"
 dependencies = [
  "rav-core",
+ "toml",
 ]
 
 [[package]]
