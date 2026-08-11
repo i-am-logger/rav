@@ -15,6 +15,7 @@ use crate::{
         },
         spectrum::{MAX_HEIGHT, Spectrum},
     },
+    surface::Chosen,
     units::{Curve, Level},
     visual::{Palette, Theme},
 };
@@ -199,6 +200,13 @@ pub struct App {
     /// Size the cached mapping and colours were built for.
     sized_for: (u16, u16),
 
+    /// Which surface rav would draw on, and why.
+    ///
+    /// Reported, not obeyed - the glyph renderer draws every frame whatever this
+    /// says. It is here so the choice is visible in the help overlay for a beta
+    /// before anything depends on it being right.
+    surface: Chosen,
+
     visualisation: Visualisation,
     scope_style: ScopeStyle,
     peaks: Peaks,
@@ -273,6 +281,7 @@ impl App {
             palette: Palette::default(),
             layout: BarLayout::default(),
             sized_for: (0, 0),
+            surface: Chosen::UNASKED,
             visualisation: Visualisation::default(),
             scope_style: ScopeStyle::default(),
             peaks: Peaks::default(),
@@ -306,6 +315,15 @@ impl App {
         }
         self.theme = theme;
         self.sized_for = (0, 0);
+    }
+
+    /// Record which surface was chosen, for the help overlay to report.
+    ///
+    /// Nothing downstream reads it yet. Deciding is separate from drawing so the
+    /// probe that makes the decision can be in users' hands - and shown to be
+    /// harmless - a beta before the renderer that would act on it.
+    pub fn set_surface(&mut self, chosen: Chosen) {
+        self.surface = chosen;
     }
 
     /// Append a capture buffer to the rolling window, de-interleaving to mono.
@@ -573,6 +591,18 @@ impl App {
                 key: "q",
                 description: "quit",
                 value: None,
+            },
+            // No key, because there is none: `--surface` is a flag. "Would"
+            // rather than "does" is the literal truth for this beta - the glyph
+            // renderer draws the frame you are looking at whatever this says.
+            HelpRow {
+                key: "",
+                description: "would draw on",
+                value: Some(format!(
+                    "{} ({})",
+                    self.surface.surface.label(),
+                    self.surface.because
+                )),
             },
         ]
     }
@@ -1184,6 +1214,25 @@ mod tests {
 
         a.apply(Action::ToggleHelp);
         assert!(!a.show_help);
+    }
+
+    #[test]
+    fn the_overlay_reports_the_surface_and_why() {
+        // The one place a user can see what the startup probe concluded. Without
+        // the reason it is unarguable: "glyphs" alone does not say whether the
+        // terminal was asked and declined or never asked.
+        let mut a = app();
+        a.set_surface(crate::surface::choose(
+            crate::surface::Choice::Auto,
+            true,
+            || true,
+        ));
+        let readout = a
+            .help_rows()
+            .into_iter()
+            .find(|r| r.description == "would draw on")
+            .and_then(|r| r.value);
+        assert_eq!(readout, Some("glyphs (under a multiplexer)".to_string()));
     }
 
     #[test]

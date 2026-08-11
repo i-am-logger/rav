@@ -90,13 +90,30 @@ pub struct Chosen {
     pub because: &'static str,
 }
 
+impl Chosen {
+    /// What to hold before anything has been decided.
+    ///
+    /// Glyphs, because they work everywhere - which is what makes them the
+    /// answer when there is no answer.
+    pub const UNASKED: Self = Self {
+        surface: Surface::Glyphs,
+        because: "nothing asked",
+    };
+}
+
 /// Decide which surface to draw on.
 ///
 /// `asked` is what the user typed; `multiplexed` is whether rav is running under
-/// tmux or screen; `answers` is whether the terminal admitted to the kitty
-/// protocol. Split from the probe so the decision is testable without a
-/// terminal - the probe needs one and this does not.
-pub fn choose(asked: Choice, multiplexed: bool, answers: bool) -> Chosen {
+/// tmux or screen; `answers` asks the terminal whether it admits to the kitty
+/// protocol. Split from the probe so the decision is testable without a terminal
+/// - the probe needs one and this does not.
+///
+/// `answers` is a closure rather than a `bool` so the arms that ignore it never
+/// ask. That is not a micro-optimisation: asking writes escape sequences and
+/// reads stdin, and costs [`PROBE_TIMEOUT`] against a terminal that will never
+/// reply. Passing a `bool` would make every startup pay for an answer three of
+/// the five arms discard.
+pub fn choose(asked: Choice, multiplexed: bool, answers: impl FnOnce() -> bool) -> Chosen {
     let glyphs = |because| Chosen {
         surface: Surface::Glyphs,
         because,
@@ -118,12 +135,19 @@ pub fn choose(asked: Choice, multiplexed: bool, answers: bool) -> Chosen {
         // passes through. Image escapes do not survive that intact, and the
         // failure is a garbled screen rather than a missing picture - so auto
         // never picks pixels there, however the terminal answers.
-        Choice::Auto if multiplexed => glyphs("running under a multiplexer"),
-        Choice::Auto if answers => Chosen {
-            surface: Surface::Kitty,
-            because: "the terminal answered the graphics query",
-        },
-        Choice::Auto => glyphs("the terminal did not answer the graphics query"),
+        Choice::Auto if multiplexed => glyphs("under a multiplexer"),
+        // Not a guard, because calling `answers` consumes it and a match guard
+        // only gets a borrow.
+        Choice::Auto => {
+            if answers() {
+                Chosen {
+                    surface: Surface::Kitty,
+                    because: "the terminal answered",
+                }
+            } else {
+                glyphs("the terminal said nothing")
+            }
+        }
     }
 }
 
@@ -227,29 +251,70 @@ mod tests {
         assert!(!sink.is_empty(), "it should still have asked");
     }
 
+    /// Say `yes`, and record whether anyone asked.
+    fn asking(asked: &std::cell::Cell<bool>, yes: bool) -> impl FnOnce() -> bool + '_ {
+        move || {
+            asked.set(true);
+            yes
+        }
+    }
+
     #[test]
     fn a_multiplexer_declines_pixels_however_the_terminal_answers() {
         // tmux and screen rewrite what passes through, and an image escape does
         // not survive that intact. The failure is a garbled screen rather than a
         // missing picture, which is worse than not trying.
-        let under_tmux = choose(Choice::Auto, true, true);
+        let under_tmux = choose(Choice::Auto, true, || true);
         assert_eq!(under_tmux.surface, Surface::Glyphs);
-        assert_eq!(under_tmux.because, "running under a multiplexer");
+        assert_eq!(under_tmux.because, "under a multiplexer");
     }
 
     #[test]
     fn auto_follows_the_terminals_answer() {
-        assert_eq!(choose(Choice::Auto, false, true).surface, Surface::Kitty);
-        assert_eq!(choose(Choice::Auto, false, false).surface, Surface::Glyphs);
+        assert_eq!(choose(Choice::Auto, false, || true).surface, Surface::Kitty);
+        assert_eq!(
+            choose(Choice::Auto, false, || false).surface,
+            Surface::Glyphs
+        );
     }
 
     #[test]
     fn an_explicit_request_is_honoured_even_where_auto_would_decline() {
         // It is the user's terminal and they can see the result. A terminal that
         // draws images without answering the query is reachable this way.
-        assert_eq!(choose(Choice::Kitty, false, false).surface, Surface::Kitty);
-        assert_eq!(choose(Choice::Kitty, true, false).surface, Surface::Kitty);
-        assert_eq!(choose(Choice::Glyphs, false, true).surface, Surface::Glyphs);
+        assert_eq!(
+            choose(Choice::Kitty, false, || false).surface,
+            Surface::Kitty
+        );
+        assert_eq!(
+            choose(Choice::Kitty, true, || false).surface,
+            Surface::Kitty
+        );
+        assert_eq!(
+            choose(Choice::Glyphs, false, || true).surface,
+            Surface::Glyphs
+        );
+    }
+
+    #[test]
+    fn the_terminal_is_only_asked_when_the_answer_could_change_the_outcome() {
+        // Asking is not free and not invisible: it writes escape sequences,
+        // reads stdin, and waits out the timeout against a terminal that will
+        // never reply. Every arm that ignores the answer must cost nothing.
+        for (asked, multiplexed) in [
+            (Choice::Glyphs, false),
+            (Choice::Kitty, false),
+            (Choice::Window, false),
+            (Choice::Auto, true),
+        ] {
+            let probed = std::cell::Cell::new(false);
+            choose(asked, multiplexed, asking(&probed, true));
+            assert!(!probed.get(), "{asked:?} asked and did not need to");
+        }
+
+        let probed = std::cell::Cell::new(false);
+        choose(Choice::Auto, false, asking(&probed, true));
+        assert!(probed.get(), "auto has nothing else to go on");
     }
 
     #[test]
