@@ -46,5 +46,5 @@ pub mod units;
 pub use capability::{Capabilities, Requirements, Shortfall};
 pub use geometry::{Anchor, BarLayout, Column, Rectangle, Screen};
 pub use units::{
-    Bounded, CellSize, Cells, Curve, Elapsed, Fill, Hz, Length, Level, SampleRate, Step,
+    Bounded, CellSize, Cells, Curve, Elapsed, Fill, Frames, Hz, Length, Level, SampleRate, Step,
 };

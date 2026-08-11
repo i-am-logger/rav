@@ -496,6 +496,46 @@ impl Elapsed {
     pub const fn as_seconds(self) -> f32 {
         self.0
     }
+
+    /// This much time counted in frames of a display running at `fps`.
+    ///
+    /// The bridge every rate written per-frame has to cross. Constants copied
+    /// from something that drew sixty times a second mean nothing until they
+    /// are told how many of those frames have gone by.
+    ///
+    /// A rate below one a second gives a fraction of a frame, which is the
+    /// honest answer; a nonsensical one gives none.
+    pub fn frames_at(self, fps: f32) -> Frames {
+        Frames::count(self.0 * fps)
+    }
+}
+
+/// A count of frames of the display a rate was written against.
+///
+/// Not a count of frames rav drew, and not a duration. A cap's velocity is
+/// multiplied by 1.1 "per frame", which is meaningless until it says *whose*
+/// frames - and 1.1 per frame at 30 a second is not 1.1 per frame at 60, nor
+/// 1.21. Keeping this apart from [`Elapsed`] is what stops a rate tuned on one
+/// display being applied unchanged to another.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
+#[repr(transparent)]
+pub struct Frames(f32);
+
+impl Frames {
+    pub const NONE: Self = Self(0.0);
+
+    /// For a caller that genuinely has a frame count rather than a duration.
+    pub fn count(value: f32) -> Self {
+        Self(if value.is_nan() { 0.0 } else { value.max(0.0) })
+    }
+
+    pub const fn get(self) -> f32 {
+        self.0
+    }
+
+    pub fn is_none(self) -> bool {
+        self.0 <= 0.0
+    }
 }
 
 #[cfg(test)]
@@ -520,8 +560,36 @@ mod tests {
     type Rungs = Bounded<4, 4096>;
 
     /// The amplitude of a signal `db` below full scale.
+    ///
+    /// Shares the 20 with [`Curve::Decibel`] on purpose - it is the same
+    /// definition - which is exactly why it cannot be the only thing checking
+    /// it. See `a_decibel_is_the_amplitude_kind_not_the_power_kind`.
     fn at_dbfs(db: f32) -> Level {
         Level::new(10f32.powf(db / 20.0))
+    }
+
+    #[test]
+    fn a_decibel_is_the_amplitude_kind_not_the_power_kind() {
+        // A level is an amplitude, so dBFS is 20*log10 of it. The power form,
+        // 10*log10, halves every figure: a four-light strip's boundaries would
+        // land at -6, -3 and -1.25 instead of the -12, -6 and -2.5 this type
+        // documents, and every strip preset would be tuned against a window
+        // twice the size it thought.
+        //
+        // Literal pairs on purpose. `at_dbfs` above shares the definition with
+        // the implementation, so the two agree whatever the coefficient says -
+        // change both together and nothing else notices.
+        let window = Curve::Decibel { floor: -12.0 };
+
+        // Full scale is 0 dBFS: the top of any window.
+        assert!((window.apply(Level::FULL).fraction() - 1.0).abs() < 1e-3);
+
+        // Half amplitude is -6.02 dBFS, which is halfway up a 12 dB window.
+        let half = window.apply(Level::new(0.5)).fraction();
+        assert!((half - 0.4983).abs() < 1e-3, "0.5 amplitude read {half}");
+
+        // A quarter is -12.04 dBFS, which is under the floor and draws nothing.
+        assert!(window.apply(Level::new(0.25)).fraction() < 0.01);
     }
 
     #[test]
@@ -764,6 +832,24 @@ mod tests {
     fn time_never_runs_backwards() {
         assert_eq!(Elapsed::seconds(-1.0).as_seconds(), 0.0);
         assert_eq!(Elapsed::seconds(f32::NAN).as_seconds(), 0.0);
+    }
+
+    #[test]
+    fn a_duration_counts_frames_of_the_display_it_is_asked_about() {
+        // The same half second is thirty frames of one display and fifteen of
+        // another, which is why a rate written per frame has to say whose.
+        assert_eq!(Elapsed::seconds(0.5).frames_at(60.0), Frames::count(30.0));
+        assert_eq!(Elapsed::seconds(0.5).frames_at(30.0), Frames::count(15.0));
+
+        // A display slower than a frame a second gets a fraction of one, not a
+        // whole one - rounding up here would make a rate fall faster than asked
+        // on exactly the hardware least able to hide it.
+        assert_eq!(Elapsed::seconds(1.0).frames_at(0.5), Frames::count(0.5));
+
+        // A rate nobody could run at counts nothing, rather than running the
+        // motion backwards or filling it with NaN.
+        assert!(Elapsed::seconds(1.0).frames_at(f32::NAN).is_none());
+        assert!(Elapsed::seconds(1.0).frames_at(-60.0).is_none());
     }
 
     #[test]

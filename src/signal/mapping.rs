@@ -34,10 +34,14 @@ pub const DEFAULT_LIMIT_INDEX: usize = 2;
 
 /// FFT bin that `hz` falls in, for a stream at `sample_rate`.
 pub fn bin_for_hz(hz: u32, sample_rate: u32, bins: usize) -> usize {
+    // The guard stays even though the type below knows its own Nyquist. A rate
+    // of zero gives `Hz(0.0)`, and dividing by that is NaN - which survives the
+    // clamp, saturates to nothing, and lands on bin 1. "Unknown rate is the
+    // full range" would silently become the narrowest one.
     if sample_rate == 0 {
         return bins;
     }
-    let nyquist = sample_rate as f32 / 2.0;
+    let nyquist = rav_core::SampleRate(sample_rate).nyquist().get();
     let fraction = (hz as f32 / nyquist).clamp(0.0, 1.0);
     ((fraction * bins as f32).round() as usize).clamp(1, bins)
 }
@@ -146,6 +150,21 @@ impl Bandwidth {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rate_of_zero_is_the_whole_spectrum_and_not_a_sliver_of_it() {
+        // Reachable before a device has said what it runs at. The guard in
+        // `bin_for_hz` is what makes that the full range, and the temptation is
+        // to drop it now that `SampleRate` knows its own Nyquist - but
+        // `SampleRate(0).nyquist()` is `Hz(0.0)`, and dividing by that gives
+        // NaN, which survives the clamp, saturates to nothing and lands on bin
+        // one. The widest answer would quietly become the narrowest.
+        assert_eq!(bin_for_hz(16_000, 0, 512), 512, "not the full spectrum");
+        assert_eq!(bin_for_hz(0, 0, 512), 512);
+
+        // And with a rate, the ordinary answer is unchanged.
+        assert_eq!(bin_for_hz(16_000, 48_000, 512), 341);
+    }
 
     #[test]
     fn spans_the_spectrum_and_increases() {

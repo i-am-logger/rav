@@ -1,4 +1,13 @@
-// RAV Audio Visualizer Library
+//! A real-time audio spectrum analyser and oscilloscope.
+//!
+//! The binary is argument parsing and wiring; everything else is here, so the
+//! tests and `rav` compile one copy of the tree rather than two.
+//!
+//! Capture is in [`audio`], analysis in [`signal`], and what a level looks like
+//! in [`visual`] and [`render`]. [`ui`] holds the event loop and the widgets.
+//! The portable half - levels, geometry, colours, themes - lives in `rav-core`
+//! and `rav-appearance`, re-exported below.
+
 pub mod audio;
 pub mod config;
 pub mod render;
@@ -19,5 +28,5 @@ pub use rav_core::units;
 // Re-export commonly used types
 pub use config::Config;
 pub use rav_core::{
-    Bounded, CellSize, Cells, Curve, Elapsed, Fill, Hz, Length, Level, SampleRate, Step,
+    Bounded, CellSize, Cells, Curve, Elapsed, Fill, Frames, Hz, Length, Level, SampleRate, Step,
 };

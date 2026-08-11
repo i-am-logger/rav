@@ -38,9 +38,73 @@ pub fn powf(value: f32, exponent: f32) -> f32 {
     libm::powf(value, exponent)
 }
 
+/// How far something travels when its speed is multiplied by `growth` every
+/// frame, in units of the speed it started at.
+///
+/// A peak cap does not fall at a steady rate. Its velocity compounds, so the
+/// distance it covers is the sum of a geometric series and not speed times
+/// frames. Writing it the obvious way gives motion that is nearly right at the
+/// rate it was tuned against and visibly wrong at any other, which is the kind
+/// of mistake that survives being looked at.
+///
+/// `growth` of 1 is a steady speed, where the series degenerates to the frame
+/// count - handled directly, because the closed form divides by zero there.
+///
+/// ```
+/// use rav_core::{math::compounded_travel, Frames};
+/// // Steady speed for ten frames covers ten frames' worth of ground.
+/// assert!((compounded_travel(1.0, Frames::count(10.0)) - 10.0).abs() < 1e-4);
+/// // Speed doubling each frame covers 1 + 2 + 4 + 8 over four.
+/// assert!((compounded_travel(2.0, Frames::count(4.0)) - 15.0).abs() < 1e-4);
+/// ```
+pub fn compounded_travel(growth: f32, frames: crate::units::Frames) -> f32 {
+    let frames = frames.get();
+    if (growth - 1.0).abs() < f32::EPSILON {
+        return frames;
+    }
+    (powf(growth, frames) - 1.0) / (growth - 1.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::units::Frames;
+
+    #[test]
+    fn a_compounding_speed_covers_the_sum_of_the_series() {
+        // The whole reason this is not speed times frames.
+        assert!((compounded_travel(2.0, Frames::count(1.0)) - 1.0).abs() < 1e-4);
+        assert!((compounded_travel(2.0, Frames::count(3.0)) - 7.0).abs() < 1e-4);
+        assert!((compounded_travel(3.0, Frames::count(3.0)) - 13.0).abs() < 1e-4);
+        assert_eq!(compounded_travel(2.0, Frames::NONE), 0.0);
+    }
+
+    #[test]
+    fn a_steady_speed_is_just_the_frame_count() {
+        // The closed form divides by zero at a growth of one, and a rate that
+        // does not compound is a perfectly ordinary thing to ask for.
+        for frames in [0.0f32, 1.0, 7.5, 240.0] {
+            assert_eq!(compounded_travel(1.0, Frames::count(frames)), frames);
+        }
+    }
+
+    #[test]
+    fn cutting_the_frames_finer_covers_the_same_ground() {
+        // What makes a rate written per-frame survive a different display. Ten
+        // frames in one step and ten frames in twenty must arrive together, or
+        // the same music falls at different speeds on different machines.
+        let whole = compounded_travel(1.1, Frames::count(10.0));
+        let mut piecewise = 0.0;
+        let mut speed = 1.0f32;
+        for _ in 0..20 {
+            piecewise += speed * compounded_travel(1.1, Frames::count(0.5));
+            speed *= powf(1.1, 0.5);
+        }
+        assert!(
+            (whole - piecewise).abs() < 1e-3,
+            "{whole} in one step, {piecewise} in twenty",
+        );
+    }
 
     #[test]
     fn these_agree_with_the_std_methods_they_stand_in_for() {
