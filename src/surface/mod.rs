@@ -145,12 +145,16 @@ pub fn choose(asked: Choice, multiplexed: bool, answers: impl FnOnce() -> bool) 
         Choice::Auto if multiplexed => glyphs("tmux or screen is in the way"),
         // Not a guard, because calling `answers` consumes it and a match guard
         // only gets a borrow.
+        // Pixels are asked for, never assumed. A terminal that says it can draw
+        // images is told so and left on block characters, because "it looked
+        // fine on the one terminal that was tried" is not something a default
+        // can rest on - and a default that turns out wrong is a broken display
+        // for everybody rather than for whoever opted in.
+        //
+        // The line to change when that is no longer true is the one below.
         Choice::Auto => {
             if answers() {
-                Chosen {
-                    surface: Surface::Kitty,
-                    because: "your terminal can draw images",
-                }
+                glyphs("your terminal can draw images - try --surface kitty")
             } else {
                 glyphs("your terminal cannot draw images")
             }
@@ -329,11 +333,28 @@ mod tests {
     }
 
     #[test]
-    fn auto_follows_the_terminals_answer() {
-        assert_eq!(choose(Choice::Auto, false, || true).surface, Surface::Kitty);
+    fn nobody_gets_pixels_without_asking_for_them() {
+        // Both ways round, auto draws block characters. A terminal that can do
+        // better is told how, rather than being switched over on its behalf:
+        // the pixel surface has been seen working on one terminal, and a
+        // default that turns out wrong breaks the display for everyone instead
+        // of for whoever chose it.
+        let capable = choose(Choice::Auto, false, || true);
+        assert_eq!(capable.surface, Surface::Glyphs);
+        assert!(
+            capable.because.contains("--surface kitty"),
+            "a capable terminal was not told how to use it: {}",
+            capable.because,
+        );
         assert_eq!(
             choose(Choice::Auto, false, || false).surface,
             Surface::Glyphs
+        );
+
+        // Asking is still honoured, or there would be no way in at all.
+        assert_eq!(
+            choose(Choice::Kitty, false, || false).surface,
+            Surface::Kitty
         );
     }
 
