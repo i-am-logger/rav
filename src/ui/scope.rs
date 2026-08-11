@@ -218,6 +218,23 @@ mod tests {
     }
 
     #[test]
+    fn no_amount_of_gain_pushes_the_trace_off_the_screen() {
+        // `up` is a key a user can hold down, and a loud passage through a loud
+        // trim is a sample many times full scale. The trace has to saturate at
+        // the rails: a row past the last one is drawn into a cell that is not
+        // there, or into somebody else's.
+        for height in [1u16, 2, 9, 16, 64] {
+            for sample in [-1e9f32, -40.0, -1.0, 0.0, 1.0, 40.0, 1e9, f32::MAX] {
+                let row = row_of(sample, height);
+                assert!(
+                    row < height,
+                    "{sample} drew row {row} of a display {height} tall",
+                );
+            }
+        }
+    }
+
+    #[test]
     fn degenerate_areas_and_inputs_do_not_panic() {
         for (w, h) in [(0u16, 0u16), (1, 1), (80, 1), (1, 40)] {
             let _ = render(&[0.5, -0.5], w, h, ScopeStyle::Lines);
