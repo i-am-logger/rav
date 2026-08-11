@@ -621,6 +621,7 @@ impl App {
         {
             enable_raw_mode()?;
             io::stdout().execute(EnterAlternateScreen)?;
+            guard_the_terminal();
         }
         self.terminal.clear()?;
         info!("🎨 Starting analyser");
@@ -889,11 +890,7 @@ impl App {
         }
 
         #[cfg(not(test))]
-        {
-            disable_raw_mode()?;
-            io::stdout().execute(LeaveAlternateScreen)?;
-            self.terminal.show_cursor()?;
-        }
+        hand_the_terminal_back();
         info!("👋 Analyser shut down");
         Ok(())
     }
@@ -906,6 +903,38 @@ impl App {
 /// that dies outright leaves the bars resting on the floor rather than frozen
 /// part-way down.
 const WATCHDOG: Duration = Duration::from_millis(250);
+
+/// Put the terminal back the way it was found.
+///
+/// Raw mode off, off the alternate screen, cursor visible. The one place that
+/// knows what setting rav up did, so the way out cannot drift from the way in.
+#[cfg(not(test))]
+fn hand_the_terminal_back() {
+    let _ = disable_raw_mode();
+    let _ = io::stdout().execute(LeaveAlternateScreen);
+    let _ = io::stdout().execute(crossterm::cursor::Show);
+}
+
+/// Make sure a panic hands the terminal back too.
+///
+/// Without this a panic leaves the user on the alternate screen in raw mode:
+/// no echo, no line editing, and a backtrace they cannot see. The way out is to
+/// type `reset` blind.
+///
+/// The previous hook still runs, so the panic still reports itself - and it
+/// reports to `rav.log`, since `main` points stderr there before anything
+/// touches the terminal.
+///
+/// `panic = "abort"` in the release profile does not skip this: hooks run
+/// before the abort.
+#[cfg(not(test))]
+fn guard_the_terminal() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panicked| {
+        hand_the_terminal_back();
+        previous(panicked);
+    }));
+}
 
 /// Terminal events, on a channel the render loop can wait on.
 ///
