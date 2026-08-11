@@ -32,7 +32,7 @@ const SWEEP: Duration = Duration::from_secs(12);
 
 /// Loud, but not against the ceiling: a signal that clipped every bar to full
 /// scale would hide exactly the ballistics this exists to show.
-const AMPLITUDE: f32 = 0.5;
+pub const AMPLITUDE: f32 = 0.5;
 
 /// Blocks a second, matching what a capture device delivers.
 ///
@@ -49,6 +49,71 @@ const BLOCKS_PER_SECOND: u32 = 100;
 /// that recomputes the curve for itself agrees with itself whatever this does.
 fn sweep_hz(turn: f32) -> f32 {
     LOWEST * (HIGHEST / LOWEST).powf(turn.fract())
+}
+
+/// The sweep itself, with no thread and no clock.
+///
+/// Separate from [`start`] so the signal can be asked what it plays at any point
+/// in a pass without waiting twelve seconds for it - which is what lets a test
+/// check the bar, the level and the timing rather than only that something moved.
+pub struct Sweep {
+    rate: f32,
+    /// Integrated rather than computed from frequency times time. A sweep moves
+    /// its frequency every sample, and `sin(2*pi*f*t)` with a moving `f` jumps
+    /// the phase each time it moves - a click per sample, which reads as noise
+    /// across the whole display instead of a peak.
+    phase: f32,
+    /// Samples produced so far. Not wall-clock: this advances by one per sample
+    /// whatever the machine is doing, which is what makes the signal testable.
+    ///
+    /// A count rather than a running total of seconds. Adding `1/48000` to an
+    /// `f32` half a million times a pass loses enough to put the sweep a hertz
+    /// out by the end of one and further out on every pass after it - a signal
+    /// that drifts is no use as ground truth for what the display should show.
+    produced: u64,
+}
+
+impl Sweep {
+    pub fn new(sample_rate: u32) -> Self {
+        Self {
+            rate: sample_rate.max(1) as f32,
+            phase: 0.0,
+            produced: 0,
+        }
+    }
+
+    /// How far through a pass the *next* sample is, where 1.0 is a whole one.
+    pub fn turn(&self) -> f32 {
+        let seconds = self.produced as f64 / f64::from(self.rate);
+        (seconds / f64::from(SWEEP.as_secs_f32())) as f32
+    }
+
+    /// The frequency the next sample is being drawn at.
+    pub fn hz(&self) -> f32 {
+        sweep_hz(self.turn())
+    }
+
+    /// Produce `samples` more, continuing from wherever the last call stopped.
+    pub fn block(&mut self, samples: usize) -> Vec<f32> {
+        let dt = 1.0 / self.rate;
+        (0..samples)
+            .map(|_| {
+                let hz = sweep_hz(self.turn());
+                self.phase = (self.phase + std::f32::consts::TAU * hz * dt) % std::f32::consts::TAU;
+                self.produced += 1;
+                AMPLITUDE * self.phase.sin()
+            })
+            .collect()
+    }
+
+    /// Throw away `seconds` of signal, to reach a point in the pass.
+    ///
+    /// Generates rather than skips: the phase has to be carried through, and a
+    /// jump would put a click exactly where a test is about to measure.
+    pub fn advance(&mut self, seconds: f32) {
+        let samples = (seconds * self.rate) as usize;
+        let _ = self.block(samples);
+    }
 }
 
 /// Start the test signal, and hand back the channel it feeds.
@@ -70,23 +135,11 @@ pub fn start(sample_rate: u32) -> Receiver<AudioData> {
     );
 
     std::thread::spawn(move || {
-        // Phase is integrated rather than computed from the frequency and the
-        // time, because a sweep changes frequency every sample: `sin(2*pi*f*t)`
-        // with a moving `f` jumps the phase each time it moves, which is a click
-        // on every sample and broadband noise across the whole display.
-        let mut phase = 0.0f32;
-        let mut elapsed = 0.0f32;
-        let dt = 1.0 / rate as f32;
+        let mut sweep = Sweep::new(rate);
         let mut due = Instant::now();
 
         loop {
-            let mut block = Vec::with_capacity(per_block);
-            for _ in 0..per_block {
-                let hz = sweep_hz(elapsed / SWEEP.as_secs_f32());
-                phase = (phase + std::f32::consts::TAU * hz * dt) % std::f32::consts::TAU;
-                block.push(AMPLITUDE * phase.sin());
-                elapsed += dt;
-            }
+            let block = sweep.block(per_block);
 
             // Drop the oldest queued block to make room, exactly as the capture
             // path does. Blocking here instead would stall the sweep whenever
