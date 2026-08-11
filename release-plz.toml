@@ -21,7 +21,7 @@ semver_check = true
 release_always = false
 
 # A release is triggered by changes to packaged files. README.md, docs/, LICENSE,
-# themes/ and src/ ship inside the crate, so editing any of them needs a new
+# themes and src/ ship inside the crates, so editing any of them needs a new
 # version before crates.io shows it. .github/ is not packaged.
 
 pr_labels = ["release", "automated"]

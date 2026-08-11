@@ -19,7 +19,7 @@
           inherit (pkgs) lib stdenv;
           craneLib = crane.mkLib pkgs;
 
-          # src/visual/theme.rs pulls themes/*.toml in with include_str!, so they
+          # src/visual/theme.rs pulls crates/rav-appearance/themes/*.toml in with
           # have to survive filtering. crane's filter keeps every .toml today,
           # which covers them incidentally rather than deliberately; the second
           # clause states the requirement so a narrower filter upstream cannot

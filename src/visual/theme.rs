@@ -28,10 +28,22 @@ pub const SCOPE_LEVELS: usize = 5;
 /// where the MIT notice for the transcribed ramp lives, there being no vendored
 /// file to put it alongside.
 const BUILT_IN: [(&str, &str); 4] = [
-    ("rav", include_str!("../../themes/rav.toml")),
-    ("winamp", include_str!("../../themes/winamp.toml")),
-    ("terminal", include_str!("../../themes/terminal.toml")),
-    ("mono", include_str!("../../themes/mono.toml")),
+    (
+        "rav",
+        include_str!("../../crates/rav-appearance/themes/rav.toml"),
+    ),
+    (
+        "winamp",
+        include_str!("../../crates/rav-appearance/themes/winamp.toml"),
+    ),
+    (
+        "terminal",
+        include_str!("../../crates/rav-appearance/themes/terminal.toml"),
+    ),
+    (
+        "mono",
+        include_str!("../../crates/rav-appearance/themes/mono.toml"),
+    ),
 ];
 
 /// A parsed theme: every colour the display needs, resolved and length-checked.
@@ -586,7 +598,7 @@ mod tests {
 
     #[test]
     fn a_theme_loads_from_a_path() {
-        let from_disk = Theme::load("themes/winamp.toml").expect("by path");
+        let from_disk = Theme::load("crates/rav-appearance/themes/winamp.toml").expect("by path");
         let built_in = Theme::built_in("winamp").unwrap().unwrap();
         assert_eq!(from_disk, built_in, "the compiled-in copy has drifted");
     }
