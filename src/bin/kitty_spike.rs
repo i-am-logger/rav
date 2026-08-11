@@ -753,11 +753,18 @@ fn diagnose() -> std::process::ExitCode {
 
 // ── the occlusion question ──────────────────────────────────────────────────
 
-/// Whether text drawn over an image at `z=-1` hides it.
+/// Whether a cell written over an image hides it.
 ///
-/// This is the one that can invalidate the design. rav wants bars as pixels with
-/// the status line and help overlay still real text on top. That works only if a
-/// cell whose background is the terminal default leaves the image visible.
+/// The check that decides how the pixel surface draws. rav wants bars as pixels
+/// with the status line and help overlay still real text on top, which needs a
+/// cell at the terminal's default background to leave the image showing.
+///
+/// Measured in WezTerm, it does not: a row of nothing but spaces blanks the
+/// image, and `z=1`, `z=0` and `z=-1` all give the same picture. A row with an
+/// explicit background comes back in *that* colour rather than black, so cell
+/// backgrounds are painted over the image rather than the image being dropped.
+/// The consequence is that the surface must write only the cells it actually
+/// wants text in - anything that paints the whole grid erases the frame.
 fn occlusion_check() -> std::process::ExitCode {
     // A solid slab, not the bar pattern. Bars leave most of the frame
     // transparent, so a hidden region and a region that simply had no bar in it
@@ -875,8 +882,9 @@ fn occlusion_check() -> std::process::ExitCode {
     println!("The image covers rows 3 to 10. Rows 3, 5, 9 and 10 carry nothing and");
     println!("must be green in every phase - if they are not, the image did not");
     println!("arrive and nothing else on the screen means anything.\n");
-    println!("Phase 1 (z=1) should hide the text under the image. If it does not,");
-    println!("this terminal ignores z and the remaining phases prove nothing.\n");
+    println!("If all three phases look alike, the terminal gives a written cell");
+    println!("precedence over the image whatever z says. That is an answer, not a");
+    println!("failed run - it means z cannot be used to buy transparency.\n");
     println!("Then, in phase 3, read the three written rows together:");
     println!("  row 8, explicit red   -> red means cell backgrounds paint over the");
     println!("                           image. Black would mean the image is gone.");
