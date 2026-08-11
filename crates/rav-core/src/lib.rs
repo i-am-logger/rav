@@ -38,6 +38,7 @@ extern crate std;
 
 pub mod math;
 
+pub mod ballistics;
 pub mod capability;
 pub mod geometry;
 pub mod units;

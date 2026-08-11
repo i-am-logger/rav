@@ -40,6 +40,7 @@ extern crate std;
 pub mod ink;
 mod names;
 pub mod palette;
+pub mod preset;
 pub mod ramp;
 pub mod scene;
 pub mod skin;
@@ -47,6 +48,7 @@ pub mod theme;
 
 pub use ink::{ANSI_NAMES, Colour, DEFAULT_ANSI, Ink};
 pub use palette::Palette;
+pub use preset::Preset;
 pub use ramp::{Ramp, Stripe};
 pub use scene::{Band, CapStyle, Scene, Style, StyleId};
 pub use skin::{Shapes, Skin};
