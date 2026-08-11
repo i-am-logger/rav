@@ -8,6 +8,7 @@
 
 pub mod frame;
 pub mod kitty;
+pub mod overlay;
 pub mod pixels;
 
 use crate::render::Capabilities;
