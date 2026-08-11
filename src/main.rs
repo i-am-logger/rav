@@ -32,7 +32,7 @@ struct Args {
     #[arg(long)]
     test_audio: bool,
 
-    /// Enable clean mode (minimal logging for better TUI)
+    /// Log almost nothing. `RUST_LOG` still wins if it is set
     #[arg(long)]
     clean: bool,
 
@@ -213,9 +213,9 @@ async fn rav_main() -> Result<()> {
                 tap.sample_rate(),
                 tap.channels()
             );
-            // The cpal stream is already running, and its channel is unbounded.
-            // Leaving it feeding a receiver the app will never drain again grows
-            // the queue by ~350 KB/s until the process is killed.
+            // Nothing drains the cpal stream once the tap takes over. Its queue
+            // is bounded and drops its oldest block, so this frees a capture
+            // device and a callback rather than memory.
             audio_capture.stop();
             app.use_tap(tap);
         }

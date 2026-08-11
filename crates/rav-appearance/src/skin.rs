@@ -25,6 +25,14 @@
 //! partial *brightness* and `steps` is how many levels of it are worth asking
 //! for. That is the same number, read differently - which is the whole reason
 //! the core deals in counts.
+//!
+//! # Not yet read
+//!
+//! Every preset names a skin and nothing looks at one, and none carries
+//! artwork. The terminal draws from `BarStyle`, which names its glyphs
+//! directly; a [`Skin`] carries only the step count and leaves the glyphs to
+//! the surface. That difference is what would let one setting dress a glyph
+//! grid, a pixel surface and an LED strip at once.
 
 /// How a skin covers a partial rung.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

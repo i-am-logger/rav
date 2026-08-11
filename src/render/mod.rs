@@ -4,9 +4,12 @@
 //! same geometry has to serve a terminal that draws glyphs, a terminal that
 //! carries pixels, and a window - see issue #65.
 //!
-//! Geometry and capability come from `rav-core`, which is `no_std` and needs no
-//! allocator. What stays here is the part that cannot: the colour model, and the
-//! rasteriser that owns a `tiny-skia` pixmap.
+//! Geometry and capability come from `rav-core`, colour and scenes from
+//! `rav-appearance`, both `no_std`. Only [`raster`] is defined here, because it
+//! owns a `tiny-skia` pixmap and a pixmap needs an allocator.
+//!
+//! The re-exports below let a surface reach a scene, a ramp and a rectangle
+//! from one place.
 
 pub use rav_appearance::{ink, ramp, scene};
 pub use rav_core::{capability, geometry};

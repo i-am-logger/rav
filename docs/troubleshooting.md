@@ -36,15 +36,18 @@ as an uneven 2/1 cadence.
 
 ## Bars stay flat with no warning
 
-rav is capturing a device with no signal on it. The log settles it in one line —
-rav reports the level of the first audio that arrives:
+rav is capturing a device with no signal on it. `rav.log`, beside wherever you
+started rav, settles it in one line — rav reports the level of the first audio
+that arrives:
 
 ```
-Capture delivering audio (peak 0.500)
+Capture delivering audio (peak 0.500)        # a capture device
+Process tap delivering audio (peak 0.500)    # macOS, capturing system output
 ```
 
-No such line at all means nothing is arriving; a peak near zero means the source
-is silent rather than absent.
+Which of the two depends on where the sound is coming from, and the line above
+it says which rav chose. Neither line at all means nothing is arriving; a peak
+near zero means the source is silent rather than absent.
 
 `rav --list-devices` shows what rav can see and `rav -d "<name>"` selects one.
 On Linux that list is ALSA PCMs only — a PipeWire/PulseAudio `.monitor` source

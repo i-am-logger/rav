@@ -33,12 +33,17 @@ pub struct Spec {
 }
 
 impl Spec {
-    /// How far a bar falls in one second.
+    /// The dial reading per second rather than per frame.
+    ///
+    /// For comparing presets and reference rates, not for placing a bar. The
+    /// conversion to a fraction of full scale needs two constants held by the
+    /// integrator, so this reads 240 times the distance covered: 720 at the
+    /// shipped preset, where a bar falls three full scales a second.
     pub fn bar_fall_per_second(&self) -> f32 {
         self.bar_fall * self.reference_fps
     }
 
-    /// How far a cap falls in one second.
+    /// The cap's fall in the same units, and with the same caveat.
     pub fn peak_fall_per_second(&self) -> f32 {
         self.bar_fall * self.peak_fall * self.reference_fps
     }

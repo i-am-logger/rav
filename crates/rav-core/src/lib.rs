@@ -23,12 +23,16 @@
 //!
 //! No allocator, so nothing returns a `Vec`; geometry hands back one rectangle
 //! at a time and iterators do the rest. No clock, so anything with memory takes
-//! an [`Elapsed`] and the caller keeps the clock. No floating-point maths beyond
-//! what `core` provides - [`Curve`]'s logarithm and power forms are the one
-//! exception, and they say so.
+//! an [`Elapsed`] and the caller keeps the clock.
+//!
+//! And one dependency, which is the honest cost rather than a convenience.
+//! `f32::floor`, `round`, `ceil`, `log10` and `powf` are `std` methods and not
+//! `core` ones, however ordinary they look - rounding a level onto a step needs
+//! one, and so does fitting bars across a screen. [`math`] gathers them behind
+//! `libm` so the call sites still read as arithmetic and the dependency is
+//! visible in one place.
 //!
 //! [`Elapsed`]: units::Elapsed
-//! [`Curve`]: units::Curve
 
 #![no_std]
 

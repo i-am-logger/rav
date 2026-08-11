@@ -4,10 +4,16 @@
 //! retained scene graph: a glyph renderer has to quantise to cells with its own
 //! rules - the fill-versus-glyph backdrop, cap lifting, partial blocks - and
 //! quantising a shared list of rectangles back into cells cannot reproduce them.
-//! Every surface takes the same scene and each is free to be itself.
+//! A surface takes the scene and is then free to be itself.
 //!
 //! Nothing here can draw. A scene that knew how to rasterise itself would be a
 //! scene only a rasteriser could consume, and the LED matrix has none.
+//!
+//! # Taken by one thing
+//!
+//! The `tiny-skia` rasteriser, and only from the graphics spike so far. The
+//! glyph renderer takes levels and colours directly and quantises them itself,
+//! so this is the seam for one consumer until a second is built on it.
 
 use crate::ink::Colour;
 use crate::ramp::Ramp;
@@ -65,11 +71,10 @@ impl Band {
 
 /// Everything a surface needs to draw one frame.
 ///
-/// The seam between the analyser and whatever is drawing. Deliberately not a
-/// retained scene graph: the glyph renderer has to quantise to cells with its
-/// own rules - the fill-versus-glyph backdrop, cap lifting, partial blocks - and
-/// quantising a shared list of rectangles back into cells cannot reproduce them.
-/// Every surface takes the same scene and each is free to be itself.
+/// Borrowed throughout, and built fresh each frame rather than kept: a scene is
+/// what the analyser currently reads, so holding one across frames would be
+/// holding a picture of the past. See the module note for why it is a flat list
+/// rather than a graph, and for which surfaces take it.
 pub struct Scene<'a> {
     pub bands: &'a [Band],
     pub layout: BarLayout,
