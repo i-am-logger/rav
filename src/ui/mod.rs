@@ -235,6 +235,19 @@ impl App {
         let window = vec![0.0; spectrum.size()];
         let bar_map = BarMap::new(1, spectrum.bins(), DEFAULT_SCALE);
 
+        // Everything about how rav looks and feels on startup comes from one
+        // place. Four constants scattered through this constructor is how they
+        // drift from the preset that claims to describe them - and how a
+        // "default" ends up meaning something different in two files.
+        let preset = rav_appearance::preset::RAV;
+        // The dial starts where the preset sits, so cycling `f` moves from what
+        // rav actually opened with rather than from a hardcoded index that
+        // happens to agree today.
+        let bar_fall_index = BAR_FALL_SPEEDS
+            .iter()
+            .position(|&speed| speed == preset.ballistics.bar_fall)
+            .unwrap_or(0);
+
         Ok(Self {
             config,
             terminal,
@@ -242,16 +255,18 @@ impl App {
             channels: channels.max(1) as usize,
             spectrum,
             bar_map,
-            ballistics: Ballistics::new(0),
+            ballistics: Ballistics::new(0)
+                .with_speeds(preset.ballistics.bar_fall, preset.ballistics.peak_fall)
+                .with_reference_fps(preset.ballistics.reference_fps),
             bandwidth: Bandwidth::Wide,
-            bar_fall_index: 2, // 12.0, the original default
+            bar_fall_index,
             limit_index: DEFAULT_LIMIT_INDEX,
             sample_rate,
             gain_db: 0.0,
-            curve: rav_appearance::preset::RAV.curve,
+            curve: preset.curve,
             sampled: Vec::new(),
             bands: Vec::new(),
-            theme: Theme::default(),
+            theme: Theme::from(preset.theme),
             loaded_theme: None,
             row_colors: Vec::new(),
             grid_colors: Vec::new(),
@@ -893,6 +908,22 @@ mod tests {
 
     fn app() -> App {
         App::new(Config::default(), 2, 48_000).expect("app should build")
+    }
+
+    #[test]
+    fn everything_rav_opens_with_comes_from_the_preset() {
+        // Four constants scattered through the constructor is how a "default"
+        // ends up meaning one thing in the preset and another in the app. Each
+        // of these is asserted against the preset rather than a literal, so
+        // editing the preset moves rav and editing rav alone cannot.
+        let a = app();
+        let preset = rav_appearance::preset::RAV;
+        assert_eq!(a.theme.name, preset.theme.name, "colours");
+        assert_eq!(a.curve, preset.curve, "response");
+        assert_eq!(
+            BAR_FALL_SPEEDS[a.bar_fall_index], preset.ballistics.bar_fall,
+            "the fall dial starts where the preset sits"
+        );
     }
 
     #[test]
