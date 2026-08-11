@@ -206,6 +206,8 @@ pub struct App {
     /// What the overlay wrote over the last pixel frame, so the cells can be
     /// taken back when it changes.
     painted_cells: String,
+    /// Whether there is a picture on the screen to take down.
+    painting: bool,
 
     /// Which surface rav would draw on, and why.
     ///
@@ -290,6 +292,7 @@ impl App {
             sized_for: (0, 0),
             painter: crate::surface::pixels::Pixels::new(),
             painted_cells: String::new(),
+            painting: false,
             surface: Chosen::UNASKED,
             visualisation: Visualisation::default(),
             scope_style: ScopeStyle::default(),
@@ -377,6 +380,13 @@ impl App {
         use rav_core::geometry::Screen;
         use rav_core::units::{CellSize, Cells, Length};
 
+        // Only the analyser is drawn as pixels. The oscilloscope is still block
+        // characters, so `space` has to hand the screen back rather than leave
+        // the bars sitting there looking like a key that does nothing.
+        if self.visualisation != Visualisation::Analyzer {
+            return self.stop_painting(out).map(|()| false);
+        }
+
         let screen = Screen::new(
             Length(f32::from(size.width)),
             Length(f32::from(size.height)),
@@ -452,7 +462,24 @@ impl App {
         )?;
         out.write_all(cells.as_bytes())?;
         out.flush()?;
+        self.painting = true;
         Ok(true)
+    }
+
+    /// Take the picture down, for whenever the glyph renderer takes over.
+    ///
+    /// An image left up shows through wherever the grid leaves a cell empty,
+    /// which is most of a quiet display. Doing nothing when there was no
+    /// picture, so this costs a frame's worth of nothing on every terminal that
+    /// never had one.
+    fn stop_painting(&mut self, out: &mut impl Write) -> Result<()> {
+        if self.painting {
+            crate::surface::pixels::clear(out)?;
+            self.painter.tidy(crate::surface::pixels::staging());
+            self.painted_cells.clear();
+            self.painting = false;
+        }
+        Ok(())
     }
 
     /// Append a capture buffer to the rolling window, de-interleaving to mono.
@@ -1527,6 +1554,37 @@ mod tests {
             !String::from_utf8_lossy(&steady).contains("\x1b[2J"),
             "it cleared a screen nothing had changed on",
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn switching_to_the_oscilloscope_hands_the_screen_back() {
+        // Only the analyser is drawn as pixels. Without this, `space` would look
+        // like a key that does nothing: the bars would sit there while the scope
+        // was supposedly showing, and the image would show through wherever the
+        // glyph grid left a cell empty.
+        let mut a = app();
+        a.resize(80, 24);
+        let dir = scratch("scope");
+
+        let mut bars = Vec::new();
+        assert!(a.painted(&mut bars, window(), &dir, None, None).unwrap());
+
+        a.apply(Action::CycleVisualisation);
+        let mut scope = Vec::new();
+        assert!(
+            !a.painted(&mut scope, window(), &dir, None, None).unwrap(),
+            "it drew the analyser while the scope was showing",
+        );
+        assert!(
+            String::from_utf8_lossy(&scope).contains("a=d,d=A"),
+            "the picture was left up under the scope",
+        );
+
+        // And back again, without taking the screen down twice.
+        a.apply(Action::CycleVisualisation);
+        let mut again = Vec::new();
+        assert!(a.painted(&mut again, window(), &dir, None, None).unwrap());
         std::fs::remove_dir_all(&dir).ok();
     }
 
