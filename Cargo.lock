@@ -1148,7 +1148,7 @@ dependencies = [
 
 [[package]]
 name = "rav"
-version = "1.0.0-beta.6"
+version = "1.0.0-beta.7"
 dependencies = [
  "anyhow",
  "clap",
@@ -1175,7 +1175,7 @@ dependencies = [
 
 [[package]]
 name = "rav-appearance"
-version = "1.0.0-beta.6"
+version = "1.0.0-beta.7"
 dependencies = [
  "rav-core",
  "toml",
@@ -1183,7 +1183,7 @@ dependencies = [
 
 [[package]]
 name = "rav-core"
-version = "1.0.0-beta.6"
+version = "1.0.0-beta.7"
 dependencies = [
  "libm",
 ]
