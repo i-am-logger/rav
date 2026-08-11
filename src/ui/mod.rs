@@ -85,17 +85,17 @@ pub fn to_color(ink: Ink) -> Color {
 /// Which visualisation is on screen. The original showed one at a time, full area,
 /// switched by clicking the panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum View {
+pub enum Visualisation {
     #[default]
     Analyzer,
     Oscilloscope,
 }
 
-impl View {
+impl Visualisation {
     fn next(self) -> Self {
         match self {
-            View::Analyzer => View::Oscilloscope,
-            View::Oscilloscope => View::Analyzer,
+            Visualisation::Analyzer => Visualisation::Oscilloscope,
+            Visualisation::Oscilloscope => Visualisation::Analyzer,
         }
     }
 }
@@ -106,7 +106,7 @@ impl View {
 pub enum Action {
     None,
     Quit,
-    ToggleView,
+    CycleVisualisation,
     TogglePeaks,
     ToggleGrid,
     CycleBandwidth,
@@ -126,7 +126,7 @@ pub fn map_key(code: KeyCode) -> Action {
     match code {
         KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => Action::Quit,
         KeyCode::Char(' ') | KeyCode::Char('o') | KeyCode::Char('O') | KeyCode::Tab => {
-            Action::ToggleView
+            Action::CycleVisualisation
         }
         KeyCode::Char('p') | KeyCode::Char('P') => Action::TogglePeaks,
         KeyCode::Char('g') | KeyCode::Char('G') => Action::ToggleGrid,
@@ -190,7 +190,7 @@ pub struct App {
     /// Size the cached mapping and colours were built for.
     sized_for: (u16, u16),
 
-    view: View,
+    visualisation: Visualisation,
     scope_style: ScopeStyle,
     peaks: Peaks,
     show_grid: bool,
@@ -248,7 +248,7 @@ impl App {
             palette: Palette::default(),
             layout: BarLayout::default(),
             sized_for: (0, 0),
-            view: View::default(),
+            visualisation: Visualisation::default(),
             scope_style: ScopeStyle::default(),
             peaks: Peaks::default(),
             show_grid: true,
@@ -376,11 +376,11 @@ impl App {
     fn apply(&mut self, action: Action) {
         match action {
             Action::Quit => self.should_quit = true,
-            Action::ToggleView => {
-                self.view = self.view.next();
-                self.note(match self.view {
-                    View::Analyzer => "analyser".to_string(),
-                    View::Oscilloscope => "oscilloscope".to_string(),
+            Action::CycleVisualisation => {
+                self.visualisation = self.visualisation.next();
+                self.note(match self.visualisation {
+                    Visualisation::Analyzer => "analyser".to_string(),
+                    Visualisation::Oscilloscope => "oscilloscope".to_string(),
                 });
             }
             Action::TogglePeaks => {
@@ -480,9 +480,9 @@ impl App {
             Some(hz) => format!("up to {} kHz", hz / 1000),
             None => "full range".to_string(),
         };
-        let view = match self.view {
-            View::Analyzer => "analyser",
-            View::Oscilloscope => "oscilloscope",
+        let showing = match self.visualisation {
+            Visualisation::Analyzer => "analyser",
+            Visualisation::Oscilloscope => "oscilloscope",
         };
         let bandwidth = match self.bandwidth {
             Bandwidth::Wide => "wide",
@@ -491,8 +491,8 @@ impl App {
         vec![
             HelpRow {
                 key: "space",
-                description: "switch view",
-                value: Some(view.to_string()),
+                description: "switch visualisation",
+                value: Some(showing.to_string()),
             },
             HelpRow {
                 key: "r",
@@ -771,7 +771,7 @@ impl App {
                 theme,
                 layout,
                 window,
-                view,
+                visualisation,
                 scope_style,
                 peaks,
                 show_grid,
@@ -781,8 +781,8 @@ impl App {
             let cap_color = theme.peak;
             let grid = show_grid.then_some(grid_colors.as_slice());
             terminal.draw(|f| {
-                match view {
-                    View::Analyzer => f.render_widget(
+                match visualisation {
+                    Visualisation::Analyzer => f.render_widget(
                         Analyzer {
                             bars: ballistics.bars(),
                             peaks: ballistics.peaks(),
@@ -795,7 +795,7 @@ impl App {
                         },
                         f.area(),
                     ),
-                    View::Oscilloscope => f.render_widget(
+                    Visualisation::Oscilloscope => f.render_widget(
                         Scope {
                             samples: window,
                             theme,
@@ -1039,17 +1039,25 @@ mod tests {
     #[test]
     fn the_view_toggles_between_analyser_and_scope() {
         let mut a = app();
-        assert_eq!(a.view, View::Analyzer, "analyser is the default");
-        a.apply(Action::ToggleView);
-        assert_eq!(a.view, View::Oscilloscope);
-        a.apply(Action::ToggleView);
-        assert_eq!(a.view, View::Analyzer, "toggling twice returns");
+        assert_eq!(
+            a.visualisation,
+            Visualisation::Analyzer,
+            "analyser is the default"
+        );
+        a.apply(Action::CycleVisualisation);
+        assert_eq!(a.visualisation, Visualisation::Oscilloscope);
+        a.apply(Action::CycleVisualisation);
+        assert_eq!(
+            a.visualisation,
+            Visualisation::Analyzer,
+            "toggling twice returns"
+        );
     }
 
     #[test]
     fn tab_and_o_both_switch_view() {
-        assert_eq!(map_key(KeyCode::Tab), Action::ToggleView);
-        assert_eq!(map_key(KeyCode::Char('o')), Action::ToggleView);
+        assert_eq!(map_key(KeyCode::Tab), Action::CycleVisualisation);
+        assert_eq!(map_key(KeyCode::Char('o')), Action::CycleVisualisation);
     }
 
     #[test]
@@ -1091,7 +1099,7 @@ mod tests {
         assert_eq!(value_for(&a, "r"), Some("up to 20 kHz".to_string()));
 
         assert_eq!(value_for(&a, "space"), Some("analyser".to_string()));
-        a.apply(Action::ToggleView);
+        a.apply(Action::CycleVisualisation);
         assert_eq!(value_for(&a, "space"), Some("oscilloscope".to_string()));
 
         a.apply(Action::ToggleHelp);
