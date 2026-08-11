@@ -183,6 +183,7 @@ impl BarLayout {
         Column {
             left: (self.width + self.gap) * index as f32,
             width: self.width,
+            anchor: Anchor::default(),
         }
     }
 
@@ -192,12 +193,34 @@ impl BarLayout {
     }
 }
 
+/// Which edge a bar grows from.
+///
+/// One knob, and the classic arrangements fall out of it: a stereo pair with the
+/// left channel on `Floor` and the right on `Ceiling` is the mirrored look on a
+/// car dashboard or a speaker grille, and `Middle` is the symmetric butterfly
+/// that reads fastest at a glance because the eye catches a symmetric shape
+/// sooner than a one-sided one.
+///
+/// Stacked and interleaved arrangements need nothing here: stacked is two
+/// panels, and interleaved is which column a band is given.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Anchor {
+    /// Grows upward from the bottom. What a spectrum analyser has always done.
+    #[default]
+    Floor,
+    /// Grows downward from the top - the other half of a mirrored pair.
+    Ceiling,
+    /// Grows both ways from the centre line, half in each direction.
+    Middle,
+}
+
 /// The vertical slot one frequency band occupies, and the rules for placing
 /// things in it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Column {
     left: Length,
     width: Length,
+    anchor: Anchor,
 }
 
 impl Column {
@@ -209,28 +232,55 @@ impl Column {
         self.width
     }
 
+    pub fn anchor(&self) -> Anchor {
+        self.anchor
+    }
+
+    /// The same slot, growing from a different edge.
+    pub fn anchored(self, anchor: Anchor) -> Self {
+        Self { anchor, ..self }
+    }
+
     /// The lit part of the bar.
     ///
     /// A silent band gives a rectangle of no height rather than nothing at all,
     /// so a caller can rely on one per band and index them alongside colours.
     pub fn bar(&self, level: Level, screen: &Screen) -> Rectangle {
         let risen = screen.risen_to(level);
-        // Bars grow upward from the floor, so it is the top edge that moves.
-        Rectangle::new(self.left, screen.height() - risen, self.width, risen)
+        let top = match self.anchor {
+            // Growing upward from the floor, so it is the top edge that moves.
+            Anchor::Floor => screen.height() - risen,
+            // Growing downward, so the top edge is fixed and the bottom moves.
+            Anchor::Ceiling => Length::NONE,
+            // Half each way from the centre line, so both edges move together.
+            Anchor::Middle => (screen.height() - risen) / 2.0,
+        };
+        Rectangle::new(self.left, top, self.width, risen)
     }
 
     /// The peak cap.
     ///
-    /// Drawn *above* the level it marks, so it never covers the bar it belongs
-    /// to, and held inside the screen at both ends: at full scale it would
-    /// otherwise sit half off the top, and at rest half below the floor.
+    /// Drawn just *beyond* the level it marks, so it never covers the bar it
+    /// belongs to, and held inside the screen at both ends: at full scale it
+    /// would otherwise sit half off the far edge, and at rest half outside the
+    /// near one.
+    ///
+    /// "Beyond" follows the anchor - above a bar growing up, below one growing
+    /// down. A `Middle` bar grows both ways and this marks its upper extent; a
+    /// surface wanting both mirrors it, rather than this returning two things
+    /// most callers would throw one of away.
     pub fn cap(&self, peak: Level, thickness: Length, screen: &Screen) -> Rectangle {
         let thickness = thickness.held_between(Length(1.0), screen.height().largest(Length(1.0)));
         // A screen shorter than the cap leaves nowhere to put it; `held_between`
         // collapses rather than panicking as `f32::clamp` would.
-        let lowest = (screen.height() - thickness).or_none();
-        let top = (screen.height() - screen.risen_to(peak) - thickness)
-            .held_between(Length::NONE, lowest);
+        let furthest = (screen.height() - thickness).or_none();
+        let risen = screen.risen_to(peak);
+        let top = match self.anchor {
+            Anchor::Floor => screen.height() - risen - thickness,
+            Anchor::Ceiling => risen,
+            Anchor::Middle => (screen.height() - risen) / 2.0 - thickness,
+        }
+        .held_between(Length::NONE, furthest);
         Rectangle::new(self.left, top, self.width, thickness)
     }
 
@@ -368,6 +418,123 @@ mod tests {
         );
         assert_eq!(backdrop.height(), Length(60.0), "still the whole column");
         assert_eq!(backdrop.top(), Length::NONE);
+    }
+
+    #[test]
+    fn an_anchor_moves_a_bar_without_resizing_it() {
+        // The property every arrangement rests on: how tall a bar is says how
+        // loud the band is, and that must not change with which edge it grows
+        // from. Otherwise a mirrored pair would read as two different loudnesses
+        // for one signal.
+        let screen = screen(100.0, 60.0);
+        let column = first(3.0, 1.0);
+        for value in [0.0f32, 0.25, 0.5, 0.75, 1.0] {
+            let level = Level::new(value);
+            let floor = column.bar(level, &screen);
+            for anchor in [Anchor::Ceiling, Anchor::Middle] {
+                let moved = column.anchored(anchor).bar(level, &screen);
+                assert_eq!(
+                    moved.height(),
+                    floor.height(),
+                    "level {value} changed height under {anchor:?}"
+                );
+                assert_eq!(moved.left(), floor.left(), "and must not move sideways");
+            }
+        }
+    }
+
+    #[test]
+    fn a_mirrored_pair_grows_away_from_each_other() {
+        // The car-dashboard and speaker-grille look: left on the floor, right on
+        // the ceiling. They must meet only when both are at full scale.
+        let screen = screen(100.0, 60.0);
+        let column = first(3.0, 1.0);
+        let level = Level::new(0.25);
+        let up = column.bar(level, &screen);
+        let down = column.anchored(Anchor::Ceiling).bar(level, &screen);
+
+        assert_eq!(
+            up.bottom(),
+            Length(60.0),
+            "the upward bar stands on the floor"
+        );
+        assert_eq!(
+            down.top(),
+            Length::NONE,
+            "the downward bar hangs from the top"
+        );
+        assert!(
+            down.sits_above(&up),
+            "at a quarter scale they must not touch"
+        );
+
+        // At full scale each fills the screen, so they coincide rather than
+        // overflowing it - the only case where they meet.
+        let full_up = column.bar(Level::FULL, &screen);
+        let full_down = column.anchored(Anchor::Ceiling).bar(Level::FULL, &screen);
+        assert_eq!(full_up, full_down);
+        assert_eq!(full_up.height(), Length(60.0));
+    }
+
+    #[test]
+    fn a_middle_anchored_bar_is_symmetric_about_the_centre_line() {
+        // The butterfly look. Equal margins above and below at every level, so
+        // the shape stays centred as it grows.
+        let screen = screen(100.0, 60.0);
+        let column = first(3.0, 1.0).anchored(Anchor::Middle);
+        for value in [0.0f32, 0.3, 0.5, 0.8, 1.0] {
+            let bar = column.bar(Level::new(value), &screen);
+            let above = bar.top();
+            let below = Length(60.0) - bar.bottom();
+            assert!(
+                (above.get() - below.get()).abs() < 1e-4,
+                "level {value}: {above:?} above but {below:?} below"
+            );
+        }
+    }
+
+    #[test]
+    fn a_cap_marks_the_edge_its_bar_grows_towards() {
+        // A cap that stayed at the top of a downward bar would mark where the
+        // signal is not.
+        let screen = screen(100.0, 60.0);
+        let column = first(3.0, 1.0);
+        let level = Level::new(0.5);
+
+        let up = column.anchored(Anchor::Floor);
+        assert!(
+            up.cap(level, Length(2.0), &screen)
+                .sits_above(&up.bar(level, &screen)),
+            "an upward bar wears its cap above"
+        );
+
+        let down = column.anchored(Anchor::Ceiling);
+        assert!(
+            down.bar(level, &screen)
+                .sits_above(&down.cap(level, Length(2.0), &screen)),
+            "a downward bar wears its cap below"
+        );
+    }
+
+    #[test]
+    fn every_anchor_stays_inside_the_screen_at_both_ends() {
+        let screen = screen(100.0, 60.0);
+        for anchor in [Anchor::Floor, Anchor::Ceiling, Anchor::Middle] {
+            let column = first(3.0, 1.0).anchored(anchor);
+            for value in [0.0f32, 0.5, 1.0] {
+                let level = Level::new(value);
+                let bar = column.bar(level, &screen);
+                assert!(
+                    bar.top() >= Length::NONE && bar.bottom() <= Length(60.0),
+                    "{anchor:?}"
+                );
+                let cap = column.cap(level, Length(3.0), &screen);
+                assert!(
+                    cap.top() >= Length::NONE && cap.bottom() <= Length(60.0),
+                    "{anchor:?}"
+                );
+            }
+        }
     }
 
     #[test]
