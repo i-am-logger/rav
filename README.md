@@ -97,9 +97,15 @@ The ballistics, and the ramp the `rav` and `winamp` themes use, come from
 
 ## What's next
 
-Pixels instead of block glyphs, a GUI, and small displays. The mechanics and the
-themes live in two `no_std` crates that know nothing about terminals — so the
-same bars, in the same colours, can be drawn to a window or to a strip of LEDs.
+**Pixels instead of block characters.** A terminal cell holds one character and
+one background, so today a peak cap erases the grid it crosses and the bar ladder
+is uneven at most font sizes. Drawing the pixels fixes both, and lets `+`/`-`
+resize the bars without touching your terminal font.
+
+**Then a window of its own, and small displays** — the same bars and the same
+colours on a strip of LEDs in a speaker cabinet, or a matrix behind a car
+dashboard. What rav measures is already kept apart from what it looks like, so a
+theme written for the terminal dresses those too.
 
 ## License
 
