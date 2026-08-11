@@ -33,20 +33,12 @@ pub struct Spec {
 }
 
 impl Spec {
-    /// The bar-fall dial read per second instead of per frame.
+    /// The dial reading per second rather than per frame.
     ///
-    /// **A speed for comparing presets, not a distance.** It is
-    /// [`bar_fall`](Self::bar_fall) - the number on the dial, in the units the
-    /// original counted in - multiplied out to a second. Turning it into a
-    /// fraction of full scale takes two more constants that belong with the
-    /// integrator rather than here, so this is 240 times the distance a bar
-    /// actually covers: at the shipped preset it reads 720 where a bar falls
-    /// three full scales a second.
-    ///
-    /// Useful for what it is used for - one preset against another, and one
-    /// reading of the reference rate against another - and wrong for anything
-    /// that wants to know where a bar will be. The integrator answers that, and
-    /// `bar_fall_matches_the_original_rate` pins it at a third of a second.
+    /// For comparing presets and reference rates, not for placing a bar. The
+    /// conversion to a fraction of full scale needs two constants held by the
+    /// integrator, so this reads 240 times the distance covered: 720 at the
+    /// shipped preset, where a bar falls three full scales a second.
     pub fn bar_fall_per_second(&self) -> f32 {
         self.bar_fall * self.reference_fps
     }

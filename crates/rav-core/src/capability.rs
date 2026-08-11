@@ -16,18 +16,12 @@
 //! its own, smaller [`Capabilities`], so a visualisation that fits alone may not
 //! fit beside another - which is the honest answer rather than a special case.
 //!
-//! # Nothing consults this yet
+//! # Not yet consulted
 //!
-//! `space` cycles the analyser and the oscilloscope without asking either of
-//! them anything, and no surface is refused a visualisation. This module is the
-//! rule written down and tested, not the rule being applied - and on a terminal
-//! the difference is invisible, because a terminal always has columns enough
-//! for both.
-//!
-//! It becomes load-bearing on the first surface that cannot show everything: a
-//! four-light bar, where offering an oscilloscope means offering a waveform with
-//! nowhere to put time. Until then this describes what should happen rather than
-//! what does.
+//! Nothing calls this. `space` cycles both visualisations unconditionally, and
+//! no surface is refused one. A terminal always has columns enough for both, so
+//! the check first matters on a display that does not - a four-light bar, where
+//! an oscilloscope has nowhere to put its time axis.
 
 use crate::units::Cells;
 

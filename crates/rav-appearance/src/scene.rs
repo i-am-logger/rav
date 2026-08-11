@@ -9,12 +9,11 @@
 //! Nothing here can draw. A scene that knew how to rasterise itself would be a
 //! scene only a rasteriser could consume, and the LED matrix has none.
 //!
-//! # One surface takes it so far
+//! # Taken by one thing
 //!
-//! The pixel surface. The glyph renderer is handed levels and colours directly
-//! and quantises them itself, which is the freedom above being used rather than
-//! a gap - but it does mean this is the seam for one surface today and the
-//! shared seam only once a second one is built on it.
+//! The `tiny-skia` rasteriser, and only from the graphics spike so far. The
+//! glyph renderer takes levels and colours directly and quantises them itself,
+//! so this is the seam for one consumer until a second is built on it.
 
 use crate::ink::Colour;
 use crate::ramp::Ramp;

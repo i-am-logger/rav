@@ -4,15 +4,12 @@
 //! same geometry has to serve a terminal that draws glyphs, a terminal that
 //! carries pixels, and a window - see issue #65.
 //!
-//! Almost none of it lives here. Geometry and capability come from `rav-core`,
-//! colour and scenes from `rav-appearance`, and both are `no_std` - so a
-//! microcontroller gets the same ones. What is left is [`raster`], the one part
-//! that genuinely cannot go with them: it owns a `tiny-skia` pixmap, and a
-//! pixmap needs an allocator.
+//! Geometry and capability come from `rav-core`, colour and scenes from
+//! `rav-appearance`, both `no_std`. Only [`raster`] is defined here, because it
+//! owns a `tiny-skia` pixmap and a pixmap needs an allocator.
 //!
-//! The rest of this module is the re-exports directly below, so a surface can
-//! reach a scene, a ramp and a rectangle from one place without knowing which
-//! crate each came from.
+//! The re-exports below let a surface reach a scene, a ramp and a rectangle
+//! from one place.
 
 pub use rav_appearance::{ink, ramp, scene};
 pub use rav_core::{capability, geometry};
