@@ -557,8 +557,36 @@ mod tests {
     type Rungs = Bounded<4, 4096>;
 
     /// The amplitude of a signal `db` below full scale.
+    ///
+    /// Shares the 20 with [`Curve::Decibel`] on purpose - it is the same
+    /// definition - which is exactly why it cannot be the only thing checking
+    /// it. See `a_decibel_is_the_amplitude_kind_not_the_power_kind`.
     fn at_dbfs(db: f32) -> Level {
         Level::new(10f32.powf(db / 20.0))
+    }
+
+    #[test]
+    fn a_decibel_is_the_amplitude_kind_not_the_power_kind() {
+        // A level is an amplitude, so dBFS is 20*log10 of it. The power form,
+        // 10*log10, halves every figure: a four-light strip's boundaries would
+        // land at -6, -3 and -1.25 instead of the -12, -6 and -2.5 this type
+        // documents, and every strip preset would be tuned against a window
+        // twice the size it thought.
+        //
+        // Literal pairs on purpose. `at_dbfs` above shares the definition with
+        // the implementation, so the two agree whatever the coefficient says -
+        // change both together and nothing else notices.
+        let window = Curve::Decibel { floor: -12.0 };
+
+        // Full scale is 0 dBFS: the top of any window.
+        assert!((window.apply(Level::FULL).fraction() - 1.0).abs() < 1e-3);
+
+        // Half amplitude is -6.02 dBFS, which is halfway up a 12 dB window.
+        let half = window.apply(Level::new(0.5)).fraction();
+        assert!((half - 0.4983).abs() < 1e-3, "0.5 amplitude read {half}");
+
+        // A quarter is -12.04 dBFS, which is under the floor and draws nothing.
+        assert!(window.apply(Level::new(0.25)).fraction() < 0.01);
     }
 
     #[test]
