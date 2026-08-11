@@ -57,6 +57,9 @@ fn sweep_hz(turn: f32) -> f32 {
 /// needs to stop it.
 pub fn start(sample_rate: u32) -> Receiver<AudioData> {
     let (tx, rx) = flume::bounded(super::QUEUE_BLOCKS);
+    // A second handle on the same queue, for discarding the oldest block when it
+    // fills. The capture path takes one for the same reason.
+    let spill = rx.clone();
     let rate = sample_rate.max(1);
     let per_block = (rate / BLOCKS_PER_SECOND).max(1) as usize;
     let block_time = Duration::from_secs_f64(f64::from(per_block as u32) / f64::from(rate));
@@ -85,10 +88,22 @@ pub fn start(sample_rate: u32) -> Receiver<AudioData> {
                 elapsed += dt;
             }
 
-            if tx.send(AudioData { samples: block }).is_err() {
+            // Drop the oldest queued block to make room, exactly as the capture
+            // path does. Blocking here instead would stall the sweep whenever
+            // the display fell behind, so the signal would no longer be the
+            // steady real-time source it is meant to stand in for - and when the
+            // display caught up it would be fed stale audio.
+            match tx.try_send(AudioData { samples: block }) {
+                Ok(()) => {}
+                Err(flume::TrySendError::Full(block)) => {
+                    let _ = spill.try_recv();
+                    if tx.try_send(block).is_err() {
+                        return;
+                    }
+                }
                 // The app has gone. Nothing to clean up: the channel is the only
                 // thing this thread holds.
-                return;
+                Err(flume::TrySendError::Disconnected(_)) => return,
             }
 
             // A deadline rather than a sleep of one block, so the signal keeps
@@ -182,6 +197,53 @@ mod tests {
             loudest < bars.len() / 2,
             "the sweep starts in the upper half: bar {loudest} of {}",
             bars.len(),
+        );
+    }
+
+    #[test]
+    fn a_display_that_falls_behind_does_not_stall_the_signal() {
+        // The queue holds eight blocks. A blocking send would park the generator
+        // as soon as they filled, so the sweep would advance at whatever rate
+        // the display managed rather than in real time - and the display would
+        // then be fed audio from whenever it last kept up. The capture path
+        // drops its oldest block instead, and so does this.
+        // Long enough that the sweep has moved somewhere the two cases can be
+        // told apart. The queue holds 80ms of audio, so a shorter wait leaves
+        // "dropped the oldest" and "never got past the first eight" only a few
+        // hertz apart on a curve this slow.
+        let waited = Duration::from_millis(1200);
+        let rx = start(48_000);
+        std::thread::sleep(waited);
+
+        assert_eq!(
+            rx.len(),
+            super::super::QUEUE_BLOCKS,
+            "the queue is not full"
+        );
+
+        let mut window: Vec<f32> = Vec::new();
+        while window.len() < 1024 {
+            let block = rx.recv_timeout(Duration::from_secs(2)).expect("no block");
+            assert_eq!(block.samples.len(), 480);
+            window.extend_from_slice(&block.samples);
+        }
+        let crossings = window
+            .windows(2)
+            .filter(|pair| (pair[0] < 0.0) != (pair[1] < 0.0))
+            .count();
+        let hz = crossings as f32 / 2.0 * (48_000.0 / window.len() as f32);
+
+        // A blocked generator can only ever have queued its first `QUEUE_BLOCKS`
+        // blocks, so the newest audio it could hold is the sweep that far in -
+        // about 42Hz. Anything above that proves it kept going, however slowly
+        // the machine ran it, which is what keeps this from turning into a race
+        // against wall-clock pacing on a loaded builder.
+        let queue_holds = super::super::QUEUE_BLOCKS as f32 / BLOCKS_PER_SECOND as f32;
+        let stalled_ceiling = sweep_hz(queue_holds / SWEEP.as_secs_f32());
+        assert!(
+            hz > stalled_ceiling * 1.1,
+            "queued audio is {hz:.0}Hz - no higher than the {stalled_ceiling:.0}Hz \
+             a generator stuck on a full queue would be holding",
         );
     }
 
