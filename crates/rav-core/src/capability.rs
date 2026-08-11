@@ -7,13 +7,27 @@
 //! shrinking fixes it. A VU meter needs one column and two rungs and is happy.
 //!
 //! So a surface reports what it has, a visualisation states what it needs, and
-//! the ones that cannot say anything useful are never offered. That makes the
-//! small end a first-class target rather than a degraded one: on a four-light
-//! bar the answer is "this shows a VU meter", not "this shows a broken spectrum".
+//! the ones that cannot say anything useful should never be offered. That makes
+//! the small end a first-class target rather than a degraded one: on a
+//! four-light bar the answer is "this shows a VU meter", not "this shows a
+//! broken spectrum".
 //!
 //! Composition falls out of the same check. Splitting a screen gives each half
 //! its own, smaller [`Capabilities`], so a visualisation that fits alone may not
 //! fit beside another - which is the honest answer rather than a special case.
+//!
+//! # Nothing consults this yet
+//!
+//! `space` cycles the analyser and the oscilloscope without asking either of
+//! them anything, and no surface is refused a visualisation. This module is the
+//! rule written down and tested, not the rule being applied - and on a terminal
+//! the difference is invisible, because a terminal always has columns enough
+//! for both.
+//!
+//! It becomes load-bearing on the first surface that cannot show everything: a
+//! four-light bar, where offering an oscilloscope means offering a waveform with
+//! nowhere to put time. Until then this describes what should happen rather than
+//! what does.
 
 use crate::units::Cells;
 
