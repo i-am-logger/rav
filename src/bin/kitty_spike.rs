@@ -41,6 +41,10 @@ const PROBE_TIMEOUT: Duration = Duration::from_millis(120);
 /// Payload bytes per escape chunk. The protocol's own limit.
 const CHUNK: usize = 4096;
 
+/// Rows the occlusion image covers. Enough that a written row can be surrounded
+/// by clear ones on both sides.
+const ROWS_COVERED: u32 = 8;
+
 /// The image slot every frame is transmitted into.
 ///
 /// One id reused rather than a new one per frame: a fresh id per frame at 60fps
@@ -758,14 +762,20 @@ fn occlusion_check() -> std::process::ExitCode {
     // A solid slab, not the bar pattern. Bars leave most of the frame
     // transparent, so a hidden region and a region that simply had no bar in it
     // look identical - the picture cannot distinguish the two answers it is here
-    // to tell apart. Tall enough that the text lands in the middle of the image
-    // rather than along its edge, for the same reason.
-    let (w, h) = (900u32, 360u32);
+    // to tell apart.
+    //
+    // Sized in whole cells so every row below is either wholly inside the image
+    // or wholly outside it. Guessed dimensions put the bottom edge inside a row,
+    // and a row showing the terminal's background is then ambiguous between
+    // "occluded" and "past the end of the image".
+    let (cell_w, cell_h) = cell_pixels().unwrap_or((30, 60));
+    let (w, h) = (cell_w * 30, cell_h * ROWS_COVERED);
     let mut frame = vec![0u8; (w * h * 4) as usize];
     for (i, px) in frame.chunks_exact_mut(4).enumerate() {
-        // Banded rather than flat, so a partially drawn image is still obvious.
+        // One band per covered row, so which row is which can be counted off
+        // the screen instead of measured.
         let row = i as u32 / w;
-        let light = (row / 30).is_multiple_of(2);
+        let light = (row / cell_h).is_multiple_of(2);
         px[0] = if light { 0x20 } else { 0x10 };
         px[1] = if light { 0xd0 } else { 0xa0 };
         px[2] = if light { 0x40 } else { 0x30 };
@@ -782,11 +792,17 @@ fn occlusion_check() -> std::process::ExitCode {
     for (phase, z, blurb) in [
         (
             1,
-            0i32,
-            "ABOVE text (z=0) - proves the image arrives at all",
+            1i32,
+            "ABOVE text (z=1) - proves the image arrives, and that z works",
         ),
         (
             2,
+            0i32,
+            "z=0, the default - kitty puts only *positive* z above the text, so \
+             this is expected to sit below it",
+        ),
+        (
+            3,
             -1i32,
             "BELOW text (z=-1) - the question this is here to answer",
         ),
@@ -820,18 +836,28 @@ fn occlusion_check() -> std::process::ExitCode {
         );
         let _ = out.flush();
 
-        // Three rows inside the image, each answering a different question.
-        // Row 5 is the one that decides the design: ratatui writes
-        // default-styled cells, so if those hide the image the overlay plan is
-        // dead regardless of what the other two do. Row 9 is left clear as a
-        // control - the image must be visible there in both phases, or the
-        // reading of the other rows means nothing.
-        let _ = write!(out, "\x1b[5;3H default background - THE QUESTION ");
+        // Rows 3..=10 carry the image. Rows 3, 5, 9 and 10 are left clear, so
+        // the image's presence is never in doubt while reading the rest.
+        //
+        // Row 4 decides the design - ratatui writes default-styled cells, and if
+        // those hide the image the overlay plan is dead whatever else happens.
+        // On its own it cannot say why, though: "the image was blanked" and "the
+        // terminal's default background was painted over it" are the same
+        // picture. So two rows disambiguate it.
+        //
+        // - Row 8 sets an explicit *red* background. Red on screen means cell
+        //   backgrounds paint over the image, which makes row 4's black the
+        //   default background doing exactly that rather than an empty frame.
+        // - Row 6 writes only spaces, at the default background, so no glyph is
+        //   involved. If it hides the image too then it is the cell that
+        //   occludes, not the character in it.
+        let _ = write!(out, "\x1b[4;3H default background with text - THE QUESTION");
+        let _ = write!(out, "\x1b[6;3H                              ");
         let _ = write!(
             out,
-            "\x1b[7;3H\x1b[48;2;0;0;0m explicit black background \x1b[0m"
+            "\x1b[8;3H\x1b[48;2;200;0;0m explicit RED background \x1b[0m"
         );
-        let _ = write!(out, "\x1b[11;1H");
+        let _ = write!(out, "\x1b[13;1H");
         let _ = out.flush();
 
         if let Some(reply) = read_reply() {
@@ -846,18 +872,22 @@ fn occlusion_check() -> std::process::ExitCode {
 
     let _ = write!(out, "\x1b[2J\x1b[H");
     let _ = out.flush();
-    println!("Read row 9 first - it carries no text and must be green in both");
-    println!("phases. If it is not, the image did not arrive and nothing else");
-    println!("on the screen means anything.\n");
-    println!("Then row 5, the default-background row, in phase 2:");
-    println!("  green around the letters -> ratatui's default cells let the image");
-    println!("                              through, and bars as pixels with help");
-    println!("                              and status as real text works.");
-    println!("  black around the letters -> a text cell blanks the image even at");
-    println!("                              the default background, so the overlay");
-    println!("                              has to be drawn into the frame instead.");
-    println!("\nRow 7 sets a background explicitly and is expected to hide the");
-    println!("image in both phases; it is the control for row 5, not a result.");
+    println!("The image covers rows 3 to 10. Rows 3, 5, 9 and 10 carry nothing and");
+    println!("must be green in every phase - if they are not, the image did not");
+    println!("arrive and nothing else on the screen means anything.\n");
+    println!("Phase 1 (z=1) should hide the text under the image. If it does not,");
+    println!("this terminal ignores z and the remaining phases prove nothing.\n");
+    println!("Then, in phase 3, read the three written rows together:");
+    println!("  row 8, explicit red   -> red means cell backgrounds paint over the");
+    println!("                           image. Black would mean the image is gone.");
+    println!("  row 6, spaces only    -> if this hides it too, the cell occludes");
+    println!("                           rather than the glyph in it.");
+    println!("  row 4, THE QUESTION   -> green around the letters means ratatui's");
+    println!("                           default cells let the image through, and");
+    println!("                           bars as pixels with help and status as");
+    println!("                           real text works. Black means every cell");
+    println!("                           rav writes blanks the image, so it must");
+    println!("                           write only where text actually goes.");
     println!("\nPress Enter to finish.");
     let mut line = String::new();
     let _ = std::io::stdin().read_line(&mut line);
@@ -873,6 +903,33 @@ fn occlusion_check() -> std::process::ExitCode {
 /// A pixel renderer needs device pixels, not cells. `ws_xpixel`/`ws_ypixel` are
 /// the only way to ask, and plenty of terminals leave them zero - in which case
 /// the size has to be inferred from the cell count, which is approximate.
+/// Device pixels per cell, if the terminal reports them.
+///
+/// The occlusion check sizes its image in whole rows from this. Guessing a cell
+/// height instead puts the image edge somewhere inside a row, and then a row
+/// that shows the terminal's background is ambiguous - it could be occlusion, or
+/// it could simply be past the bottom of the image.
+fn cell_pixels() -> Option<(u32, u32)> {
+    let mut size: libc::winsize = unsafe { std::mem::zeroed() };
+    // SAFETY: stdout is a tty here (checked in main) and size is a valid,
+    // initialised winsize for the duration of the call.
+    let ok = unsafe {
+        libc::ioctl(
+            std::io::stdout().as_raw_fd(),
+            libc::TIOCGWINSZ,
+            &raw mut size,
+        )
+    };
+    if ok < 0 || size.ws_xpixel == 0 || size.ws_ypixel == 0 || size.ws_col == 0 || size.ws_row == 0
+    {
+        return None;
+    }
+    Some((
+        u32::from(size.ws_xpixel / size.ws_col),
+        u32::from(size.ws_ypixel / size.ws_row),
+    ))
+}
+
 fn report_window_pixels() {
     let mut size: libc::winsize = unsafe { std::mem::zeroed() };
     // SAFETY: stdout is a tty here (checked in main) and size is a valid,
