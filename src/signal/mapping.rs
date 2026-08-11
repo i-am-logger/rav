@@ -10,11 +10,15 @@
 //! ```
 //!
 //! That 9% linear term is not a rounding detail — it is what stops the bottom of
-//! the spectrum collapsing. A pure log axis over 512 bins puts the first dozen
-//! bars inside a single bin, so they move as one blob; the linear term spreads
-//! them back out. It is also why this needs no second bass FFT, no constant-Q
-//! and no fractional-octave scheme: the problem is solved on the mapping side
-//! rather than by buying more resolution.
+//! the spectrum collapsing. Over 512 bins and 60 bars, a pure log axis puts the
+//! **first seven bars in one bin** and the first twelve across three, so the
+//! bass moves as one blob; the blend spreads those same twelve across twelve.
+//! It is also why this needs no second bass FFT, no constant-Q and no
+//! fractional-octave scheme: the problem is solved on the mapping side rather
+//! than by buying more resolution.
+//!
+//! Those counts are measured, and `a_pure_log_axis_collapses_the_bass` keeps
+//! them honest — it is the whole argument for `DEFAULT_SCALE` not being 1.0.
 
 /// Bin count the reference maps against. Kept as its own constant so a different
 /// FFT size rescales onto the same curve rather than changing its shape.
@@ -167,6 +171,37 @@ mod tests {
     }
 
     #[test]
+    fn a_pure_log_axis_collapses_the_bass() {
+        // The whole argument for `DEFAULT_SCALE` being 0.91 and not 1.0, which
+        // is the change someone makes on the way to "a proper logarithmic
+        // axis". Counting distinct bins is the measurement, because bars
+        // sharing a bin are bars that move together no matter what is playing.
+        let distinct = |scale: f32| {
+            BarMap::new(60, 512, scale).positions()[..12]
+                .iter()
+                .map(|position| *position as usize)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+        };
+
+        assert_eq!(distinct(1.0), 3, "a pure log axis over twelve bars");
+        assert_eq!(
+            distinct(DEFAULT_SCALE),
+            12,
+            "one bin each, which is the aim"
+        );
+
+        // Seven of those twelve share the *same* bin under a pure log axis.
+        let log_axis = BarMap::new(60, 512, 1.0);
+        let lowest = log_axis.positions()[0] as usize;
+        let sharing = log_axis.positions()[..12]
+            .iter()
+            .filter(|position| **position as usize == lowest)
+            .count();
+        assert_eq!(sharing, 7, "bars moving as one blob at the bottom");
+    }
+
+    #[test]
     fn spans_the_spectrum_and_increases() {
         let m = BarMap::new(75, 512, DEFAULT_SCALE);
         let p = m.positions();
@@ -179,20 +214,30 @@ mod tests {
     }
 
     #[test]
-    fn the_linear_term_keeps_the_low_end_from_collapsing() {
-        // With a pure log axis the first bars share one bin and move as a blob.
-        let pure_log = BarMap::new(75, 512, 1.0);
-        let blended = BarMap::new(75, 512, DEFAULT_SCALE);
-        let log_gap = pure_log.positions()[1] - pure_log.positions()[0];
-        let blend_gap = blended.positions()[1] - blended.positions()[0];
-        assert!(
-            log_gap < 0.2,
-            "pure log should be degenerate, got {log_gap}"
-        );
-        assert!(
-            blend_gap > 0.5,
-            "blend should separate the low bars, got {blend_gap}"
-        );
+    fn the_blend_holds_across_display_widths() {
+        // The collapse is not an artefact of one bar count. Wider displays make
+        // it worse, because more bars are competing for the same few bins at
+        // the bottom - so a check at one width could pass while the look breaks
+        // at another.
+        for bars in [24usize, 40, 60, 75, 120] {
+            let blended = BarMap::new(bars, 512, DEFAULT_SCALE);
+            let sharing = |map: &BarMap| {
+                let lowest = map.positions()[0] as usize;
+                map.positions()
+                    .iter()
+                    .filter(|position| **position as usize == lowest)
+                    .count()
+            };
+            assert!(
+                sharing(&blended) <= 2,
+                "{bars} bars: {} of them share the lowest bin even blended",
+                sharing(&blended),
+            );
+            assert!(
+                sharing(&BarMap::new(bars, 512, 1.0)) > sharing(&blended),
+                "{bars} bars: a pure log axis was no worse, so the blend is idle",
+            );
+        }
     }
 
     #[test]

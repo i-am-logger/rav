@@ -11,10 +11,10 @@
 //! light is derivable. Taking it from an audio file instead would mean running
 //! an FFT to decide what the FFT should have found.
 //!
-//! What is *not* here is timing - when a spike arrives relative to when a note
-//! starts. That needs the rolling window advanced frame by frame, and the
-//! analysis is currently inline in the render loop with no seam to drive it
-//! from. These are steady tones, and what they test is where the energy lands.
+//! These are steady tones, and what they test is where the energy lands. When a
+//! spike arrives relative to when the note starts needs the rolling window
+//! advanced frame by frame, so that half is driven through `App::measure` and
+//! lives beside it in `src/ui/`.
 
 use rav::signal::mapping::{BarMap, DEFAULT_SCALE, bin_for_hz};
 use rav::signal::spectrum::Spectrum;
@@ -56,10 +56,10 @@ fn bar_of(note: Note) -> usize {
 
 /// Whether a bar stands above both its neighbours.
 ///
-/// Deliberately without a loudness floor. An early version required a peak to
-/// clear 15% of the loudest bar, which is a number chosen to make an answer come
-/// out - and removing it changed none of the conclusions, only added leakage
-/// peaks up in the empty top of the spectrum that no test here asks about.
+/// Deliberately without a loudness floor. A threshold here would be a number
+/// picked to make an answer come out, and none is needed: the tests below ask
+/// about specific bars, so the leakage peaks up in the empty top of the
+/// spectrum are simply not looked at.
 fn is_peak(bars: &[f32], at: usize) -> bool {
     at > 0 && at + 1 < bars.len() && bars[at] > bars[at - 1] && bars[at] > bars[at + 1]
 }
@@ -179,8 +179,8 @@ fn the_smallest_interval_the_display_can_separate() {
             .find(|&semitones| {
                 let other = Note(root.0 + semitones);
                 // Both must reach *distinct* bars, or "two peaks" is one peak
-                // counted twice - which is how a first attempt at this
-                // measurement reported that C3 resolves a semitone.
+                // counted twice - and down in the bass a semitone lands well
+                // inside a single bar.
                 let (low, high) = (bar_of(root), bar_of(other));
                 if low == high {
                     return false;

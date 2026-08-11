@@ -83,7 +83,7 @@ mod pipeline_tests {
         // onto a handful of bins fails this while still passing a single-tone
         // check.
         let generator = AudioGenerator::new(RATE as f32);
-        let samples = generator.pink_noise(1.0, Spectrum::DEFAULT_SIZE);
+        let samples = generator.white_noise(1.0, Spectrum::DEFAULT_SIZE);
         let mut spectrum = Spectrum::new(Spectrum::DEFAULT_SIZE).unwrap();
         let top = bin_for_hz(16_000, RATE, spectrum.bins());
         let map = BarMap::with_top_bin(BARS, spectrum.bins(), top, DEFAULT_SCALE);

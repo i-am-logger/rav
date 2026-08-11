@@ -333,9 +333,11 @@ mod tests {
     #[test]
     fn darken_reads_all_three_ways_it_can_be_written() {
         // Absent, `true`, and a number are three different intents and one of
-        // them is "leave it alone" - which is not the same as `Some(1.0)`. That
-        // distinction is what keeps `mono` following the terminal's palette,
-        // and collapsing it is a mistake this has already caught once.
+        // them is "leave it alone" - which is not the same as `Some(1.0)`.
+        // Keeping them apart is what lets `mono` follow the terminal's own
+        // palette: a theme that says nothing has its ink handed on untouched,
+        // where a theme asking to keep all its brightness has it resolved and
+        // scaled by one.
         let with = |line: &str| {
             parse(&format!(
                 "name = \"t\"\n{line}\n[colors]\npeak = \"#ffffff\"\n\
@@ -372,10 +374,10 @@ mod tests {
     #[test]
     fn the_theme_file_in_the_documentation_is_one_that_works() {
         // docs/themes.md hands a whole `sunset.toml` to anyone writing their
-        // first theme. If it has drifted from the parser, their first attempt
-        // fails and the error is rav's fault, not theirs. Extracted from the
-        // document rather than copied into this test, or the copy is what stays
-        // correct while the document rots.
+        // first theme, so a document that disagrees with the parser makes their
+        // first attempt fail with rav's mistake in their file. Extracted from
+        // the document rather than copied here, so this checks the thing people
+        // read rather than a copy of it.
         let doc = std::fs::read_to_string("docs/themes.md").expect("beside the source");
         let example = doc
             .split("```toml")

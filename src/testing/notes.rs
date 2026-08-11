@@ -10,10 +10,10 @@
 //! light is derivable rather than guessed. Reading it off an audio file instead
 //! would mean an FFT deciding what the FFT should have found.
 //!
-//! Nothing here has an envelope. An attack and a release would test *when* a
-//! spike arrives, which needs the rolling window advanced frame by frame -
-//! a different seam, and one that does not exist yet. These are steady tones,
-//! and what they test is where the energy lands.
+//! Nothing here has an envelope. These are steady tones, and what they test is
+//! where the energy lands. *When* a spike arrives needs the rolling window
+//! advanced frame by frame, which is `App::measure`'s side of the seam - see
+//! `a_note_lights_the_display_in_the_first_frame_that_carries_it`.
 
 use std::f32::consts::TAU;
 

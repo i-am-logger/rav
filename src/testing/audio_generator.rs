@@ -36,30 +36,30 @@ impl AudioGenerator {
         signal
     }
 
-    /// Pink (1/f) noise, summed over octaves and normalised to `amplitude`.
+    /// White noise: every frequency carries the same energy, on average.
     ///
-    /// Approximate rather than spectrally exact - the tests ask only that every
-    /// part of the spectrum carries energy, not how much.
-    pub fn pink_noise(&self, amplitude: f32, samples: usize) -> Vec<f32> {
-        use rand::{Rng, thread_rng};
-        let mut rng = thread_rng();
-
-        let mut signal = vec![0.0; samples];
-        for octave in 0..8 {
-            let amp_mult = 1.0 / 2.0_f32.powi(octave).sqrt();
-            for sample in signal.iter_mut() {
-                *sample += amplitude * amp_mult * (rng.r#gen::<f32>() * 2.0 - 1.0);
-            }
-        }
-
-        let max_val = signal.iter().fold(0.0f32, |max, &val| max.max(val.abs()));
-        if max_val > 0.0 {
-            for sample in &mut signal {
-                *sample = (*sample / max_val) * amplitude;
-            }
-        }
-
-        signal
+    /// What "does the whole display light up" wants, and the reason it is white
+    /// rather than pink - pink falls 3dB per octave, so it would put least
+    /// energy exactly where a spectrum analyser has the most bars.
+    ///
+    /// Seeded rather than drawn from the thread's generator, so a failure is
+    /// reproducible. A test source that cannot be replayed turns a rare failure
+    /// into a mystery, and this module's whole claim is to be deterministic.
+    ///
+    /// Pink noise would need a filter with memory across samples - summing
+    /// independent draws at falling amplitudes gives white noise with a larger
+    /// variance and no 1/f tilt at all, however many terms it has.
+    pub fn white_noise(&self, amplitude: f32, samples: usize) -> Vec<f32> {
+        // A plain LCG, written out rather than pulled in: the numbers are
+        // Numerical Recipes', the sequence has to be the same everywhere, and
+        // nothing here needs the quality of a real generator.
+        let mut seed: u32 = 0x5eed_1234;
+        let mut next = || {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            // The high bits are the good ones in an LCG; the low bits cycle.
+            (seed >> 8) as f32 / 8_388_608.0 - 1.0
+        };
+        (0..samples).map(|_| amplitude * next()).collect()
     }
 }
 
@@ -90,14 +90,54 @@ mod tests {
     }
 
     #[test]
-    fn pink_noise_is_bounded_and_two_sided() {
+    fn white_noise_is_bounded_and_two_sided() {
         let generator = AudioGenerator::new(44100.0);
-        let signal = generator.pink_noise(1.0, 1000);
+        let signal = generator.white_noise(1.0, 1000);
 
         assert_eq!(signal.len(), 1000);
         assert!(signal.iter().any(|&x| x > 0.0));
         assert!(signal.iter().any(|&x| x < 0.0));
         assert!(signal.iter().all(|&x| x.abs() <= 1.0));
+    }
+
+    #[test]
+    fn the_same_noise_comes_back_every_time() {
+        // The module's claim, and the thing that makes a rare failure a bug
+        // report rather than a mystery: a test that fails once in a thousand
+        // runs is only useful if the input can be replayed.
+        let generator = AudioGenerator::new(48_000.0);
+        assert_eq!(
+            generator.white_noise(1.0, 256),
+            generator.white_noise(1.0, 256),
+        );
+        assert_eq!(
+            AudioGenerator::new(44_100.0).white_noise(1.0, 256),
+            generator.white_noise(1.0, 256),
+            "the rate does not change the noise, only how long it lasts",
+        );
+    }
+
+    #[test]
+    fn white_noise_is_flat_rather_than_tilted() {
+        // The property the old name got wrong. Split the signal in two halves by
+        // the sign of a coarse high-pass - if one end carried more energy than
+        // the other the noise would be tinted, and a display test built on it
+        // would be asserting the tint rather than the display.
+        let signal = AudioGenerator::new(48_000.0).white_noise(1.0, 8192);
+        // The difference of neighbouring samples isolates the high end and
+        // their sum isolates the low. For independent samples both come to
+        // twice the variance, so the ratio is 1 - measured at 0.9992 here - and
+        // noise tilted towards the low end drives it below that.
+        let (mut high, mut low) = (0.0f64, 0.0f64);
+        for pair in signal.windows(2) {
+            high += f64::from(pair[1] - pair[0]).powi(2);
+            low += f64::from(pair[1] + pair[0]).powi(2);
+        }
+        let ratio = high / low;
+        assert!(
+            (0.8..=1.25).contains(&ratio),
+            "the noise is tinted: high/low power {ratio:.3}, flat is 1.0",
+        );
     }
 
     #[test]

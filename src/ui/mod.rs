@@ -326,6 +326,37 @@ impl App {
         self.surface = chosen;
     }
 
+    /// Turn the rolling window into a level per band, and report the gain.
+    ///
+    /// Everything between the samples and the bars, and nothing else: the
+    /// ballistics are stepped by the caller, because they need a `dt` and a
+    /// clock is the one thing that cannot be handed to a test.
+    ///
+    /// Extracted from the render loop unchanged rather than as a redesign. It
+    /// was the only part of the chain with no way in from a test - which is why
+    /// nothing checks that a note lights its bar within a frame of sounding,
+    /// only that it lights the right one eventually.
+    fn measure(&mut self) -> f32 {
+        let magnitudes = self.spectrum.analyse(&self.window);
+        self.bar_map.sample(magnitudes, &mut self.sampled);
+        self.bandwidth.group(&self.sampled, &mut self.bands);
+        // Gain is applied before the clip, so full scale always means
+        // exactly full scale whatever the trim.
+        let gain = 10f32.powf(self.gain_db / 20.0);
+        for v in self.bands.iter_mut() {
+            // The preset's response curve, applied where the measured
+            // amplitude becomes a level to draw. Linear for every preset
+            // rav ships on a screen, which is rav's documented choice and
+            // what makes a quiet passage read quiet; a short LED bar needs
+            // otherwise, and says so in its own preset rather than here.
+            *v = self
+                .curve
+                .apply(Level::new(*v * gain / MAX_HEIGHT))
+                .fraction();
+        }
+        gain
+    }
+
     /// Append a capture buffer to the rolling window, de-interleaving to mono.
     ///
     /// cpal delivers interleaved frames. Averaging rather than summing keeps a
@@ -771,23 +802,7 @@ impl App {
             // plainer one: it is framerate-independent because it integrates
             // dt, and stepping it on the display's cadence rather than the
             // signal's threw away the accuracy that buys.
-            let magnitudes = self.spectrum.analyse(&self.window);
-            self.bar_map.sample(magnitudes, &mut self.sampled);
-            self.bandwidth.group(&self.sampled, &mut self.bands);
-            // Gain is applied before the clip, so full scale always means
-            // exactly full scale whatever the trim.
-            let gain = 10f32.powf(self.gain_db / 20.0);
-            for v in self.bands.iter_mut() {
-                // The preset's response curve, applied where the measured
-                // amplitude becomes a level to draw. Linear for every preset
-                // rav ships on a screen, which is rav's documented choice and
-                // what makes a quiet passage read quiet; a short LED bar needs
-                // otherwise, and says so in its own preset rather than here.
-                *v = self
-                    .curve
-                    .apply(Level::new(*v * gain / MAX_HEIGHT))
-                    .fraction();
-            }
+            let gain = self.measure();
 
             let measured_at = Instant::now();
             let dt = measured_at.duration_since(self.last_frame).as_secs_f32();
@@ -1004,6 +1019,85 @@ mod tests {
         App::new(Config::default(), 2, 48_000).expect("app should build")
     }
 
+    /// One channel, so a generated signal reaches the window unaltered.
+    ///
+    /// `push_samples` averages across channels, so handing a two-channel app a
+    /// mono tone averages each pair of neighbouring samples - which is a
+    /// low-pass filter, and quietly moves the thing under test.
+    fn listening_app() -> App {
+        let mut a = App::new(Config::default(), 1, 48_000).expect("app should build");
+        a.resize(80, 24);
+        a
+    }
+
+    /// Samples in one frame at the 60fps ceiling.
+    const FRAME_SAMPLES: usize = 48_000 / 60;
+
+    #[test]
+    fn a_note_lights_the_display_in_the_first_frame_that_carries_it() {
+        // The timing half of "does the picture match the music", and until the
+        // analysis had a seam there was no way to ask it - `tests/music.rs` can
+        // only show that a note lights the *right* bar, never that it does so
+        // while the note is still sounding.
+        //
+        // No threshold: silence analyses to exactly zero, so "lit" is "above
+        // zero" and the assertion is about which frame rather than how much.
+        let mut a = listening_app();
+        a.push_samples(&vec![0.0; Spectrum::DEFAULT_SIZE]);
+        a.measure();
+        assert!(
+            a.bands.iter().all(|&level| level == 0.0),
+            "silence lit something: {:?}",
+            a.bands,
+        );
+
+        // One frame's worth of a note and not a sample more.
+        let note = crate::testing::Instrument::pure(48_000.0).play(
+            &[crate::testing::Note::MIDDLE_C.octave_up(2)],
+            FRAME_SAMPLES,
+        );
+        a.push_samples(&note);
+        a.measure();
+        assert!(
+            a.bands.iter().any(|&level| level > 0.0),
+            "the frame the note started in showed nothing",
+        );
+    }
+
+    #[test]
+    fn a_note_that_stops_leaves_its_cap_hanging_above_a_falling_bar() {
+        // The whole point of the effect, end to end through `App` for the first
+        // time rather than against the ballistics alone: the bar drops away and
+        // the cap stays up to mark where it had been.
+        let mut a = listening_app();
+        let note = crate::testing::Instrument::pure(48_000.0)
+            .play(&[crate::testing::Note::MIDDLE_C.octave_up(2)], 4096);
+        a.push_samples(&note);
+        a.measure();
+        a.ballistics.step(&a.bands, 1.0 / 60.0);
+
+        let loudest = (0..a.ballistics.len())
+            .max_by(|&x, &y| {
+                let (x, y) = (a.ballistics.bars()[x], a.ballistics.bars()[y]);
+                x.partial_cmp(&y).expect("no NaN in a bar")
+            })
+            .expect("bars to compare");
+        let struck = a.ballistics.bars()[loudest];
+        assert!(struck > 0.0, "the note did not register at all");
+
+        // Silence for a third of a second, which is a full-scale bar's fall.
+        for _ in 0..20 {
+            a.push_samples(&vec![0.0; FRAME_SAMPLES]);
+            a.measure();
+            a.ballistics.step(&a.bands, 1.0 / 60.0);
+        }
+
+        let bar = a.ballistics.bars()[loudest];
+        let cap = a.ballistics.peaks()[loudest];
+        assert!(bar < struck, "the bar did not fall: {struck} -> {bar}");
+        assert!(cap > bar, "the cap came down with the bar: {cap} vs {bar}");
+    }
+
     #[test]
     fn everything_rav_opens_with_comes_from_the_preset() {
         // Four constants scattered through the constructor is how a "default"
@@ -1049,6 +1143,87 @@ mod tests {
             Curve::Decibel { floor: -48.0 }.apply(Level::FULL),
             Level::FULL
         );
+    }
+
+    #[test]
+    fn every_key_the_readme_documents_is_bound() {
+        // The README is where a user learns the keys, and `map_key`'s catch-all
+        // `_ => Action::None` means an unbound key is a keypress that does
+        // nothing rather than a build failure. So a binding can be renamed or
+        // dropped and the only symptom is a documented key that does not work.
+        let readme = std::fs::read_to_string("README.md").expect("beside the source");
+        let table = readme
+            .split("| Key | |")
+            .nth(1)
+            .expect("the key table is still in the README");
+
+        let code_for = |spelling: &str| match spelling {
+            "Esc" => Some(KeyCode::Esc),
+            "Space" => Some(KeyCode::Char(' ')),
+            "Tab" => Some(KeyCode::Tab),
+            "↑" => Some(KeyCode::Up),
+            "↓" => Some(KeyCode::Down),
+            other => other
+                .chars()
+                .next()
+                .filter(|_| other.chars().count() == 1)
+                .map(KeyCode::Char),
+        };
+
+        let mut checked = 0;
+        // `skip(1)` steps over what is left of the header line itself, which is
+        // empty and would end the run before it began. The count at the bottom
+        // is there because a table this fails to parse looks exactly like a
+        // table with nothing wrong in it.
+        for row in table
+            .lines()
+            .skip(1)
+            .take_while(|line| line.starts_with('|'))
+        {
+            // Only the first column: later columns name values, not keys.
+            let keys = row.split('|').nth(1).unwrap_or_default();
+            for spelling in keys.split('`').skip(1).step_by(2) {
+                let code = code_for(spelling)
+                    .unwrap_or_else(|| panic!("the test cannot spell {spelling:?}"));
+                assert_ne!(
+                    map_key(code),
+                    Action::None,
+                    "the README documents {spelling:?} and nothing is bound to it",
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked >= 15, "only {checked} keys found - the table moved");
+    }
+
+    #[test]
+    fn the_readme_lists_the_values_the_code_offers() {
+        // These are what drift: adding a fall speed or a theme is a one-line
+        // change in one file, and the README is in another. Each list here is
+        // built from the code, so the assertion is that the document agrees with
+        // it rather than that both agree with something written twice.
+        let readme = std::fs::read_to_string("README.md").expect("beside the source");
+
+        let speeds = BAR_FALL_SPEEDS
+            .iter()
+            .map(|speed| format!("{speed}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        assert!(readme.contains(&speeds), "fall speeds: expected {speeds:?}");
+
+        let themes = Theme::built_in_names().collect::<Vec<_>>().join(", ");
+        assert!(readme.contains(&themes), "themes: expected {themes:?}");
+
+        // Bar styles in the order `b` actually walks them, from the default.
+        let mut style = BarStyle::default();
+        let mut styles = Vec::new();
+        for _ in 0..6 {
+            styles.push(style.label());
+            style = style.next();
+        }
+        assert_eq!(style, BarStyle::default(), "the cycle did not come home");
+        let styles = styles.join(", ");
+        assert!(readme.contains(&styles), "bar styles: expected {styles:?}");
     }
 
     #[test]
@@ -1575,9 +1750,9 @@ mod tests {
     #[test]
     fn cycling_themes_walks_the_bundled_order_and_returns() {
         // The path a user without --theme presses constantly, and the one that
-        // exercises the generated consts end to end: the themes are no longer
-        // parsed at startup, they are static data, and this is where a wrong
-        // order or a missing entry would actually be seen.
+        // exercises the generated consts end to end: the themes are static
+        // data rather than something parsed at startup, and this is where a
+        // wrong order or a missing entry would actually be seen.
         //
         // Four presses must return to where they started, or the cycle has
         // dropped an entry or gained one.

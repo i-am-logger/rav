@@ -14,7 +14,7 @@
 //! Two things about it are easy to get wrong.
 //!
 //! **There is no hold timer.** The cap looks like it hangs at the top, but that is
-//! emergent: velocity starts at `3/4096` of full scale and only compounds into
+//! emergent: velocity starts at `3/3840` of full scale and only compounds into
 //! visible motion after a few dozen frames. Coding an explicit hold followed by a
 //! linear fall gives a visibly different feel.
 //!
@@ -64,8 +64,11 @@ pub const DEFAULT_PEAK_FALL: f32 = rav_core::ballistics::WINAMP.peak_fall;
 ///
 /// The original's vis timer is not documented in the material we have; Webamp drives
 /// its painter from `requestAnimationFrame`, i.e. the display rate. 60 reproduces
-/// Webamp's behaviour and drops a full-scale cap in ~0.86s; 30 stretches the same
-/// curve to ~1.72s. Configurable because it is a genuine choice, not a fact.
+/// Webamp's behaviour and drops a full-scale cap in 0.85s; 30 stretches the same
+/// curve to 1.70s. Configurable because it is a genuine choice, not a fact.
+///
+/// Both numbers are measured, and `the_numbers_in_the_module_note_are_the_ones_it_uses`
+/// keeps them that way.
 pub const DEFAULT_REFERENCE_FPS: f32 = rav_core::ballistics::WINAMP.reference_fps;
 
 /// Per-bar bar and cap motion.
@@ -265,6 +268,36 @@ mod tests {
     }
 
     #[test]
+    fn the_numbers_in_the_module_note_are_the_ones_it_uses() {
+        // The note at the top of this file quotes figures a reader will trust,
+        // and prose cannot be compiled. This is what checks it.
+        //
+        // The seed is the one to watch: `3/3840` is 3 over 256 x *15*, the
+        // clip. Using 16 - the analyser's row count - gives `3/4096` and makes
+        // every bar and cap fall 6.7% slow, which is the confusion
+        // `FULL_SCALE_PIXELS` warns about two dozen lines below.
+        let seed = Ballistics::new(1).velocity_seed();
+        assert_eq!(
+            seed,
+            PEAK_VELOCITY_SEED / (PEAK_FIXED_POINT * FULL_SCALE_PIXELS),
+        );
+        assert!(
+            (3.0 / seed - 3840.0).abs() < 0.5,
+            "the note says 3/3840, the code says 3/{:.0}",
+            3.0 / seed,
+        );
+
+        // And the fall times it quotes, which decide how the thing feels.
+        for (fps, expected) in [(60.0f32, 0.85f32), (30.0, 1.70)] {
+            let measured = fall_seconds(fps, true);
+            assert!(
+                (measured - expected).abs() < 0.02,
+                "at {fps}fps a cap falls in {measured:.3}s, not the {expected}s quoted",
+            );
+        }
+    }
+
+    #[test]
     fn cap_falls_far_slower_than_its_bar() {
         // The whole point of the effect: the cap must detach and linger.
         let bar = fall_seconds(60.0, false);
@@ -275,9 +308,9 @@ mod tests {
     #[test]
     fn bar_fall_matches_the_original_rate() {
         // 15px clip at 12/16 px per frame = 20 frames = 0.3333s at 60fps.
-        // Spelled as literals on purpose - deriving it from the same constants
-        // the implementation uses made this test self-confirming, and it passed
-        // happily while the conversion divided by 16 instead of 15.
+        // Spelled as literals on purpose: derived from the same constants the
+        // implementation uses, this would agree with itself whatever those
+        // constants said.
         let actual = fall_seconds(60.0, false);
         assert!(
             (actual - 0.3333).abs() < 0.005,
