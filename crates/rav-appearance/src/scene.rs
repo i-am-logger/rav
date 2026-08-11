@@ -129,3 +129,120 @@ impl Scene<'_> {
             .or_else(|| self.styles.first())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ink::Colour;
+    use alloc::vec;
+    use alloc::vec::Vec;
+
+    fn ramp(colour: Colour) -> Ramp {
+        Ramp::new(vec![colour])
+    }
+
+    fn scene<'a>(bands: &'a [Band], styles: &'a [Style<'a>], across: f32) -> Scene<'a> {
+        Scene {
+            bands,
+            layout: BarLayout::new(Length(8.0), Length(2.0)),
+            screen: Screen::new(Length(across), Length(100.0)),
+            styles,
+        }
+    }
+
+    #[test]
+    fn a_scene_draws_the_lesser_of_what_fits_and_what_exists() {
+        // The glyph renderer's rule, and the reason it is here rather than in
+        // each surface: one per band regardless puts rectangles past the screen,
+        // where a rasteriser drops them without a word - so two surfaces would
+        // disagree about how many bars there are and neither would say so.
+        let green = ramp(Colour::GREEN);
+        let styles = [Style {
+            bars: &green,
+            grid: None,
+            cap: None,
+        }];
+        let many: Vec<Band> = (0..64).map(|_| Band::default()).collect();
+
+        // 8 wide with a 2 gap is a stride of 10, so 5 fit across 48.
+        assert_eq!(scene(&many, &styles, 48.0).visible_bands(), 5, "clipped");
+        let few = [Band::default(), Band::default()];
+        assert_eq!(
+            scene(&few, &styles, 480.0).visible_bands(),
+            2,
+            "all of them"
+        );
+    }
+
+    #[test]
+    fn a_stereo_pair_is_two_styles_and_one_scene() {
+        // What "a mode can have a different colour per channel" comes to. The
+        // bands carry an index and the surface holds the looks, so a mirrored
+        // pair needs no second scene and no second analyser.
+        let left = ramp(Colour::CYAN);
+        let right = ramp(Colour::MAGENTA);
+        let styles = [
+            Style {
+                bars: &left,
+                grid: None,
+                cap: None,
+            },
+            Style {
+                bars: &right,
+                grid: None,
+                cap: None,
+            },
+        ];
+        let bands = [
+            Band::new(Level::FULL, Level::FULL),
+            Band::new(Level::FULL, Level::FULL).styled(StyleId(1)),
+        ];
+        let scene = scene(&bands, &styles, 480.0);
+        assert_eq!(
+            scene.style_of(&bands[0]).unwrap().bars.stops()[0],
+            Colour::CYAN
+        );
+        assert_eq!(
+            scene.style_of(&bands[1]).unwrap().bars.stops()[0],
+            Colour::MAGENTA,
+        );
+    }
+
+    #[test]
+    fn a_band_wearing_a_style_that_is_gone_is_drawn_in_the_first_one() {
+        // Reachable: a theme change swaps the styles while bands from the
+        // previous frame still name the old ones. A wrong colour for one frame
+        // is a blink; a panic mid-render loses the terminal the user is in.
+        let green = ramp(Colour::GREEN);
+        let styles = [Style {
+            bars: &green,
+            grid: None,
+            cap: None,
+        }];
+        let stale = Band::default().styled(StyleId(9));
+        let bands = [stale];
+        let scene = scene(&bands, &styles, 480.0);
+        assert_eq!(
+            scene.style_of(&stale).unwrap().bars.stops()[0],
+            Colour::GREEN,
+        );
+    }
+
+    #[test]
+    fn a_scene_with_no_styles_draws_nothing_rather_than_inventing_a_colour() {
+        // The alternative is a default, and a default here is rav choosing a
+        // colour the theme did not - which is the one thing the appearance
+        // layer exists to prevent.
+        let band = Band::default();
+        let bands = [band];
+        assert!(scene(&bands, &[], 480.0).style_of(&band).is_none());
+    }
+
+    #[test]
+    fn everything_is_the_first_style_until_something_says_otherwise() {
+        // So the common case costs one byte per band and no thought.
+        assert_eq!(Band::default().style, StyleId::FIRST);
+        assert_eq!(Band::new(Level::FULL, Level::FULL).style, StyleId::FIRST);
+        assert_eq!(StyleId::FIRST.index(), 0);
+    }
+}

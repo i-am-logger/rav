@@ -19,9 +19,16 @@ repository = "https://github.com/i-am-logger/rav"
 
 # Both a path and a version: the path is what the workspace builds against, and
 # the version is what a published rav requires, so the two cannot drift.
+[dev-dependencies]
+proptest.workspace = true
+
 [workspace.dependencies]
 rav-core = { path = "crates/rav-core", version = "1.0.0-beta.7" }
 rav-appearance = { path = "crates/rav-appearance", version = "1.0.0-beta.7" }
+# Dev-only, so nothing published gains a dependency. Shared here for the same
+# reason the versions are: two crates disagreeing about a test framework is a
+# thing that happens quietly.
+proptest = "1"
 
 [package]
 name = "rav"

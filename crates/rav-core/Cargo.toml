@@ -20,5 +20,11 @@ categories = ["multimedia::audio", "no-std", "visualization"]
 [dependencies]
 libm = "0.2"
 
+# The properties in `tests/` need a generator and `std`; the library needs
+# neither. A dev-dependency is invisible to anything that depends on this crate,
+# so an embedded target never sees it.
+[dev-dependencies]
+proptest.workspace = true
+
 [lints.rust]
 unused = "deny"
