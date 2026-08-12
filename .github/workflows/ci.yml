@@ -277,11 +277,24 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           RELEASES: ${{ steps.release-plz.outputs.releases }}
         run: |
+          # What was released, before looking for `rav` among it. An empty list
+          # here means the output is not the shape this expects any more, and
+          # that has to be loud: the whole reason three releases shipped without
+          # a binary is that the one step which knew kept failing where nobody
+          # read it. "Cannot find the tag" must never be indistinguishable from
+          # "there was no tag to find".
+          RELEASED=$(echo "$RELEASES" | jq -r '.[].package_name | select(. != null)' | paste -sd' ' -)
+          if [ -z "$RELEASED" ]; then
+            echo "released nothing this run, or the output changed shape:"
+            echo "$RELEASES"
+            exit 1
+          fi
+
           TAG=$(echo "$RELEASES" | jq -r '.[] | select(.package_name == "rav") | .tag')
-          # A run that released only the libraries has no binary to attach, and
-          # that is not a failure.
+          # Only the libraries moved. There is no binary to attach to a release
+          # that was never created, and that is an ordinary outcome.
           if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
-            echo "no rav release in this run - nothing to attach"
+            echo "released $RELEASED - no rav among them, so nothing to attach"
             exit 0
           fi
           chmod +x dist/rav
