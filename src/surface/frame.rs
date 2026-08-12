@@ -520,9 +520,15 @@ mod against_the_glyphs {
             palette: &palette,
             backdrop: false,
             caps: None,
-            // The acceptance test is about where a bar stands, not what it is
-            // made of - a ladder here would compare a ladder to a solid glyph.
-            ladder: None,
+            // The ladder production actually passes, not `None`. `blocks` is
+            // what rav opens as, and testing the configuration nobody runs
+            // would leave the one everybody runs unchecked.
+            //
+            // Only the styles whose ink reaches the top of their rung can be
+            // compared this way: `line` is a rule at mid-height, so its topmost
+            // ink sits half a rung below its bar top - on the glyph renderer
+            // too, which draws the same stroke.
+            ladder: Some((crate::ui::analyzer::BarStyle::Blocks.skin(), Length(ch))),
         };
         let rgba = Frame::new(&levels, &levels, &look, layout, screen)
             .pixels()
