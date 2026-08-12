@@ -7,6 +7,7 @@
 
 use crate::render::{Colour, Ramp, Scene};
 use rav_core::geometry::{Rectangle, Screen};
+use rav_core::units::Length;
 use tiny_skia::{Paint, Pixmap, Rect as SkRect, Transform};
 
 /// An RGBA buffer that geometry is drawn into.
@@ -75,9 +76,28 @@ impl Canvas {
     /// Stripe by stripe rather than row by row, so the cost is the number of
     /// stops and not the height of the rectangle.
     pub fn fill_ramped(&mut self, area: Rectangle, ramp: &Ramp, screen: &Screen) {
+        self.fill_ramped_at(area, ramp, screen, 1.0);
+    }
+
+    /// The same, at a flat opacity over whatever the ramp gives.
+    ///
+    /// What the shaded styles are. `▓` is a whole cell at three quarters, and
+    /// scaling the ramp's own alpha is how that reaches a surface with no
+    /// glyph to carry it - the colour still comes from the height, so the bar
+    /// still reddens as it rises, just fainter all the way up.
+    pub fn fill_ramped_at(&mut self, area: Rectangle, ramp: &Ramp, screen: &Screen, opacity: f32) {
+        let opacity = opacity.clamp(0.0, 1.0);
         for stripe in ramp.stripes(screen.height()) {
             if let Some(part) = stripe.clip(area) {
-                self.fill(part, stripe.colour);
+                let colour = if opacity >= 1.0 {
+                    stripe.colour
+                } else {
+                    Colour {
+                        alpha: (f32::from(stripe.colour.alpha) * opacity) as u8,
+                        ..stripe.colour
+                    }
+                };
+                self.fill(part, colour);
             }
         }
     }
@@ -136,7 +156,10 @@ impl Draw for Scene<'_> {
         for (index, band) in self.bands.iter().take(drawable).enumerate() {
             if let Some(style) = self.style_of(band) {
                 let bar = self.layout.column(index).bar(band.level, screen);
-                canvas.fill_ramped(bar, style.bars, screen);
+                match style.ladder {
+                    Some((skin, rung)) => draw_ladder(canvas, bar, skin, rung, style.bars, screen),
+                    None => canvas.fill_ramped(bar, style.bars, screen),
+                }
             }
         }
 
@@ -145,6 +168,69 @@ impl Draw for Scene<'_> {
                 let column = self.layout.column(index);
                 canvas.fill(column.cap(band.peak, cap.thickness, screen), cap.colour);
             }
+        }
+    }
+}
+
+/// Draw a bar as the ladder its skin describes, rung by rung.
+///
+/// The bar is the same rectangle either way; what changes is what fills it. A
+/// solid style covers the lower seven eighths of each rung, so the ladder shows
+/// a seam every rung; a rule covers an eighth in the middle of one and reads as
+/// air. That is what `b` chooses, and on a cell grid the glyph does it - here
+/// nothing does unless this does.
+///
+/// The topmost rung is clipped to the bar rather than drawn whole, so a bar
+/// that stops part way up a rung stops there instead of rounding up to it.
+fn draw_ladder(
+    canvas: &mut Canvas,
+    bar: Rectangle,
+    skin: rav_appearance::Skin,
+    rung: Length,
+    ramp: &Ramp,
+    screen: &Screen,
+) {
+    // A rung with no height is a division by zero waiting to happen, and a
+    // screen mid-resize produces one. One shape is the honest fallback: it is
+    // what the ladder collapses to when there is no room for rungs.
+    if rung.get() <= 0.0 || bar.height().get() <= 0.0 {
+        canvas.fill_ramped(bar, ramp, screen);
+        return;
+    }
+
+    let shape = skin.rung;
+    let floor = bar.bottom();
+    let mut lit = bar.height().get();
+    let mut index = 0usize;
+
+    while lit > 0.0 {
+        // Rungs are counted from the floor, which is where a bar grows from.
+        let rung_bottom = floor - rung * (index as f32);
+        let rung_top = rung_bottom - rung;
+
+        let shape_bottom = rung_bottom - rung * shape.floats;
+        let shape_top = shape_bottom - rung * shape.covers;
+
+        // Clipped to the bar, so the rung the bar stops inside is drawn only as
+        // far as the bar reached.
+        let top = shape_top.largest(bar.top());
+        let bottom = shape_bottom.smallest(floor);
+        if bottom > top {
+            let piece = Rectangle::new(bar.left(), top, bar.width(), bottom - top);
+            if shape.opacity >= 1.0 {
+                canvas.fill_ramped(piece, ramp, screen);
+            } else {
+                canvas.fill_ramped_at(piece, ramp, screen, shape.opacity);
+            }
+        }
+
+        lit -= rung.get();
+        index += 1;
+        // Nothing draws below the floor or above the bar, so the loop is bounded
+        // by the bar's own height - but a rung smaller than float precision
+        // would not shrink `lit`, and this is the render path.
+        if index > 4096 || rung_top.get() < bar.top().get() - rung.get() {
+            break;
         }
     }
 }
@@ -196,6 +282,7 @@ mod tests {
                 colour: Colour::WHITE,
                 thickness: Length(3.0),
             }),
+            ladder: None,
         }]
     }
 
@@ -297,11 +384,13 @@ mod tests {
                 bars: &left_ramp,
                 grid: None,
                 cap: None,
+                ladder: None,
             },
             Style {
                 bars: &right_ramp,
                 grid: None,
                 cap: None,
+                ladder: None,
             },
         ];
         // Two bands side by side, second one in the second style.
@@ -333,11 +422,13 @@ mod tests {
                 bars: &ramp,
                 grid: None,
                 cap: None,
+                ladder: None,
             },
             Style {
                 bars: &other,
                 grid: None,
                 cap: None,
+                ladder: None,
             },
         ];
         // Band 0 quiet, band 1 loud - both in style 0, with style 1 present but

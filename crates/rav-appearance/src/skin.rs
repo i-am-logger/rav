@@ -53,13 +53,70 @@ pub enum Shapes {
     Discrete,
 }
 
+/// One rung of the ladder a bar is built from, as a fraction of its pitch.
+///
+/// Fractions rather than lengths, so the same skin describes a cell sixty
+/// device pixels tall, a cell of eight, and one light on a strip. The surface
+/// multiplies by whatever a rung is worth to it.
+///
+/// Transcribed from what WezTerm actually draws rather than from the font: it
+/// renders these itself with `custom_block_glyphs`, so the outlines in a font
+/// file are not what anyone is looking at. `▇` is the lower seven eighths, `━`
+/// is a stroke across the middle, and `░▒▓` are a whole cell at flat opacity -
+/// **not** the dithers their outlines describe.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Rung {
+    /// How much of the rung's height the lit shape fills. 1.0 is all of it.
+    pub covers: f32,
+    /// Where the shape's bottom sits, measured up from the rung's bottom.
+    ///
+    /// Zero for every ladder that grows off the floor, which is all of them but
+    /// the rule: `━` is a stroke at mid-height and has to float.
+    pub floats: f32,
+    /// Flat opacity of the lit shape.
+    ///
+    /// The shaded styles are the reason this exists. `▓` is a whole cell at
+    /// three quarters, and no clip of a full block yields it.
+    pub opacity: f32,
+}
+
+impl Rung {
+    /// The ordinary case: a shape that fills its rung, opaque, off the floor.
+    pub const FULL: Self = Self {
+        covers: 1.0,
+        floats: 0.0,
+        opacity: 1.0,
+    };
+
+    /// The lower `covers` of a rung, opaque - the partial block ladder.
+    pub const fn lower(covers: f32) -> Self {
+        Self {
+            covers,
+            floats: 0.0,
+            opacity: 1.0,
+        }
+    }
+
+    /// A whole rung at flat opacity - the shaded styles.
+    pub const fn shaded(opacity: f32) -> Self {
+        Self {
+            covers: 1.0,
+            floats: 0.0,
+            opacity,
+        }
+    }
+}
+
 /// The shapes a bar is drawn from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Skin {
     pub name: &'static str,
     /// How many steps a rung divides into. The one thing the core is told.
     steps: usize,
     pub shapes: Shapes,
+    /// What one rung looks like. A surface with rungs of its own - a cell grid -
+    /// already draws this with a glyph; a surface without them draws it here.
+    pub rung: Rung,
 }
 
 impl Skin {
@@ -70,7 +127,13 @@ impl Skin {
             name,
             steps: if steps == 0 { 1 } else { steps },
             shapes,
+            rung: Rung::FULL,
         }
+    }
+
+    /// The same skin, drawn from a rung of a different shape.
+    pub const fn drawn_as(self, rung: Rung) -> Self {
+        Self { rung, ..self }
     }
 
     pub const fn steps(&self) -> usize {
@@ -95,6 +158,53 @@ pub const BLOCKS: Skin = Skin::new("blocks", 8, Shapes::Discrete);
 /// What an LED strip is, and what a pixel surface can draw at any size without
 /// a shape per step.
 pub const SOLID: Skin = Skin::new("solid", 1, Shapes::Clipped);
+
+/// The six ladders rav offers, as the terminal's `b` key cycles them.
+///
+/// Every one is a whole cell or a fraction of one - which is why they need no
+/// artwork and no parser, and why a surface that is not made of cells can draw
+/// them from these numbers alone. Anything richer is a skin with shapes in it,
+/// and arrives with them.
+///
+/// The fractions come from what WezTerm renders, not from a font: `wezterm
+/// ls-fonts` reports every one of these as `drawn by wezterm because
+/// custom_block_glyphs=true`, so the font's outlines are not on screen. The
+/// difference matters most for the shades, which are flat opacity here and
+/// genuine dithers in a font file.
+pub mod ladders {
+    use super::{Rung, Shapes, Skin};
+
+    /// `█` - the whole cell. The original's look, and the smoothest, because
+    /// `▁▂▃▄▅▆▇` give it eight steps within a cell.
+    pub const BLOCKS: Skin = Skin::new("blocks", 8, Shapes::Discrete);
+
+    /// `▓` - a whole cell at three quarters, with `░▒` beneath it.
+    ///
+    /// Three steps, not eight: Unicode has no shaded eighth-blocks, so the top
+    /// of a shade bar fades in rather than rising.
+    pub const SHADE: Skin = Skin::new("shade", 4, Shapes::Discrete).drawn_as(Rung::shaded(0.75));
+
+    /// `▇` - the lower seven eighths. The densest that still shows a seam.
+    pub const SOLID: Skin = Skin::new("solid", 1, Shapes::Clipped).drawn_as(Rung::lower(7.0 / 8.0));
+
+    /// `▆` - the lower three quarters. Near-solid with a thin dark separator.
+    pub const THICK: Skin = Skin::new("thick", 1, Shapes::Clipped).drawn_as(Rung::lower(0.75));
+
+    /// `▄` - the lower half. Visibly striped.
+    pub const HALF: Skin = Skin::new("half", 1, Shapes::Clipped).drawn_as(Rung::lower(0.5));
+
+    /// `━` - a thin rule at mid-height. The airiest ladder.
+    ///
+    /// The one that floats. WezTerm draws it as a stroke across the middle of
+    /// the cell, so it neither sits on the rung's floor nor fills it - and a
+    /// ladder of these reads as rungs with air between them rather than as a
+    /// bar with gaps cut out.
+    pub const LINE: Skin = Skin::new("line", 1, Shapes::Clipped).drawn_as(Rung {
+        covers: 1.0 / 8.0,
+        floats: 7.0 / 16.0,
+        opacity: 1.0,
+    });
+}
 
 #[cfg(test)]
 mod tests {
