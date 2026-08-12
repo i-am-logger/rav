@@ -61,12 +61,16 @@ impl OnAPty {
         };
         assert_eq!(
             unsafe {
+                // A raw pointer rather than a reference: this argument is
+                // `*mut winsize` on Darwin and `*const winsize` on Linux, and
+                // only a `*mut` satisfies both - it coerces one way and not the
+                // other.
                 libc::openpty(
                     &mut master,
                     &mut slave,
                     std::ptr::null_mut(),
                     std::ptr::null_mut(),
-                    &mut want,
+                    std::ptr::from_mut(&mut want),
                 )
             },
             0,
