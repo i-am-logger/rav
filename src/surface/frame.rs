@@ -463,6 +463,62 @@ mod tests {
         );
     }
 
+    /// Why the pixel surface is expected to settle #63 and #64 rather than tune
+    /// around them.
+    #[test]
+    fn a_fall_slides_on_pixels_where_it_steps_on_glyphs() {
+        // A cell grid can only land a bar on an eighth of a row, so a slow fall
+        // crosses a fixed number of visible steps - and how many depends on the
+        // row count, which depends on the cell height, which differs by
+        // platform: `DEFAULT_DPI` is 72 on macOS and 96 elsewhere. The same
+        // descent stepping through more of them is what "the fall looks more
+        // aggressive on Linux" would be made of.
+        //
+        // Pixels have no such ladder. Every level lands where it is.
+        use crate::ui::scale::bar_eighths;
+        use rav_core::geometry::{BarLayout, Screen};
+        // 24 rows of 60 device pixels, which is what a WezTerm on this Mac
+        // reports - not the toy screen the other tests use.
+        let (rows, ch) = (24u16, 60.0f32);
+        let screen = Screen::new(Length(240.0), Length(f32::from(rows) * ch));
+        let layout = BarLayout::new(Length(20.0), Length(4.0));
+        let theme = Theme::default();
+        let palette = Palette::default();
+        let tall = (f32::from(rows) * ch) as u32;
+        let mut glyph_steps = std::collections::BTreeSet::new();
+        let mut pixel_tops = std::collections::BTreeSet::new();
+        for i in 0..40 {
+            let level = 0.60 - i as f32 * 0.0015;
+            glyph_steps.insert(bar_eighths(level, rows));
+            let look = Look {
+                theme: &theme,
+                palette: &palette,
+                backdrop: false,
+                caps: None,
+                ladder: None,
+            };
+            let rgba = Frame::new(&[level], &[level], &look, layout, screen)
+                .pixels()
+                .unwrap();
+            let inside = layout.column(0).left().get() as u32 + 5;
+            let idx = |y: u32| ((y * 240 + inside) * 4 + 3) as usize;
+            pixel_tops.insert((0..tall).find(|&y| rgba[idx(y)] != 0));
+        }
+        assert_eq!(
+            pixel_tops.len(),
+            40,
+            "the pixel surface collapsed levels it should be able to express",
+        );
+        assert!(
+            glyph_steps.len() * 2 < pixel_tops.len(),
+            "the glyph ladder resolved {} of 40 levels and pixels {} - if these \
+             are close, the cell is too short for this comparison to mean \
+             anything and the numbers below need revisiting",
+            glyph_steps.len(),
+            pixel_tops.len(),
+        );
+    }
+
     #[test]
     fn a_shaded_ladder_is_the_same_colour_more_faintly() {
         use crate::ui::analyzer::BarStyle;
