@@ -13,6 +13,20 @@ git_release_type = "auto"
 
 # cargo-semver-checks before each release: a breaking change proposed as a patch
 # bump is rejected and the version escalated.
+#
+# Inert for the whole 1.0.0-beta series, and left on so it starts working by
+# itself rather than needing to be remembered. Every bump between pre-release
+# versions is classified a *major* change, and a major change permits anything,
+# so every lint is skipped as vacuously satisfied:
+#
+#     $ cargo semver-checks check-release -p rav-appearance \
+#           --baseline-version 1.0.0-beta.7
+#     Checking rav-appearance v1.0.0-beta.7 -> v1.0.0-beta.8 (major change)
+#      Checked 0 checks: 0 pass, 254 skip
+#
+# `rav_appearance::skin::SOLID` was renamed in beta.9 and the release reported
+# "API compatible changes". So this guards nothing until 1.0.0 -> 1.0.1 - not
+# even the release *of* 1.0.0, which is a major change by the same rule.
 semver_check = true
 
 # Publishing requires merging a Release PR. An ordinary commit landing on master
