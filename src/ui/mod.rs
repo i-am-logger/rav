@@ -313,7 +313,10 @@ impl App {
             scope_style: ScopeStyle::default(),
             peaks: Peaks::default(),
             show_grid: true,
-            bar_style: BarStyle::default(),
+            // From the preset, not from `Default`: a preset naming a skin nothing
+            // reads is a preset that cannot describe how rav opens, and two
+            // answers to that question agree only until one of them moves.
+            bar_style: BarStyle::from_skin(preset.skin).unwrap_or_default(),
             show_help: false,
             status: None,
             source: None,
@@ -2498,5 +2501,27 @@ mod tests {
                 "{name} changed nothing in the pixels",
             );
         }
+    }
+
+    #[test]
+    fn rav_opens_as_the_preset_says_it_does() {
+        // One answer to "what does rav open as", not two that agree by accident.
+        // The preset names a skin; without this it is a field nothing reads and
+        // `BarStyle::default()` is the real answer, so a preset built for other
+        // hardware would be quietly ignored.
+        //
+        // Two assertions, because one would agree with itself. The first pins
+        // what the preset says - written out, so changing it fails here and asks
+        // to be told. The second pins that rav follows it.
+        assert_eq!(
+            rav_appearance::preset::RAV.skin,
+            rav_appearance::skin::ladders::BLOCKS,
+            "the preset rav ships with changed - is the opening style still right?",
+        );
+        assert_eq!(
+            app().bar_style,
+            BarStyle::Blocks,
+            "rav did not open as the skin its own preset names",
+        );
     }
 }

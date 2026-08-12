@@ -157,7 +157,11 @@ pub const BLOCKS: Skin = Skin::new("blocks", 8, Shapes::Discrete);
 ///
 /// What an LED strip is, and what a pixel surface can draw at any size without
 /// a shape per step.
-pub const SOLID: Skin = Skin::new("solid", 1, Shapes::Clipped);
+///
+/// Not to be confused with [`ladders::SOLID`], which is the terminal bar style
+/// `▇` - the lower seven eighths of every rung. This one has no rungs at all.
+/// They were both called "solid" for a day and that was one day too many.
+pub const PLAIN: Skin = Skin::new("plain", 1, Shapes::Clipped);
 
 /// The six ladders rav offers, as the terminal's `b` key cycles them.
 ///
@@ -240,7 +244,7 @@ mod tests {
         // cell that yields a half-density one, so a skin carrying the shades
         // cannot be drawn by clipping.
         assert!(BLOCKS.needs_a_shape_per_step());
-        assert!(!SOLID.needs_a_shape_per_step());
+        assert!(!PLAIN.needs_a_shape_per_step());
     }
 
     #[test]

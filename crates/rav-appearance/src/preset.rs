@@ -72,7 +72,7 @@ pub const STRIP: Preset = Preset {
     name: "strip",
     ballistics: ballistics::WINAMP,
     theme: &crate::theme::RAV,
-    skin: skin::SOLID,
+    skin: skin::PLAIN,
     curve: Curve::Decibel { floor: -48.0 },
 };
 

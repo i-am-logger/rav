@@ -80,6 +80,29 @@ impl BarStyle {
         }
     }
 
+    /// The style a preset asked for, or `None` if it named a skin no bar style
+    /// corresponds to.
+    ///
+    /// The inverse of [`Self::skin`], so a preset naming `blocks` opens as
+    /// `Blocks` rather than as whatever `Default` happens to say. Without it a
+    /// preset carries a skin nothing reads, and rav has two answers to "what
+    /// does it open as" that agree only by coincidence.
+    ///
+    /// `None` is an ordinary outcome: `skin::PLAIN` is what a strip of lights
+    /// is, and no terminal bar style is that. The caller keeps its default.
+    pub fn from_skin(skin: rav_appearance::Skin) -> Option<Self> {
+        [
+            BarStyle::Shade,
+            BarStyle::Blocks,
+            BarStyle::Solid,
+            BarStyle::Thick,
+            BarStyle::Half,
+            BarStyle::Line,
+        ]
+        .into_iter()
+        .find(|style| style.skin() == skin)
+    }
+
     /// Glyph for a fully lit row.
     fn glyph(self) -> &'static str {
         match self {
@@ -1017,5 +1040,45 @@ mod tests {
         for x in 0..4u16 {
             assert_eq!(buf[(x, 0)].symbol(), "█", "column {x} should be filled");
         }
+    }
+
+    #[test]
+    fn every_bar_style_is_a_skin_and_back_again() {
+        // The two directions have to agree, or a preset naming a skin opens as
+        // something else and the panel reports a style the picture is not.
+        for style in [
+            BarStyle::Shade,
+            BarStyle::Blocks,
+            BarStyle::Solid,
+            BarStyle::Thick,
+            BarStyle::Half,
+            BarStyle::Line,
+        ] {
+            assert_eq!(
+                BarStyle::from_skin(style.skin()),
+                Some(style),
+                "{style:?} does not come back from its own skin",
+            );
+        }
+
+        // Every ladder is distinct, so the round trip above is not six styles
+        // agreeing to be the same one.
+        let skins: std::collections::BTreeSet<&str> = [
+            BarStyle::Shade,
+            BarStyle::Blocks,
+            BarStyle::Solid,
+            BarStyle::Thick,
+            BarStyle::Half,
+            BarStyle::Line,
+        ]
+        .into_iter()
+        .map(|s| s.skin().name)
+        .collect();
+        assert_eq!(skins.len(), 6, "two bar styles share a skin: {skins:?}");
+
+        // A skin that is not a bar style is not one: `plain` is what a strip of
+        // lights is, and the caller keeps its own default rather than being
+        // given a wrong answer.
+        assert_eq!(BarStyle::from_skin(rav_appearance::skin::PLAIN), None);
     }
 }
