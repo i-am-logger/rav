@@ -45,8 +45,14 @@ rav --clean           # log almost nothing
 rav --surface kitty   # auto, glyphs, kitty or window
 ```
 
-`--surface` only reports for now. Press `h` and rav tells you which surface it
-would draw on and why; block characters draw the picture either way.
+`--surface kitty` draws the bars as **pixels** in WezTerm, Ghostty or kitty. A
+peak cap then rides over the backdrop instead of erasing the cell it crosses,
+and the bar ladder is even at any font size — the two things a terminal cell
+cannot do.
+
+You have to ask for it. `auto` still draws block characters everywhere, however
+capable your terminal is. Press `h` and the panel names the surface rav is on
+and why it chose it.
 
 Everything else is a keypress, and `h` shows the lot with their current values:
 
@@ -97,10 +103,12 @@ The ballistics, and the ramp the `rav` and `winamp` themes use, come from
 
 ## What's next
 
-**Pixels instead of block characters.** A terminal cell holds one character and
-one background, so today a peak cap erases the grid it crosses and the bar ladder
-is uneven at most font sizes. Drawing the pixels fixes both, and lets `+`/`-`
-resize the bars without touching your terminal font.
+**Pixels by default.** They are here behind `--surface kitty`; what is left is
+choosing them for you. A terminal cell holds one character and one background,
+so on the default path a peak cap still erases the grid it crosses and the bar
+ladder is still uneven at most font sizes. Drawing the pixels fixes both, and
+that is where every terminal capable of it is headed once the opt-in path has
+had a few releases in the open.
 
 **Then a window of its own, and small displays** — the same bars and the same
 colours on a strip of LEDs in a speaker cabinet, or a matrix behind a car
