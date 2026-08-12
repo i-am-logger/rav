@@ -58,3 +58,20 @@ where the newest run begins.
 On Linux that list is ALSA PCMs only — a PipeWire/PulseAudio `.monitor` source
 is not in it and cannot be selected with `-d`. Route the capture from the
 PipeWire side instead; see [audio.md](audio.md).
+
+## `--surface kitty` draws block characters anyway
+
+Press `h`. The last row of the panel names the surface and the reason, and it
+reports rather than forecasts: **drawing on** while the pixels are going,
+**would draw on** while they are not.
+
+| what it says | |
+|---|---|
+| `pixels (asked for)` | pixels are going, and nothing needs fixing |
+| `glyphs (your terminal will not say how big it is in pixels)` | rav asked the terminal how big it is and got no answer. Deriving a cell size from the font is the rounding the pixel surface exists to remove, so rav declines to guess |
+| `glyphs (your terminal can draw images - try --surface kitty)` | `auto`, on a terminal that could. Pixels are opt-in and stay that way for a few releases |
+| `glyphs (tmux or screen is in the way)` | image escapes do not pass through a multiplexer intact. An explicit `--surface kitty` is still honoured — asking always wins — but it is the terminal underneath that has to answer |
+
+**Pixels are the bars.** The oscilloscope is block characters on every surface,
+so `Space` takes the picture down and the panel goes back to saying *would*.
+Switching back brings it up again.
