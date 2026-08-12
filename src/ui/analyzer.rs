@@ -156,6 +156,35 @@ impl Peaks {
         }
     }
 
+    /// Where a cap sits on a surface that is not made of cells.
+    ///
+    /// A fraction of full scale, so a pixel surface can place it directly.
+    ///
+    /// `Coarse` is one position per row - the middle of the row the peak falls
+    /// in, which is where the original panel drew it and what [`Self::cell`]
+    /// still does with `CAP_MID`. Keeping that on a surface that could place the
+    /// cap anywhere is the whole point of offering the setting: coarse is a
+    /// look, not a limitation, and it steps as it falls.
+    ///
+    /// `Fine` leaves the cap where the ballistics put it. That is the position a
+    /// cell cannot express and pixels can, and without this the two settings
+    /// draw the same frame while the help panel reports a difference.
+    pub fn placed(self, peak: f32, rows: u16) -> f32 {
+        let peak = if peak.is_finite() {
+            peak.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        match self {
+            Peaks::Coarse => {
+                let rows = f32::from(rows.max(1));
+                let row = (peak * rows).floor().min(rows - 1.0);
+                (row + 0.5) / rows
+            }
+            Peaks::Fine | Peaks::Off => peak,
+        }
+    }
+
     /// Row and glyph for a cap at `peak`, or `None` when caps are off.
     fn cell(self, peak: f32, height: u16) -> Option<(u16, &'static str)> {
         if self == Peaks::Off {

@@ -187,6 +187,12 @@ pub struct App {
     /// Reused every frame so the render path does not allocate.
     sampled: Vec<f32>,
     bands: Vec<f32>,
+    /// Where the caps sit once `p` has had its say, for the pixel surface.
+    ///
+    /// Reused for the same reason as the two above. A cell has one position per
+    /// row and needs no such thing; pixels can put a cap anywhere, so which of
+    /// the two the user asked for has to be decided before the frame is drawn.
+    cap_levels: Vec<f32>,
 
     theme: Theme,
     /// A theme loaded from disk by `--theme`, kept so the `t` cycle returns to it.
@@ -290,6 +296,7 @@ impl App {
             gain_db: 0.0,
             curve: preset.curve,
             sampled: Vec::new(),
+            cap_levels: Vec::new(),
             bands: Vec::new(),
             theme: Theme::from(preset.theme),
             loaded_theme: None,
@@ -468,14 +475,20 @@ impl App {
             // proportion its caps were drawn at.
             caps: (self.peaks != Peaks::Off).then(|| screen.height() / 16.0),
         };
-        let Some(pixels) = Frame::new(
-            self.ballistics.bars(),
-            self.ballistics.peaks(),
-            &look,
-            layout,
-            screen,
-        )
-        .pixels() else {
+        // `coarse` and `fine` are the same cap on a cell grid - one position per
+        // row is all a cell offers - so the difference has to be made here or
+        // the two settings draw the same frame while `h` reports a difference.
+        let mut caps = std::mem::take(&mut self.cap_levels);
+        caps.clear();
+        caps.extend(
+            self.ballistics
+                .peaks()
+                .iter()
+                .map(|&peak| self.peaks.placed(peak, size.rows)),
+        );
+        let drawn = Frame::new(self.ballistics.bars(), &caps, &look, layout, screen).pixels();
+        self.cap_levels = caps;
+        let Some(pixels) = drawn else {
             return Ok(false);
         };
 
@@ -2345,5 +2358,87 @@ mod tests {
             "the frame a terminal would draw is entirely transparent",
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn coarse_and_fine_caps_are_two_different_pictures_in_pixels() {
+        // `p` offers three positions and the help panel names all three, so all
+        // three have to be worth pressing. On a cell grid they are: a cell has
+        // one position per row, and `coarse` and `fine` differ in whether the
+        // cap may sit mid-cell. Pixels can put a cap anywhere, so without
+        // deciding here the two draw an identical frame while `h` claims they
+        // do not - a setting that lies, which is the defect this whole surface
+        // was meant to stop making.
+        let frame_for = |want: Peaks, dir: &std::path::Path| {
+            let mut a = app();
+            a.resize(80, 24);
+            while a.peaks != want {
+                a.apply(Action::TogglePeaks);
+            }
+            a.sized_for = (0, 0);
+            a.resize(80, 24);
+            // A signal, so there are caps somewhere worth looking at. Sized here
+            // rather than from `a.bands`, which is empty until the analysis has
+            // run and would leave the ballistics with nothing to hold.
+            let bands: Vec<f32> = (0..40).map(|i| 0.2 + (i % 7) as f32 / 9.0).collect();
+            a.ballistics.step(&bands, 1.0 / 60.0);
+            let mut out = Vec::new();
+            a.painted(&mut out, window(), dir, None, None).unwrap();
+            std::fs::read_dir(dir)
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .max_by_key(|e| e.metadata().unwrap().modified().unwrap())
+                .map(|e| std::fs::read(e.path()).unwrap())
+                .expect("a staged frame")
+        };
+
+        let fine_dir = scratch("caps-fine");
+        let coarse_dir = scratch("caps-coarse");
+        let off_dir = scratch("caps-off");
+        let fine = frame_for(Peaks::Fine, &fine_dir);
+        let coarse = frame_for(Peaks::Coarse, &coarse_dir);
+        let off = frame_for(Peaks::Off, &off_dir);
+
+        assert_ne!(
+            fine, coarse,
+            "fine and coarse draw the same frame, so one of the two is a label \
+             with nothing behind it",
+        );
+        assert_ne!(fine, off, "switching the caps off changed nothing");
+        assert_ne!(coarse, off, "switching the caps off changed nothing");
+
+        for dir in [fine_dir, coarse_dir, off_dir] {
+            std::fs::remove_dir_all(&dir).ok();
+        }
+    }
+
+    #[test]
+    fn a_coarse_cap_sits_at_one_of_the_rows_and_a_fine_one_anywhere() {
+        // What the two settings mean, rather than only that they differ.
+        // Coarse is the original panel's cap: one position per row, the middle
+        // of the row the peak falls in, so it steps as it falls.
+        let rows = 24u16;
+        for (peak, expected) in [(0.0f32, 0.5 / 24.0), (0.5, 12.5 / 24.0), (1.0, 23.5 / 24.0)] {
+            let placed = Peaks::Coarse.placed(peak, rows);
+            assert!(
+                (placed - expected).abs() < 1e-5,
+                "a coarse cap at {peak} sits at {placed}, not {expected}",
+            );
+        }
+        // Every coarse position is the middle of some row, whatever the peak.
+        for step in 0..=100 {
+            let placed = Peaks::Coarse.placed(step as f32 / 100.0, rows);
+            let row = placed * f32::from(rows) - 0.5;
+            assert!(
+                (row - row.round()).abs() < 1e-4,
+                "a coarse cap landed between rows, at row {row}",
+            );
+        }
+        // Fine is left alone - that is the position a cell cannot express.
+        assert_eq!(Peaks::Fine.placed(0.137, rows), 0.137);
+        assert_eq!(Peaks::Off.placed(0.137, rows), 0.137);
+        // And nonsense does not escape.
+        assert_eq!(Peaks::Fine.placed(f32::NAN, rows), 0.0);
+        assert!(Peaks::Coarse.placed(99.0, rows) <= 1.0);
     }
 }
