@@ -375,10 +375,11 @@ mod against_the_glyphs {
         let screen = Screen::new(Length(cols as f32 * cw), Length(rows as f32 * ch));
         let layout = BarLayout::new(Length(cw), Length(0.0));
 
-        // A ramp across the display, so every height between silence and full
-        // scale is checked rather than a few chosen ones.
+        // A ramp across the display, reaching both ends: bar 0 is silence and the
+        // last is full scale, which are the two heights most worth checking and
+        // the two a ramp that stops short of them never sees.
         let levels: Vec<f32> = (0..cols as usize)
-            .map(|i| 0.05 + 0.9 * (i as f32 / cols as f32))
+            .map(|i| i as f32 / (cols - 1) as f32)
             .collect();
         let look = Look {
             theme: &theme,
