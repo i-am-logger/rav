@@ -252,6 +252,77 @@ mod tests {
     }
 
     #[test]
+    fn the_backdrop_runs_right_up_to_the_cap_and_out_the_other_side() {
+        // This is the whole argument for owning the pixels, stated where it can
+        // be checked: issue #65's third defect, which no terminal build can fix.
+        //
+        // A cell holds one symbol. When a cap crosses the backdrop there, the
+        // cap's glyph *replaces* the backdrop's, so a notch a whole cell tall
+        // travels down the column behind the falling cap. Measured on the glyph
+        // renderer: with the grid on and a bar style whose backdrop is a glyph -
+        // solid, thick, half, line, four of the six - the backdrop rung at the
+        // cap's row is simply gone.
+        //
+        // Here the cap is two pixels of its own, so the backdrop is intact one
+        // pixel above it and one pixel below. That is the difference between
+        // losing a cell of backdrop and losing nothing.
+        let caps = Length(2.0);
+        let pixels = capped(&[0.3], &[0.8], true, Some(caps));
+        let inside = layout().column(0).left().get() as u32 + 5;
+        let cap_row = (TALL * (1.0 - 0.8)) as u32;
+
+        let cap = at(&pixels, inside, cap_row);
+        assert_ne!(cap.3, 0, "no cap at the peak");
+
+        // Far enough from the cap to be past its thickness, close enough that a
+        // terminal drawing this would still be inside the one cell it lost.
+        let clear = 3;
+        let above_row = cap_row.checked_sub(clear);
+        let below_row = cap_row + caps.get() as u32 + clear;
+        // Stated rather than assumed. `at` indexes without checking, so a peak
+        // nearer the ceiling than this would panic in the sampling rather than
+        // fail on the thing being tested - and the failure would read as a bug
+        // in the frame.
+        let above_row =
+            above_row.expect("the peak sits far enough from the ceiling to sample above it");
+        assert!(
+            below_row < TALL as u32,
+            "the sample below the cap is off the bottom of the frame",
+        );
+
+        let above = at(&pixels, inside, above_row);
+        let below = at(&pixels, inside, below_row);
+
+        assert_ne!(
+            above.3, 0,
+            "the backdrop is missing above the cap - a notch, which is the \
+             defect this surface exists to remove",
+        );
+        assert_ne!(below.3, 0, "the backdrop is missing below the cap");
+
+        // And it is the backdrop either side, not more cap: the mark has to be
+        // readable as a mark rather than smeared over the column. Near rather
+        // than equal, because the backdrop is a ramp - a few pixels apart on it
+        // is a shade apart, and demanding the same colour would be demanding the
+        // ramp not be a ramp.
+        let apart = |a: (u8, u8, u8, u8), b: (u8, u8, u8, u8)| {
+            u32::from(a.0.abs_diff(b.0))
+                + u32::from(a.1.abs_diff(b.1))
+                + u32::from(a.2.abs_diff(b.2))
+        };
+        assert!(
+            apart(above, below) < 16,
+            "the backdrop is a different colour either side of the cap: \
+             {above:?} against {below:?}",
+        );
+        assert!(
+            apart(above, cap) > 64,
+            "the cap is indistinguishable from the backdrop: {cap:?} against \
+             {above:?}",
+        );
+    }
+
+    #[test]
     fn a_screen_with_no_area_gives_no_frame() {
         // A terminal mid-resize, every time one is dragged.
         let nothing = Screen::new(Length::NONE, Length::NONE);
