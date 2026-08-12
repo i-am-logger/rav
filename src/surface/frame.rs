@@ -480,29 +480,30 @@ mod tests {
         // 24 rows of 60 device pixels, which is what a WezTerm on this Mac
         // reports - not the toy screen the other tests use.
         let (rows, ch) = (24u16, 60.0f32);
-        let screen = Screen::new(Length(240.0), Length(f32::from(rows) * ch));
+        let screen = Screen::new(Length(WIDE), Length(f32::from(rows) * ch));
         let layout = BarLayout::new(Length(20.0), Length(4.0));
         let theme = Theme::default();
         let palette = Palette::default();
         let tall = (f32::from(rows) * ch) as u32;
+        // Built once: nothing in the loop changes the look, only the level.
+        let look = Look {
+            theme: &theme,
+            palette: &palette,
+            backdrop: false,
+            caps: None,
+            ladder: None,
+        };
+        let inside = layout.column(0).left().get() as u32 + 5;
         let mut glyph_steps = std::collections::BTreeSet::new();
         let mut pixel_tops = std::collections::BTreeSet::new();
         for i in 0..40 {
             let level = 0.60 - i as f32 * 0.0015;
             glyph_steps.insert(bar_eighths(level, rows));
-            let look = Look {
-                theme: &theme,
-                palette: &palette,
-                backdrop: false,
-                caps: None,
-                ladder: None,
-            };
             let rgba = Frame::new(&[level], &[level], &look, layout, screen)
                 .pixels()
-                .unwrap();
-            let inside = layout.column(0).left().get() as u32 + 5;
-            let idx = |y: u32| ((y * 240 + inside) * 4 + 3) as usize;
-            pixel_tops.insert((0..tall).find(|&y| rgba[idx(y)] != 0));
+                .expect("a screen with area");
+            let alpha = |y: u32| rgba[((y * WIDE as u32 + inside) * 4 + 3) as usize];
+            pixel_tops.insert((0..tall).find(|&y| alpha(y) != 0));
         }
         assert_eq!(
             pixel_tops.len(),
