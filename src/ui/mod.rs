@@ -826,12 +826,20 @@ impl App {
                 description: "quit",
                 value: None,
             },
-            // No key, because there is none: `--surface` is a flag. "Would"
-            // rather than "does" is the literal truth for this beta - the glyph
-            // renderer draws the frame you are looking at whatever this says.
+            // No key, because there is none: `--surface` is a flag.
+            //
+            // "Drawing on" while the pixels are going and "would draw on" when
+            // they are not. The distinction is the whole of what this row is
+            // for: `auto` still picks glyphs however capable the terminal is,
+            // so a reader who sees "pixels" needs to know whether that is a
+            // report or a forecast.
             HelpRow {
                 key: "",
-                description: "would draw on",
+                description: if self.painting {
+                    "drawing on"
+                } else {
+                    "would draw on"
+                },
                 value: Some(format!(
                     "{} ({})",
                     self.surface.surface.label(),
@@ -1921,6 +1929,21 @@ mod tests {
         assert_eq!(
             readout,
             Some("glyphs (tmux or screen is in the way)".to_string())
+        );
+
+        // And it stops saying "would" once it is. `auto` picks glyphs however
+        // capable the terminal is, so a reader who sees "pixels" has to be able
+        // to tell a report from a forecast.
+        a.painting = true;
+        assert!(
+            a.help_rows().iter().any(|r| r.description == "drawing on"),
+            "the panel still says it *would* draw while it is drawing",
+        );
+        assert!(
+            a.help_rows()
+                .iter()
+                .all(|r| r.description != "would draw on"),
+            "both readings at once",
         );
     }
 
