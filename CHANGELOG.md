@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-beta.9](https://github.com/i-am-logger/rav/compare/rav-v1.0.0-beta.8...rav-v1.0.0-beta.9) - 2026-08-12
+
+### Added
+
+- the bar styles are shapes on pixels, not six labels over one picture ([#93](https://github.com/i-am-logger/rav/pull/93))
+- rav can draw its bars as pixels ([#84](https://github.com/i-am-logger/rav/pull/84))
+
+### Documentation
+
+- say where a frame ends up, and what to do when it does not ([#105](https://github.com/i-am-logger/rav/pull/105))
+- *(developing)* the module map was missing the pixel surface ([#100](https://github.com/i-am-logger/rav/pull/100))
+- the README still said pixels were coming ([#99](https://github.com/i-am-logger/rav/pull/99))
+- *(release)* say that the semver guard does not run during the beta ([#97](https://github.com/i-am-logger/rav/pull/97))
+- say where the block shapes ended up ([#95](https://github.com/i-am-logger/rav/pull/95))
+- say that rav.log holds every run, not just this one ([#88](https://github.com/i-am-logger/rav/pull/88))
+
+### Fixed
+
+- the cursor stops blinking on top of the bars ([#107](https://github.com/i-am-logger/rav/pull/107))
+- --help stopped saying the surface flag draws nothing ([#103](https://github.com/i-am-logger/rav/pull/103))
+- the panel stops saying it *would* draw once it is drawing ([#98](https://github.com/i-am-logger/rav/pull/98))
+- rav opens as the skin its own preset names ([#96](https://github.com/i-am-logger/rav/pull/96))
+- the help panel admits that bar style does nothing to pixels ([#92](https://github.com/i-am-logger/rav/pull/92))
+- coarse and fine caps are two different pictures again ([#91](https://github.com/i-am-logger/rav/pull/91))
+
 ## [1.0.0-beta.8](https://github.com/i-am-logger/rav/compare/rav-v1.0.0-beta.7...rav-v1.0.0-beta.8) - 2026-08-11
 
 ### Added
