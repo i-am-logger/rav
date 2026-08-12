@@ -118,7 +118,8 @@ prevent.
 | `src/signal/` | FFT front end, bin-to-bar mapping, bar and cap ballistics |
 | `src/visual/` | reading a theme a *user* wrote, and asking the terminal for its palette — the halves that need a filesystem and a terminal |
 | `src/ui/` | the `App` event loop and the analyser, scope, status and help widgets |
-| `src/render/` | the pixel surface: a `Canvas` over tiny-skia, and the one impl that puts a scene onto it |
+| `src/render/` | the rasteriser: a `Canvas` over tiny-skia, and the one impl that puts a scene onto it. Knows nothing about terminals |
+| `src/surface/` | where a frame goes. Asking the terminal what it can draw, composing a frame of pixels, and the kitty protocol that carries one — see the module note in `surface/pixels.rs` for the rules the terminal imposes |
 | `src/testing/` | signal sources with known ground truth — tones, noise, and notes by MIDI number |
 | `tests/`, `crates/rav-core/tests/` | the tests that have to see a crate from outside, and the ones that hold for *every* input rather than a chosen one |
 
