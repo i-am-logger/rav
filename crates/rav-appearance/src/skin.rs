@@ -26,13 +26,17 @@
 //! for. That is the same number, read differently - which is the whole reason
 //! the core deals in counts.
 //!
-//! # Not yet read
+//! # What reads one, and what does not yet
 //!
-//! Every preset names a skin and nothing looks at one, and none carries
-//! artwork. The terminal draws from `BarStyle`, which names its glyphs
-//! directly; a [`Skin`] carries only the step count and leaves the glyphs to
-//! the surface. That difference is what would let one setting dress a glyph
-//! grid, a pixel surface and an LED strip at once.
+//! A skin decides two things today. Which ladder the pixel surface draws - see
+//! [`ladders`], where each of the six the `b` key offers is held as fractions
+//! of a rung - and which of those rav opens as, since a `Preset` names one and
+//! `BarStyle::from_skin` turns it back into a style.
+//!
+//! None carries artwork. The terminal draws from `BarStyle`, which names its
+//! glyphs directly, and it is right that it does: it has the glyph, and drawing
+//! the shape underneath would only fight it. What is left is a skin that is a
+//! genuine drawing rather than a rectangle, which is where `usvg` comes in.
 
 /// How a skin covers a partial rung.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
