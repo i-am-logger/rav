@@ -64,20 +64,6 @@ pub fn cap_position(peak: f32, height: u16) -> (u16, f32) {
     (row as u16, (exact - row as f32).clamp(0.0, 1.0))
 }
 
-/// Row from the bottom that a cap occupies. **Truncates, then clamps.**
-#[inline]
-pub fn cap_row(peak: f32, height: u16) -> u16 {
-    if height == 0 {
-        return 0;
-    }
-    let p = if peak.is_finite() {
-        peak.clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
-    ((p * height as f32) as usize).min(height as usize - 1) as u16
-}
-
 /// How sharply stop selection is skewed when the ramp has to be subsampled.
 ///
 /// The classic ramp is green-heavy: stops 0-5 of 16 are all greens, distinguishable
@@ -163,14 +149,6 @@ mod tests {
     }
 
     #[test]
-    fn cap_row_stays_inside_the_area() {
-        assert_eq!(cap_row(0.0, 10), 0);
-        assert_eq!(cap_row(1.0, 10), 9, "full scale clamps to the top row");
-        assert_eq!(cap_row(0.5, 10), 5);
-        assert_eq!(cap_row(0.5, 0), 0, "zero height must not panic");
-    }
-
-    #[test]
     fn cap_position_splits_a_row_into_a_fraction() {
         let (row, frac) = cap_position(0.55, 10);
         assert_eq!(row, 5);
@@ -183,9 +161,21 @@ mod tests {
     }
 
     #[test]
-    fn cap_position_agrees_with_cap_row_and_survives_nonsense() {
-        for peak in [0.0f32, 0.13, 0.5, 0.99, 1.0] {
-            assert_eq!(cap_position(peak, 24).0, cap_row(peak, 24), "at {peak}");
+    fn cap_position_truncates_and_survives_nonsense() {
+        // Literal pairs rather than a second implementation to compare against.
+        // The row is the peak truncated into the height, so 0.99 of 24 is row
+        // 23 and full scale clamps to the same row rather than falling off.
+        // 0.4 of 24 is 9.6, which is the pair that tells truncation from rounding
+        // - every other value here reads the same either way.
+        for (peak, row) in [
+            (0.0f32, 0u16),
+            (0.13, 3),
+            (0.4, 9),
+            (0.5, 12),
+            (0.99, 23),
+            (1.0, 23),
+        ] {
+            assert_eq!(cap_position(peak, 24).0, row, "at {peak}");
         }
         for bad in [f32::NAN, f32::INFINITY, -5.0, 99.0] {
             let (row, frac) = cap_position(bad, 10);
@@ -200,7 +190,6 @@ mod tests {
         for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -5.0, 99.0] {
             assert!(bar_eighths(bad, 10) <= 80);
             assert!(segment_top(bad, 10) <= 10);
-            assert!(cap_row(bad, 10) <= 9);
         }
     }
 
