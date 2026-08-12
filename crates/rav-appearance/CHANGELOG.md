@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-beta.9](https://github.com/i-am-logger/rav/compare/rav-appearance-v1.0.0-beta.8...rav-appearance-v1.0.0-beta.9) - 2026-08-12
+
+### Added
+
+- the bar styles are shapes on pixels, not six labels over one picture ([#93](https://github.com/i-am-logger/rav/pull/93))
+
+### Documentation
+
+- *(appearance)* two module notes describing the world before pixels ([#101](https://github.com/i-am-logger/rav/pull/101))
+
+### Fixed
+
+- rav opens as the skin its own preset names ([#96](https://github.com/i-am-logger/rav/pull/96))
+
 ## [1.0.0-beta.8](https://github.com/i-am-logger/rav/compare/rav-appearance-v1.0.0-beta.7...rav-appearance-v1.0.0-beta.8) - 2026-08-11
 
 ### Added
