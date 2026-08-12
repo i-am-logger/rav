@@ -30,6 +30,25 @@ as the deliberate change it was.
 Skin shapes come from WezTerm's `customglyph.rs`: eighth blocks are full-width
 rectangles from `(8-n)·h/8`, and `░▒▓` are the whole cell at flat alpha.
 
+## Where they went
+
+The six built-in ladders now live in `rav-appearance`'s `skin::ladders`, as
+fractions of a rung rather than artwork:
+
+| style | rung |
+|---|---|
+| `blocks` `█` | the whole rung |
+| `shade` `▓` | the whole rung at 0.75 opacity — flat, per the above, not a dither |
+| `solid` `▇` | the lower seven eighths |
+| `thick` `▆` | the lower three quarters |
+| `half` `▄` | the lower half |
+| `line` `━` | an eighth in the middle, floating |
+
+Numbers rather than SVG because every one of them is a rectangle or a fraction
+of one. That keeps them on a target with no parser, no filesystem and no
+allocator — the same reason the themes are generated `const`s. Artwork is for
+skins that are actually drawings, and brings `usvg` with it when it arrives.
+
 This file stays as documentation of the other half of the story, and as the
 reason issue #63 looks different on Linux and macOS: the terminal, not the font,
 decides.
