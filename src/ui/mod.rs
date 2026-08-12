@@ -530,6 +530,16 @@ impl App {
             self.painted_cells = cells.clone();
         }
 
+        // Hidden for as long as the picture is up. Nothing on this path goes
+        // through ratatui, which hides the cursor on every draw of its own - so
+        // left alone it blinks at the home position, which is exactly where
+        // every frame puts it and therefore on top of the bars. The glyph
+        // renderer takes it back over when `stop_painting` hands the screen
+        // across, so this is the transition into pixels rather than every frame.
+        if !self.painting {
+            write!(out, "\x1b[?25l")?;
+        }
+
         write!(out, "\x1b[H")?;
         self.painter.send(
             out,
@@ -1819,6 +1829,41 @@ mod tests {
         assert!(
             !String::from_utf8_lossy(&steady).contains("\x1b[2J"),
             "it cleared a screen nothing had changed on",
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_cursor_goes_away_while_the_picture_is_up() {
+        // ratatui hides it on every draw of its own, and nothing here goes
+        // through ratatui. Left showing it blinks at the home position - which
+        // is where every frame puts it, so it lands on the bars rather than
+        // somewhere out of the way.
+        let mut a = app();
+        a.resize(80, 24);
+        let dir = scratch("cursor");
+
+        let mut first = Vec::new();
+        assert!(a.painted(&mut first, window(), &dir, None, None).unwrap());
+        let sent = String::from_utf8_lossy(&first);
+        let hidden = sent.find("\x1b[?25l").expect("the cursor was left showing");
+        assert!(
+            hidden < sent.find("a=T").expect("no frame"),
+            "the cursor was hidden after the picture was already up",
+        );
+
+        // The oscilloscope gives the screen back to ratatui, which owns the
+        // cursor again while it has it - so coming back to the bars has to hide
+        // it a second time.
+        a.apply(Action::CycleVisualisation);
+        a.painted(&mut Vec::new(), window(), &dir, None, None)
+            .unwrap();
+        a.apply(Action::CycleVisualisation);
+        let mut back = Vec::new();
+        assert!(a.painted(&mut back, window(), &dir, None, None).unwrap());
+        assert!(
+            String::from_utf8_lossy(&back).contains("\x1b[?25l"),
+            "the cursor stayed showing on the way back to the bars",
         );
         std::fs::remove_dir_all(&dir).ok();
     }
