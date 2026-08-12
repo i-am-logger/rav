@@ -797,7 +797,16 @@ impl App {
             HelpRow {
                 key: "b",
                 description: "bar style",
-                value: Some(self.bar_style.label().to_string()),
+                // Says so while the pixels are drawing, because it is the one
+                // setting here that does nothing on that surface. A bar style
+                // names glyphs - `▇`, `▆`, `━` - and a frame of pixels has none
+                // until the shapes arrive with the skins. Better to say that
+                // than to report a change the picture does not make.
+                value: Some(if self.painting {
+                    format!("{} (glyphs only)", self.bar_style.label())
+                } else {
+                    self.bar_style.label().to_string()
+                }),
             },
             HelpRow {
                 key: "g",
@@ -2440,5 +2449,92 @@ mod tests {
         // And nonsense does not escape.
         assert_eq!(Peaks::Fine.placed(f32::NAN, rows), 0.0);
         assert!(Peaks::Coarse.placed(99.0, rows) <= 1.0);
+    }
+
+    #[test]
+    fn every_key_that_should_change_the_pixels_changes_them() {
+        // `every_key_that_should_change_the_picture_changes_it` does this for
+        // the glyph renderer and cannot see this surface at all - which is how
+        // `p` came to cycle three positions here while drawing two pictures.
+        //
+        // Only the keys that act on the *frame* are here. Gain, bandwidth, the
+        // frequency range and the fall speed all act upstream of it: they change
+        // what the ballistics hold, and a frame drawn from different bars is a
+        // different frame on any surface. Feeding fixed bands to test them would
+        // bypass the very thing they change.
+        let render = |actions: &[Action], tag: &str| -> Vec<u8> {
+            let dir = scratch(tag);
+            let mut a = app();
+            a.resize(80, 24);
+            for act in actions {
+                a.apply(*act);
+            }
+            a.sized_for = (0, 0);
+            a.resize(80, 24);
+            // Sized here, not from `App::bands`, which is empty until the
+            // analysis has run - a frame with no bars in it compares equal to
+            // every other frame with no bars in it.
+            let bands: Vec<f32> = (0..40).map(|i| 0.2 + (i % 7) as f32 / 9.0).collect();
+            a.ballistics.step(&bands, 1.0 / 60.0);
+            let mut out = Vec::new();
+            a.painted(&mut out, window(), &dir, None, None)
+                .expect("a frame");
+            let frame = std::fs::read_dir(&dir)
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .max_by_key(|e| e.metadata().unwrap().modified().unwrap())
+                .map(|e| std::fs::read(e.path()).unwrap())
+                .expect("a staged frame");
+            std::fs::remove_dir_all(&dir).ok();
+            frame
+        };
+
+        let base = render(&[], "pixels-base");
+        for (name, action) in [
+            ("t", Action::CycleTheme),
+            ("p", Action::TogglePeaks),
+            ("g", Action::ToggleGrid),
+            ("+", Action::BarSize(1)),
+        ] {
+            assert_ne!(
+                render(&[action], name),
+                base,
+                "{name} changed nothing in the pixels",
+            );
+        }
+
+        // And the one that knowingly does nothing here, so the day it starts
+        // working this fails and asks to be told about it. Bar styles name
+        // glyphs; the shapes that would replace them arrive with the skins.
+        assert_eq!(
+            render(&[Action::CycleBarStyle], "b"),
+            base,
+            "`b` now changes the pixels - say so in the help panel, which \
+             currently tells the user it does not",
+        );
+    }
+
+    #[test]
+    fn the_bar_style_row_admits_it_does_nothing_to_pixels() {
+        // The panel is the one place a user finds out why pressing a key
+        // changed nothing. Reporting "bars solid" while the picture is
+        // identical to "bars blocks" is the kind of lie this display keeps
+        // being caught in.
+        let mut a = app();
+        let row = |a: &App| {
+            a.help_rows()
+                .into_iter()
+                .find(|r| r.key == "b")
+                .and_then(|r| r.value)
+                .expect("no bar style row")
+        };
+        assert_eq!(row(&a), "blocks", "on glyphs the style is simply the style");
+
+        a.painting = true;
+        assert_eq!(
+            row(&a),
+            "blocks (glyphs only)",
+            "the panel claims the bar style is doing something to the pixels",
+        );
     }
 }
