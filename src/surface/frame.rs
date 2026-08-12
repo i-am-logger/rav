@@ -348,3 +348,65 @@ mod tests {
         assert_eq!(layout().column(1).left(), Length(24.0));
     }
 }
+
+#[cfg(test)]
+mod against_the_glyphs {
+    use super::*;
+    use crate::ui::scale::bar_eighths;
+    use rav_core::geometry::{BarLayout, Screen};
+
+    #[test]
+    fn a_pixel_bar_stands_where_the_glyph_bar_did_without_its_rounding() {
+        // The acceptance test for moving off glyphs: the first pixel release has
+        // to draw the picture the glyph release drew at the same size. Anything
+        // else is a regression rather than the redesign it was sold as.
+        //
+        // Not identical, and it would be wrong if it were. A glyph bar is
+        // truncated to a whole eighth of a cell - that is the finest a block
+        // character goes - so the pixel bar is the same height or up to one
+        // eighth taller, being the height nothing rounded. Never shorter, and
+        // never more than the one eighth the rounding could account for.
+        //
+        // 80x24 cells at 30x60 device pixels, which is what a WezTerm on this
+        // Mac reports, and one bar per cell column so the two line up.
+        let (cols, rows, cw, ch) = (80u16, 24u16, 30.0f32, 60.0f32);
+        let theme = Theme::default();
+        let palette = Palette::default();
+        let screen = Screen::new(Length(cols as f32 * cw), Length(rows as f32 * ch));
+        let layout = BarLayout::new(Length(cw), Length(0.0));
+
+        // A ramp across the display, reaching both ends: bar 0 is silence and the
+        // last is full scale, which are the two heights most worth checking and
+        // the two a ramp that stops short of them never sees.
+        let levels: Vec<f32> = (0..cols as usize)
+            .map(|i| i as f32 / (cols - 1) as f32)
+            .collect();
+        let look = Look {
+            theme: &theme,
+            palette: &palette,
+            backdrop: false,
+            caps: None,
+        };
+        let rgba = Frame::new(&levels, &levels, &look, layout, screen)
+            .pixels()
+            .expect("a screen with area");
+
+        let width = (cols as f32 * cw) as u32;
+        let tall = (rows as f32 * ch) as u32;
+        let drawn = |x: u32, y: u32| rgba[((y * width + x) * 4 + 3) as usize] != 0;
+
+        for (i, &level) in levels.iter().enumerate() {
+            let x = (i as f32 * cw + cw / 2.0) as u32;
+            let top = (0..tall).find(|&y| drawn(x, y)).unwrap_or(tall);
+            let in_eighths = ((tall - top) as f32 / ch * 8.0).round() as i64;
+            let glyph = bar_eighths(level, rows) as i64;
+
+            assert!(
+                (in_eighths - glyph) == 0 || (in_eighths - glyph) == 1,
+                "bar {i} at level {level:.3}: the glyph renderer draws {glyph} \
+                 eighths and this draws {in_eighths} - the two have parted \
+                 company by more than the eighth a block character rounds to",
+            );
+        }
+    }
+}
