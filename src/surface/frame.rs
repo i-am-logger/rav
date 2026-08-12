@@ -276,8 +276,22 @@ mod tests {
 
         // Far enough from the cap to be past its thickness, close enough that a
         // terminal drawing this would still be inside the one cell it lost.
-        let above = at(&pixels, inside, cap_row - 3);
-        let below = at(&pixels, inside, cap_row + caps.get() as u32 + 3);
+        let clear = 3;
+        let above_row = cap_row.checked_sub(clear);
+        let below_row = cap_row + caps.get() as u32 + clear;
+        // Stated rather than assumed. `at` indexes without checking, so a peak
+        // nearer the ceiling than this would panic in the sampling rather than
+        // fail on the thing being tested - and the failure would read as a bug
+        // in the frame.
+        let above_row =
+            above_row.expect("the peak sits far enough from the ceiling to sample above it");
+        assert!(
+            below_row < TALL as u32,
+            "the sample below the cap is off the bottom of the frame",
+        );
+
+        let above = at(&pixels, inside, above_row);
+        let below = at(&pixels, inside, below_row);
 
         assert_ne!(
             above.3, 0,
@@ -288,8 +302,8 @@ mod tests {
 
         // And it is the backdrop either side, not more cap: the mark has to be
         // readable as a mark rather than smeared over the column. Near rather
-        // than equal, because the backdrop is a ramp - six pixels apart on it is
-        // a shade apart, and demanding the same colour would be demanding the
+        // than equal, because the backdrop is a ramp - a few pixels apart on it
+        // is a shade apart, and demanding the same colour would be demanding the
         // ramp not be a ramp.
         let apart = |a: (u8, u8, u8, u8), b: (u8, u8, u8, u8)| {
             u32::from(a.0.abs_diff(b.0))
