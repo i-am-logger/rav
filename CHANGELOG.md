@@ -28,7 +28,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - --help stopped saying the surface flag draws nothing ([#103](https://github.com/i-am-logger/rav/pull/103))
 - the panel stops saying it *would* draw once it is drawing ([#98](https://github.com/i-am-logger/rav/pull/98))
 - rav opens as the skin its own preset names ([#96](https://github.com/i-am-logger/rav/pull/96))
-- the help panel admits that bar style does nothing to pixels ([#92](https://github.com/i-am-logger/rav/pull/92))
 - coarse and fine caps are two different pictures again ([#91](https://github.com/i-am-logger/rav/pull/91))
 
 ## [1.0.0-beta.8](https://github.com/i-am-logger/rav/compare/rav-v1.0.0-beta.7...rav-v1.0.0-beta.8) - 2026-08-11
