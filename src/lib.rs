@@ -4,7 +4,9 @@
 //! tests and `rav` compile one copy of the tree rather than two.
 //!
 //! Capture is in [`audio`], analysis in [`signal`], and what a level looks like
-//! in [`visual`] and [`render`]. [`ui`] holds the event loop and the widgets.
+//! in [`visual`] and [`render`]. [`surface`] is where the picture ends up -
+//! block characters, or pixels carried by the kitty graphics protocol. [`ui`]
+//! holds the event loop and the widgets.
 //! The portable half - levels, geometry, colours, themes - lives in `rav-core`
 //! and `rav-appearance`, re-exported below.
 
