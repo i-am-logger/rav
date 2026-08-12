@@ -17,6 +17,7 @@
 
 use crate::ink::Colour;
 use crate::ramp::Ramp;
+use crate::skin::Skin;
 use rav_core::geometry::{BarLayout, Screen};
 use rav_core::units::{Length, Level};
 
@@ -96,6 +97,14 @@ pub struct Style<'a> {
     pub grid: Option<&'a Ramp>,
     /// `None` when caps are switched off.
     pub cap: Option<CapStyle>,
+    /// The ladder a bar is built from, and how tall one of its rungs is here.
+    ///
+    /// `None` draws the bar as one shape from the floor, which is what a
+    /// surface with rungs of its own wants: a cell grid already draws the rung
+    /// with a glyph, and drawing it twice would fight the glyph. A surface with
+    /// no rungs of its own draws them from this, which is the only way `b`
+    /// means anything on it.
+    pub ladder: Option<(Skin, Length)>,
 }
 
 /// How the peak caps are drawn.
@@ -161,6 +170,7 @@ mod tests {
             bars: &green,
             grid: None,
             cap: None,
+            ladder: None,
         }];
         let many: Vec<Band> = (0..64).map(|_| Band::default()).collect();
 
@@ -186,11 +196,13 @@ mod tests {
                 bars: &left,
                 grid: None,
                 cap: None,
+                ladder: None,
             },
             Style {
                 bars: &right,
                 grid: None,
                 cap: None,
+                ladder: None,
             },
         ];
         let bands = [
@@ -218,6 +230,7 @@ mod tests {
             bars: &green,
             grid: None,
             cap: None,
+            ladder: None,
         }];
         let stale = Band::default().styled(StyleId(9));
         let bands = [stale];

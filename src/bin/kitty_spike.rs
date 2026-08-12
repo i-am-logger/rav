@@ -472,6 +472,7 @@ fn paint(frame: &mut [u8], width: u32, tick: u64) {
             colour: Colour::rgb(0xff, 0xc0, 0xb0),
             thickness: Length(3.0),
         }),
+        ladder: None,
     }];
     Scene {
         bands: &bands,

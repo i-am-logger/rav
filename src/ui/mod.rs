@@ -474,6 +474,10 @@ impl App {
             // One row of the sixteen the original panel had, which is the
             // proportion its caps were drawn at.
             caps: (self.peaks != Peaks::Off).then(|| screen.height() / 16.0),
+            // A rung is a cell tall, so the ladder lines up with what the glyph
+            // renderer draws at the same size - the two are meant to be the
+            // same picture, and a ladder on its own pitch would not be.
+            ladder: Some((self.bar_style.skin(), cell.down(Cells(1)))),
         };
         // `coarse` and `fine` are the same cap on a cell grid - one position per
         // row is all a cell offers - so the difference has to be made here or
@@ -797,16 +801,7 @@ impl App {
             HelpRow {
                 key: "b",
                 description: "bar style",
-                // Says so while the pixels are drawing, because it is the one
-                // setting here that does nothing on that surface. A bar style
-                // names glyphs - `▇`, `▆`, `━` - and a frame of pixels has none
-                // until the shapes arrive with the skins. Better to say that
-                // than to report a change the picture does not make.
-                value: Some(if self.painting {
-                    format!("{} (glyphs only)", self.bar_style.label())
-                } else {
-                    self.bar_style.label().to_string()
-                }),
+                value: Some(self.bar_style.label().to_string()),
             },
             HelpRow {
                 key: "g",
@@ -2495,6 +2490,7 @@ mod tests {
             ("p", Action::TogglePeaks),
             ("g", Action::ToggleGrid),
             ("+", Action::BarSize(1)),
+            ("b", Action::CycleBarStyle),
         ] {
             assert_ne!(
                 render(&[action], name),
@@ -2502,39 +2498,5 @@ mod tests {
                 "{name} changed nothing in the pixels",
             );
         }
-
-        // And the one that knowingly does nothing here, so the day it starts
-        // working this fails and asks to be told about it. Bar styles name
-        // glyphs; the shapes that would replace them arrive with the skins.
-        assert_eq!(
-            render(&[Action::CycleBarStyle], "b"),
-            base,
-            "`b` now changes the pixels - say so in the help panel, which \
-             currently tells the user it does not",
-        );
-    }
-
-    #[test]
-    fn the_bar_style_row_admits_it_does_nothing_to_pixels() {
-        // The panel is the one place a user finds out why pressing a key
-        // changed nothing. Reporting "bars solid" while the picture is
-        // identical to "bars blocks" is the kind of lie this display keeps
-        // being caught in.
-        let mut a = app();
-        let row = |a: &App| {
-            a.help_rows()
-                .into_iter()
-                .find(|r| r.key == "b")
-                .and_then(|r| r.value)
-                .expect("no bar style row")
-        };
-        assert_eq!(row(&a), "blocks", "on glyphs the style is simply the style");
-
-        a.painting = true;
-        assert_eq!(
-            row(&a),
-            "blocks (glyphs only)",
-            "the panel claims the bar style is doing something to the pixels",
-        );
     }
 }

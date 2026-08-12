@@ -11,6 +11,7 @@
 
 use crate::render::{Band, Canvas, CapStyle, Draw, Ramp, Scene, Style};
 use crate::visual::{Palette, Theme};
+use rav_appearance::Skin;
 use rav_core::geometry::{BarLayout, Screen};
 use rav_core::units::{Length, Level};
 
@@ -28,6 +29,12 @@ pub struct Look<'a> {
     pub backdrop: bool,
     /// How thick a peak cap is, or `None` when `p` has switched them off.
     pub caps: Option<Length>,
+    /// The ladder `b` chose, and how tall a rung is on this surface.
+    ///
+    /// A cell grid draws its own rungs with a glyph and wants `None`. A frame of
+    /// pixels has no rungs of its own, so without this every bar style draws the
+    /// same solid bar and `b` is six labels over one picture.
+    pub ladder: Option<(Skin, Length)>,
 }
 
 /// Everything a frame needs, held for as long as it takes to draw.
@@ -36,6 +43,7 @@ pub struct Frame {
     bars: Ramp,
     grid: Option<Ramp>,
     cap: Option<CapStyle>,
+    ladder: Option<(Skin, Length)>,
     layout: BarLayout,
     screen: Screen,
 }
@@ -65,6 +73,7 @@ impl Frame {
                 colour: look.theme.cap_colour(look.palette),
                 thickness,
             }),
+            ladder: look.ladder,
             layout,
             screen,
         }
@@ -81,6 +90,7 @@ impl Frame {
             bars: &self.bars,
             grid: self.grid.as_ref(),
             cap: self.cap,
+            ladder: self.ladder,
         }];
         Scene {
             bands: &self.bands,
@@ -125,6 +135,7 @@ mod tests {
             palette: Box::leak(Box::new(Palette::default())),
             backdrop: true,
             caps: None,
+            ladder: None,
         }
     }
 
@@ -140,6 +151,7 @@ mod tests {
             palette: &palette,
             backdrop,
             caps,
+            ladder: None,
         };
         Frame::new(levels, peaks, &look, layout(), screen())
             .pixels()
@@ -347,6 +359,128 @@ mod tests {
         assert_eq!(first.right(), Length(20.0));
         assert_eq!(layout().column(1).left(), Length(24.0));
     }
+
+    /// The same frame, drawn as the ladder `style` describes with 20px rungs.
+    fn laddered(level: f32, style: crate::ui::analyzer::BarStyle) -> Vec<u8> {
+        let theme = Theme::default();
+        let palette = Palette::default();
+        let look = Look {
+            theme: &theme,
+            palette: &palette,
+            backdrop: false,
+            caps: None,
+            ladder: Some((style.skin(), Length(20.0))),
+        };
+        Frame::new(&[level], &[level], &look, layout(), screen())
+            .pixels()
+            .expect("a screen with area")
+    }
+
+    #[test]
+    fn a_ladder_leaves_a_seam_where_its_glyph_does() {
+        use crate::ui::analyzer::BarStyle;
+        // What `b` chooses, drawn rather than named. `▇` is the lower seven
+        // eighths of a cell, so a bar of it shows a gap in the top eighth of
+        // every rung - which is the seam you see on a terminal, and which a
+        // frame of pixels has to draw for itself.
+        let inside = layout().column(0).left().get() as u32 + 5;
+        // Rungs are 20 tall and the bar is full, so the floor of the second rung
+        // up is 20 from the bottom and its top is 40.
+        let second_rung_top = TALL as u32 - 40;
+
+        let solid = laddered(1.0, BarStyle::Solid);
+        // Seven eighths of 20 is 17.5, so the top two and a half pixels of the
+        // rung are the seam. Two in is inside it; five in is under it.
+        assert_eq!(
+            at(&solid, inside, second_rung_top + 1).3,
+            0,
+            "no seam at the top of the rung - solid drew a solid bar",
+        );
+        assert_ne!(
+            at(&solid, inside, second_rung_top + 5).3,
+            0,
+            "the rung itself is missing below its seam",
+        );
+
+        // Blocks fill the cell, so the same place is drawn.
+        let blocks = laddered(1.0, BarStyle::Blocks);
+        assert_ne!(
+            at(&blocks, inside, second_rung_top + 1).3,
+            0,
+            "blocks left a seam, and a full block has none",
+        );
+    }
+
+    #[test]
+    fn a_rule_floats_and_a_ladder_does_not() {
+        use crate::ui::analyzer::BarStyle;
+        // `━` is a stroke across the middle of its cell, so a ladder of them is
+        // rules with air above *and below* each one. Every other style sits on
+        // the rung's floor.
+        let inside = layout().column(0).left().get() as u32 + 5;
+        let floor = TALL as u32 - 1;
+
+        assert_eq!(
+            at(&laddered(1.0, BarStyle::Line), inside, floor).3,
+            0,
+            "the rule is sitting on the floor rather than floating above it",
+        );
+        for style in [BarStyle::Blocks, BarStyle::Solid, BarStyle::Half] {
+            assert_ne!(
+                at(&laddered(1.0, style), inside, floor).3,
+                0,
+                "{style:?} left the floor of its bottom rung empty",
+            );
+        }
+    }
+
+    #[test]
+    fn the_default_style_draws_exactly_what_it_drew_before_ladders() {
+        // The acceptance property for giving `b` a meaning here: `blocks` is a
+        // full cell, so its ladder tiles the bar and has to come out as the one
+        // rectangle that was drawn before there were ladders at all. Byte for
+        // byte - abutting antialiased edges could have left hairlines at every
+        // rung boundary, and on the default style nobody would have called it a
+        // regression, only "the bars look a bit odd now".
+        use crate::ui::analyzer::BarStyle;
+        let plain = capped(&[1.0], &[1.0], false, None);
+        let theme = Theme::default();
+        let palette = Palette::default();
+        let look = Look {
+            theme: &theme,
+            palette: &palette,
+            backdrop: false,
+            caps: None,
+            ladder: Some((BarStyle::Blocks.skin(), Length(20.0))),
+        };
+        let laddered = Frame::new(&[1.0], &[1.0], &look, layout(), screen())
+            .pixels()
+            .unwrap();
+        assert_eq!(
+            plain, laddered,
+            "the blocks ladder is not the bar it replaced - look for hairlines \
+             where the rungs meet",
+        );
+    }
+
+    #[test]
+    fn a_shaded_ladder_is_the_same_colour_more_faintly() {
+        use crate::ui::analyzer::BarStyle;
+        // `▓` is a whole cell at three quarters - a density, not a height. The
+        // bar still reddens as it rises, because the colour still comes from
+        // the height; it is only fainter all the way up.
+        let inside = layout().column(0).left().get() as u32 + 5;
+        let low = TALL as u32 - 5;
+
+        let solid = at(&laddered(1.0, BarStyle::Blocks), inside, low);
+        let shaded = at(&laddered(1.0, BarStyle::Shade), inside, low);
+        assert_ne!(solid.3, 0, "nothing to compare against");
+        assert!(
+            shaded.3 < solid.3,
+            "the shade is not fainter: {shaded:?} against {solid:?}",
+        );
+        assert!(shaded.3 > 0, "the shade vanished entirely");
+    }
 }
 
 #[cfg(test)]
@@ -386,6 +520,9 @@ mod against_the_glyphs {
             palette: &palette,
             backdrop: false,
             caps: None,
+            // The acceptance test is about where a bar stands, not what it is
+            // made of - a ladder here would compare a ladder to a solid glyph.
+            ladder: None,
         };
         let rgba = Frame::new(&levels, &levels, &look, layout, screen)
             .pixels()

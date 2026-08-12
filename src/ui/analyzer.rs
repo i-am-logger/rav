@@ -61,6 +61,25 @@ impl BarStyle {
         }
     }
 
+    /// The ladder this style is, for a surface that has to draw the shape
+    /// rather than name a glyph.
+    ///
+    /// The same six the `b` key cycles, held as fractions of a rung in
+    /// `rav-appearance` so a surface with no cells can still draw them. A cell
+    /// grid never asks: it has the glyph, and drawing the shape underneath it
+    /// would only fight it.
+    pub fn skin(self) -> rav_appearance::Skin {
+        use rav_appearance::skin::ladders;
+        match self {
+            BarStyle::Shade => ladders::SHADE,
+            BarStyle::Blocks => ladders::BLOCKS,
+            BarStyle::Solid => ladders::SOLID,
+            BarStyle::Thick => ladders::THICK,
+            BarStyle::Half => ladders::HALF,
+            BarStyle::Line => ladders::LINE,
+        }
+    }
+
     /// Glyph for a fully lit row.
     fn glyph(self) -> &'static str {
         match self {
@@ -161,7 +180,7 @@ impl Peaks {
     /// A fraction of full scale, so a pixel surface can place it directly.
     ///
     /// `Coarse` is one position per row - the middle of the row the peak falls
-    /// in, which is where the original panel drew it and what [`Self::cell`]
+    /// in, which is where the original panel drew it and what `Self::cell`
     /// still does with `CAP_MID`. Keeping that on a surface that could place the
     /// cap anywhere is the whole point of offering the setting: coarse is a
     /// look, not a limitation, and it steps as it falls.

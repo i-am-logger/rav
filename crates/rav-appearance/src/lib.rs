@@ -56,5 +56,5 @@ pub use palette::Palette;
 pub use preset::Preset;
 pub use ramp::{Ramp, Stripe};
 pub use scene::{Band, CapStyle, Scene, Style, StyleId};
-pub use skin::{Shapes, Skin};
+pub use skin::{Rung, Shapes, Skin, ladders};
 pub use theme::{SCOPE_LEVELS, STOPS, StaticTheme, Theme};
