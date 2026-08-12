@@ -2260,4 +2260,90 @@ mod tests {
             .collect();
         assert_eq!(seen, vec!["custom", "winamp", "terminal", "mono"]);
     }
+
+    /// Decode what `Payload` encoded, the way a terminal has to.
+    ///
+    /// Written out rather than reached for, because the point is to be the
+    /// *other* side of the contract: a test that called rav's own encoder to
+    /// check rav's own encoding would agree with itself whatever it did.
+    fn as_a_terminal_reads_it(text: &str) -> Vec<u8> {
+        const ALPHABET: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let six: Vec<u8> = text
+            .bytes()
+            .filter(|b| *b != b'=')
+            .map(|b| {
+                ALPHABET
+                    .iter()
+                    .position(|a| *a == b)
+                    .expect("a base64 digit") as u8
+            })
+            .collect();
+        let mut out = Vec::new();
+        for group in six.chunks(4) {
+            let mut n = 0u32;
+            for (i, s) in group.iter().enumerate() {
+                n |= u32::from(*s) << (18 - i * 6);
+            }
+            for i in 0..group.len() - 1 {
+                out.push(((n >> (16 - i * 8)) & 0xff) as u8);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn the_frame_is_where_the_terminal_is_told_it_is() {
+        // The transport, walked from the other end. Every other test here checks
+        // what rav writes; this one does what a terminal does with it - read the
+        // command, decode the path out of it, open that file, and find a frame
+        // of exactly the size the command promised.
+        //
+        // Worth its own test because the parts can each be right and the whole
+        // still wrong: `S=` disagreeing with the file by a byte makes a terminal
+        // draw nothing and report success, which is the failure that costs the
+        // longest to find.
+        let mut a = app();
+        a.resize(80, 24);
+        let dir = scratch("transport");
+        let mut out = Vec::new();
+        assert!(a.painted(&mut out, window(), &dir, None, None).unwrap());
+        let sent = String::from_utf8_lossy(&out).into_owned();
+
+        let start = sent.find("\x1b_G").expect("no graphics command was sent");
+        let rest = &sent[start + 3..];
+        let end = rest
+            .find("\x1b\\")
+            .expect("the command was never terminated");
+        let (keys, payload) = rest[..end].split_once(';').expect("no payload");
+
+        let key = |name: &str| -> Option<&str> {
+            keys.split(',')
+                .find_map(|kv| kv.strip_prefix(name).and_then(|v| v.strip_prefix('=')))
+        };
+        let width: u32 = key("s").expect("no width").parse().expect("a number");
+        let height: u32 = key("v").expect("no height").parse().expect("a number");
+        let promised: usize = key("S").expect("no byte count").parse().expect("a number");
+
+        let path = String::from_utf8(as_a_terminal_reads_it(payload)).expect("a path");
+        let frame = std::fs::read(&path).expect("the terminal cannot read the frame");
+
+        assert_eq!(
+            frame.len(),
+            promised,
+            "S={promised} but the staged frame is {} bytes - a terminal reads \
+             what it was promised, draws nothing, and reports success",
+            frame.len(),
+        );
+        assert_eq!(
+            frame.len(),
+            (width * height * 4) as usize,
+            "the command says {width}x{height} of RGBA, which is not what is there",
+        );
+        assert!(
+            frame.chunks(4).any(|pixel| pixel[3] != 0),
+            "the frame a terminal would draw is entirely transparent",
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }
