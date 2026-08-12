@@ -9,11 +9,12 @@
 //! Nothing here can draw. A scene that knew how to rasterise itself would be a
 //! scene only a rasteriser could consume, and the LED matrix has none.
 //!
-//! # Taken by one thing
+//! # Taken by one surface
 //!
-//! The `tiny-skia` rasteriser, and only from the graphics spike so far. The
-//! glyph renderer takes levels and colours directly and quantises them itself,
-//! so this is the seam for one consumer until a second is built on it.
+//! The pixel surface, on every frame `--surface kitty` draws. The glyph
+//! renderer takes levels and colours directly and quantises them itself, so
+//! this is the seam for one consumer until a second is built on it - a window
+//! or an LED matrix would be the second, and neither exists yet.
 
 use crate::ink::Colour;
 use crate::ramp::Ramp;
