@@ -130,17 +130,23 @@ impl OnAPty {
     fn quit_after(mut self, watching: Duration) -> String {
         let reading = {
             let fd = unsafe { libc::dup(self.master) };
+            assert!(fd >= 0, "dup of the pty");
             std::thread::spawn(move || {
                 let mut pty = unsafe { std::fs::File::from_raw_fd(fd) };
                 let mut seen = Vec::new();
                 let mut buf = [0u8; 1 << 16];
-                // `EIO` rather than `Ok(0)` is how a pty ends when the far side
-                // closes, so either one is the end of the run.
-                while let Ok(read) = pty.read(&mut buf) {
-                    if read == 0 {
-                        break;
+                loop {
+                    match pty.read(&mut buf) {
+                        Ok(0) => break,
+                        Ok(read) => seen.extend_from_slice(&buf[..read]),
+                        // `EIO` rather than end-of-file is how a pty finishes
+                        // when the far side closes, so that one is the end of
+                        // the run. Any other error truncates the capture, and
+                        // an assertion answered by half the bytes is worse
+                        // than one that fails.
+                        Err(no) if no.raw_os_error() == Some(libc::EIO) => break,
+                        Err(no) => panic!("the pty stopped being readable: {no}"),
                     }
-                    seen.extend_from_slice(&buf[..read]);
                 }
                 seen
             })
@@ -241,7 +247,13 @@ fn the_pixel_surface_draws_and_gives_the_terminal_back() {
     // back. Without the first of those a quit leaves pictures over the shell.
     assert!(seen.contains("\x1b_Ga=d,d=A"), "the images were left up");
     assert!(seen.contains("\x1b[?1049l"), "left in the alternate screen");
-    assert!(seen.ends_with("\x1b[?25h"), "the cursor was left hidden");
+    // The last word on the cursor has to be "show" - not the last bytes on the
+    // wire, because a panic message or a stray line on stderr would land after
+    // it and says nothing about the cursor either way.
+    assert!(
+        seen.rfind("\x1b[?25h") > seen.rfind("\x1b[?25l"),
+        "the cursor was left hidden",
+    );
 
     // A terminal that fell behind leaves frames staged, and in `/dev/shm` those
     // are resident memory - megabytes each - outliving the process that made
