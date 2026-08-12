@@ -49,6 +49,11 @@ Which of the two depends on where the sound is coming from, and the line above
 it says which rav chose. Neither line at all means nothing is arriving; a peak
 near zero means the source is silent rather than absent.
 
+Read it from the bottom. The file is appended to, so it holds every run since
+you last deleted it — and if two ravs are going at once their lines interleave
+with nothing to tell them apart. `🚀 RAV Audio Visualizer starting up` marks
+where the newest run begins.
+
 `rav --list-devices` shows what rav can see and `rav -d "<name>"` selects one.
 On Linux that list is ALSA PCMs only — a PipeWire/PulseAudio `.monitor` source
 is not in it and cannot be selected with `-d`. Route the capture from the
