@@ -264,14 +264,39 @@ jobs:
       # The tag comes from release-plz's own output. It creates the tag through
       # the GitHub API, so the tag exists on the remote while this checkout has
       # none of it - git describe finds nothing here.
+      #
+      # Chosen by name rather than by position. release-plz lists what it
+      # released in dependency order, so `rav-core` comes first - and `rav` is
+      # the only one of the three that has a GitHub release to attach anything
+      # to, the two libraries carrying `git_release_enable = false`. Taking the
+      # first entry uploaded to a release that does not exist, which is why
+      # beta.6, beta.7 and beta.8 all shipped with no binary on them.
       - name: Attach it to the release
         if: steps.release-plz.outputs.releases_created == 'true'
         env:
           GITHUB_TOKEN: ${{ github.token }}
           RELEASES: ${{ steps.release-plz.outputs.releases }}
         run: |
-          TAG=$(echo "$RELEASES" | jq -r '.[0].tag')
-          test -n "$TAG" && test "$TAG" != "null"
+          # What was released, before looking for `rav` among it. An empty list
+          # here means the output is not the shape this expects any more, and
+          # that has to be loud: the whole reason three releases shipped without
+          # a binary is that the one step which knew kept failing where nobody
+          # read it. "Cannot find the tag" must never be indistinguishable from
+          # "there was no tag to find".
+          RELEASED=$(echo "$RELEASES" | jq -r '.[].package_name | select(. != null)' | paste -sd' ' -)
+          if [ -z "$RELEASED" ]; then
+            echo "released nothing this run, or the output changed shape:"
+            echo "$RELEASES"
+            exit 1
+          fi
+
+          TAG=$(echo "$RELEASES" | jq -r '.[] | select(.package_name == "rav") | .tag')
+          # Only the libraries moved. There is no binary to attach to a release
+          # that was never created, and that is an ordinary outcome.
+          if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+            echo "released $RELEASED - no rav among them, so nothing to attach"
+            exit 0
+          fi
           chmod +x dist/rav
           mv dist/rav dist/rav-linux-x86_64
           gh release upload "$TAG" dist/rav-linux-x86_64 --clobber
