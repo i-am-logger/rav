@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-beta.10](https://github.com/i-am-logger/rav/compare/rav-v1.0.0-beta.9...rav-v1.0.0-beta.10) - 2026-08-12
+
+### Documentation
+
+- put the demo back on the crates.io page, and cut the sales pitch ([#111](https://github.com/i-am-logger/rav/pull/111))
+
 ## [1.0.0-beta.9](https://github.com/i-am-logger/rav/compare/rav-v1.0.0-beta.8...rav-v1.0.0-beta.9) - 2026-08-12
 
 ### Added
