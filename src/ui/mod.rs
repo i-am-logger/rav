@@ -407,26 +407,39 @@ impl App {
                 status,
                 help,
             ),
-            // This will not change while the terminal is the terminal it is, so
-            // the overlay stops promising pixels and the loop stops asking. A
-            // help panel reading "pixels" over a picture made of block
-            // characters is worse than no label at all.
-            _ => {
-                let fallback = Chosen {
-                    surface: crate::surface::Surface::Glyphs,
-                    because: "your terminal will not say how big it is in pixels",
-                };
-                if self.surface != fallback {
-                    info!(
-                        "Drawing with {} ({})",
-                        fallback.surface.label(),
-                        fallback.because
-                    );
-                }
-                self.surface = fallback;
-                Ok(false)
-            }
+            _ => self
+                .cannot_measure_itself(&mut io::stdout())
+                .map(|()| false),
         }
+    }
+
+    /// Hand the screen to the glyph renderer, because the terminal stopped
+    /// saying how big it is.
+    ///
+    /// Usually the first frame and every frame after, on the terminals that
+    /// never answer - so the overlay stops promising pixels and the loop stops
+    /// asking, because a help panel reading "pixels" over a picture made of
+    /// block characters is worse than no label at all.
+    ///
+    /// It is also reachable *after* a picture is up: a resize is a new answer,
+    /// and a terminal can give a pixel size and then stop. Then this is the
+    /// same handover the oscilloscope makes, and it has to take the picture
+    /// down for the same reason - an image left up shows through wherever the
+    /// glyph grid leaves a cell empty, which is most of a quiet display.
+    fn cannot_measure_itself(&mut self, out: &mut impl Write) -> Result<()> {
+        let fallback = Chosen {
+            surface: crate::surface::Surface::Glyphs,
+            because: "your terminal will not say how big it is in pixels",
+        };
+        if self.surface != fallback {
+            info!(
+                "Drawing with {} ({})",
+                fallback.surface.label(),
+                fallback.because
+            );
+        }
+        self.surface = fallback;
+        self.stop_painting(out)
     }
 
     /// Everything a pixel frame is, given a size to draw it at.
@@ -1830,6 +1843,29 @@ mod tests {
             !String::from_utf8_lossy(&steady).contains("\x1b[2J"),
             "it cleared a screen nothing had changed on",
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_terminal_that_stops_measuring_itself_gets_the_picture_taken_down() {
+        // Reachable by a resize, which is a new answer to the same question: a
+        // terminal can report a pixel size and then stop. Measured on a pty
+        // driven from 2400x1440 to 0x0 mid-run - rav stopped sending frames and
+        // the glyph renderer took over, with the last picture still up under it.
+        let mut a = app();
+        a.resize(80, 24);
+        let dir = scratch("unmeasured");
+        let mut up = Vec::new();
+        assert!(a.painted(&mut up, window(), &dir, None, None).unwrap());
+
+        let mut back = Vec::new();
+        a.cannot_measure_itself(&mut back).unwrap();
+        assert!(
+            String::from_utf8_lossy(&back).contains("a=d,d=A"),
+            "the picture was left up under the glyph renderer",
+        );
+        assert!(!a.painting, "rav still thinks it is drawing pixels");
+        assert_eq!(a.surface.surface, crate::surface::Surface::Glyphs);
         std::fs::remove_dir_all(&dir).ok();
     }
 
