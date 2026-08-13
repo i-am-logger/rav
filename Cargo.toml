@@ -110,6 +110,8 @@ clap = { version = "4.5", features = ["derive"] }
 libc = "0.2"
 
 dirs = "5.0"
+resvg = { version = "0.48", default-features = false }
+usvg = { version = "0.48", default-features = false }
 
 [[bin]]
 name = "rav"

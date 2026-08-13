@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+  <!-- One rung of the `segment` ladder: a lozenge with its ends cut off, the
+       shape a bar-graph LED has on a rack unit. Drawn as a mask, so only the
+       alpha matters and the fill is whatever the theme gives at that height -
+       see `render::sprite`.
+
+       A seam at the top and bottom, like every ladder rav draws, so a stack of
+       these reads as segments rather than as one bar. The corners are the part
+       no fraction of a rectangle can express, which is the whole reason this is
+       a drawing. -->
+  <path fill="#ffffff"
+        d="M 14 6
+           H 86
+           L 96 24
+           V 76
+           L 86 94
+           H 14
+           L 4 76
+           V 24
+           Z"/>
+</svg>

@@ -21,6 +21,20 @@ pub struct Canvas {
     pixmap: Pixmap,
     placing: Transform,
     antialias: bool,
+    /// A drawn rung, for a skin that is artwork rather than arithmetic.
+    ///
+    /// Held here rather than on the scene because a scene comes from
+    /// `rav-appearance`, which is `no_std` and cannot hold a rasterised
+    /// anything. The scene still says how many steps a ladder has and what
+    /// shape a rung is; this is the surface saying it also has a picture of
+    /// one. A surface without it draws exactly what it drew before.
+    artwork: Option<crate::render::sprite::Sprite>,
+    /// The whole ladder as one shape, and the geometry it was built for.
+    ///
+    /// Rebuilt when the screen or the rung changes and not otherwise: the grid
+    /// a bar climbs is fixed for as long as the window is, and only how much of
+    /// it is lit changes between frames.
+    ladder: Option<((u32, u32, u32), tiny_skia::Mask)>,
 }
 
 impl Canvas {
@@ -31,6 +45,8 @@ impl Canvas {
             pixmap,
             placing: Transform::IDENTITY,
             antialias: true,
+            artwork: None,
+            ladder: None,
         })
     }
 
@@ -51,6 +67,28 @@ impl Canvas {
 
     pub fn antialias(&mut self, on: bool) {
         self.antialias = on;
+    }
+
+    /// Draw the ladder's rungs from this picture instead of from its
+    /// fractions, for as long as the rungs are the size it was drawn for.
+    ///
+    /// Rasterised once per size by the caller, because a rung is a fixed size
+    /// for as long as the window is and parsing an SVG sixty times a second
+    /// would cost more than every bar rav draws put together.
+    pub fn wants_artwork(&mut self, svg: &'static str, across: u32, down: u32) {
+        // Already have it, at the size it is wanted: which is every frame but
+        // the first and the one after a resize. Parsing and rasterising the SVG
+        // is 0.44 ms, and the ladder it stamps is 8.6 - both of which the frame
+        // budget has no room for sixty times a second.
+        if self
+            .artwork
+            .as_ref()
+            .is_some_and(|had| had.is(svg) && had.fits(across, down))
+        {
+            return;
+        }
+        self.artwork = crate::render::sprite::Sprite::drawn(svg, across, down);
+        self.ladder = None;
     }
 
     /// Sized to hold a screen exactly.
@@ -165,6 +203,69 @@ impl Canvas {
             SkTransform::identity(),
             None,
         );
+    }
+
+    /// Paint a row of bars through the drawn ladder, if there is one to use.
+    ///
+    /// `false` when there is not, which is the caller's cue to draw the shape
+    /// the skin describes instead. The colour still comes from the ramp: the
+    /// drawing is taken as a mask, so it decides the shape and the theme decides
+    /// what colour that height is - which is the invariant every surface here
+    /// keeps, and the one thing a skin must not be able to override.
+    ///
+    /// Under a transform this declines. A clip is in the pixmap's own
+    /// coordinates and a leaning bar is not where its rectangle is, so the mask
+    /// and the fill would disagree - and half a bar shaped right is worse than a
+    /// whole one shaped plainly.
+    fn fill_through_ladder(
+        &mut self,
+        bars: &[Rectangle],
+        rung: Length,
+        ramp: &Ramp,
+        screen: &Screen,
+    ) -> bool {
+        if !self.placing.is_identity() || bars.is_empty() {
+            return false;
+        }
+        let (across, down) = (self.pixmap.width(), self.pixmap.height());
+        let wanted = (across, down, rung.get().to_bits());
+        if self.ladder.as_ref().is_none_or(|(had, _)| *had != wanted) {
+            let Some(artwork) = self.artwork.as_ref() else {
+                return false;
+            };
+            if !artwork.fits(bars[0].width().rounded_up(), rung.rounded_up()) {
+                return false;
+            }
+            let Some(mask) = artwork.ladder(across, down, bars, rung.get()) else {
+                return false;
+            };
+            self.ladder = Some((wanted, mask));
+        }
+        let Some((_, mask)) = &self.ladder else {
+            return false;
+        };
+
+        for stripe in ramp.stripes(screen.height()) {
+            let mut paint = Paint::default();
+            let colour = stripe.colour;
+            paint.set_color_rgba8(colour.red, colour.green, colour.blue, colour.alpha);
+            paint.anti_alias = self.antialias;
+            for bar in bars {
+                if let Some(part) = stripe.clip(*bar) {
+                    let Some(rect) = SkRect::from_xywh(
+                        part.left().get(),
+                        part.top().get(),
+                        part.width().get(),
+                        part.height().get(),
+                    ) else {
+                        continue;
+                    };
+                    self.pixmap
+                        .fill_rect(rect, &paint, SkTransform::identity(), Some(mask));
+                }
+            }
+        }
+        true
     }
 
     /// Paint one rectangle in whatever colour the ramp gives at each height.
@@ -442,6 +543,12 @@ fn draw_ladders(
 ) {
     if rung.get() <= 0.0 {
         canvas.fill_many_ramped_at(bars, ramp, screen, 1.0);
+        return;
+    }
+    // A drawn skin, if the surface has the picture and can use it. It declines
+    // for a size it was not drawn at and under any transform, and then the
+    // fractions below draw the ladder they always drew.
+    if canvas.fill_through_ladder(bars, rung, ramp, screen) {
         return;
     }
     let shape = skin.rung;

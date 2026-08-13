@@ -44,6 +44,11 @@ pub struct Look<'a> {
     pub view: View,
     /// How long rav has been running, for the one angle that moves.
     pub elapsed: Elapsed,
+    /// The skin's artwork, for a skin that is a drawing.
+    ///
+    /// `None` for every ladder made of fractions, which is all of them but one
+    /// - and for a cell grid, which has no way to draw a picture and says so.
+    pub artwork: Option<&'static str>,
 }
 
 /// Everything a frame needs, held for as long as it takes to draw.
@@ -55,6 +60,7 @@ pub struct Frame {
     ladder: Option<(Skin, Length)>,
     view: View,
     elapsed: Elapsed,
+    artwork: Option<&'static str>,
     layout: BarLayout,
     screen: Screen,
 }
@@ -87,6 +93,7 @@ impl Frame {
             ladder: look.ladder,
             view: look.view,
             elapsed: look.elapsed,
+            artwork: look.artwork,
             layout,
             screen,
         }
@@ -98,7 +105,27 @@ impl Frame {
     /// [`super::pixels`], which never encodes them.
     pub fn pixels(&self) -> Option<Vec<u8>> {
         let mut canvas = Canvas::for_screen(&self.screen)?;
+        self.painted_onto(&mut canvas);
+        Some(canvas.to_rgba())
+    }
+
+    /// The same, onto a canvas the caller keeps.
+    ///
+    /// Which is what the render loop does, and the difference is not tidiness.
+    /// A canvas made fresh each frame throws away everything expensive it
+    /// learned: at 2400x1440 that is a 13.8 MB pixmap allocated and dropped
+    /// sixty times a second, and - for a skin that is a drawing - a whole
+    /// screen's worth of ladder stamped again from nothing, measured at
+    /// **8.6 ms** against a frame budget of 16.7. Handed the same canvas back,
+    /// it keeps both, and the drawn skin costs about what the block one does.
+    pub fn painted_onto(&self, canvas: &mut Canvas) {
         canvas.clear();
+        // A drawn skin, rasterised to whatever a rung is on this terminal. The
+        // canvas declines it at any other size and under any transform, so this
+        // is an offer rather than an instruction.
+        if let (Some(svg), Some((_, rung))) = (self.artwork, self.ladder) {
+            canvas.wants_artwork(svg, self.layout.bar_width().rounded_up(), rung.rounded_up());
+        }
         let styles = [Style {
             bars: &self.bars,
             grid: self.grid.as_ref(),
@@ -113,8 +140,7 @@ impl Frame {
             elapsed: self.elapsed,
             styles: &styles,
         }
-        .draw(&mut canvas);
-        Some(canvas.to_rgba())
+        .draw(canvas);
     }
 }
 
@@ -149,6 +175,7 @@ mod tests {
             theme: Box::leak(Box::new(Theme::default())),
             view: View::Flat,
             elapsed: Elapsed::seconds(0.0),
+            artwork: None,
             palette: Box::leak(Box::new(Palette::default())),
             backdrop: true,
             caps: None,
@@ -167,6 +194,7 @@ mod tests {
             theme: &theme,
             view: View::Flat,
             elapsed: Elapsed::seconds(0.0),
+            artwork: None,
             palette: &palette,
             backdrop,
             caps,
@@ -190,6 +218,7 @@ mod tests {
             theme: &theme,
             view,
             elapsed,
+            artwork: None,
             palette: &palette,
             backdrop: true,
             caps: Some(Length(2.0)),
@@ -204,6 +233,70 @@ mod tests {
         )
         .pixels()
         .expect("a screen with area")
+    }
+
+    /// The same frame with and without a drawn skin.
+    fn skinned(artwork: Option<&'static str>) -> Vec<u8> {
+        let theme = Theme::default();
+        let palette = Palette::default();
+        let look = Look {
+            theme: &theme,
+            view: View::Flat,
+            elapsed: Elapsed::seconds(0.0),
+            artwork,
+            palette: &palette,
+            backdrop: false,
+            caps: None,
+            ladder: Some((rav_appearance::skin::ladders::BLOCKS, Length(20.0))),
+        };
+        Frame::new(&[1.0], &[1.0], &look, layout(), screen())
+            .pixels()
+            .expect("a screen with area")
+    }
+
+    #[test]
+    fn a_drawn_skin_is_a_shape_the_fractions_cannot_make() {
+        // What twenty-one crates buy. A ladder of fractions is rectangles all
+        // the way up; a drawing can have a corner cut off, and this checks the
+        // corner is actually missing rather than the picture merely differing
+        // somewhere.
+        const CORNERS: &str = include_str!("../../assets/skins/segment.svg");
+        let plain = skinned(None);
+        let drawn = skinned(Some(CORNERS));
+        assert_ne!(plain, drawn, "the drawing changed nothing");
+
+        // The top-left corner of the bottom rung. A rectangle ladder fills it;
+        // the segment has that corner cut away, so it is bare.
+        let column: Column = layout().column(0);
+        let x = column.left().get() as u32 + 1;
+        let y = TALL as u32 - 2;
+        assert!(at(&plain, x, y).3 > 200, "a plain ladder fills its corner");
+        assert!(
+            at(&drawn, x, y).3 < 60,
+            "the drawn skin filled a corner it cuts away: {:?}",
+            at(&drawn, x, y),
+        );
+    }
+
+    #[test]
+    fn a_drawn_skin_still_takes_its_colour_from_the_theme() {
+        // The invariant that outranks the artwork: colour is a function of
+        // height, never of the skin. An SVG whose own fill reached the screen
+        // would be a skin overriding the theme, which is the one thing the
+        // appearance layer exists to prevent - and this drawing is white, so it
+        // would be obvious.
+        const CORNERS: &str = include_str!("../../assets/skins/segment.svg");
+        let drawn = skinned(Some(CORNERS));
+        let column: Column = layout().column(0);
+        let middle = column.left().get() as u32 + 10;
+
+        let low = at(&drawn, middle, TALL as u32 - 6);
+        let high = at(&drawn, middle, 6);
+        assert!(low.3 > 200 && high.3 > 200, "the bar is not solid there");
+        assert!(
+            low.1 > low.0 && high.0 > high.1,
+            "green at the bottom and red at the top: got {low:?} and {high:?}",
+        );
     }
 
     #[test]
@@ -511,6 +604,7 @@ mod tests {
             theme: &theme,
             view: View::Flat,
             elapsed: Elapsed::seconds(0.0),
+            artwork: None,
             palette: &palette,
             backdrop: false,
             caps: None,
@@ -595,6 +689,7 @@ mod tests {
             theme: &theme,
             view: View::Flat,
             elapsed: Elapsed::seconds(0.0),
+            artwork: None,
             palette: &palette,
             backdrop: false,
             caps: None,
@@ -637,6 +732,7 @@ mod tests {
             theme: &theme,
             view: View::Flat,
             elapsed: Elapsed::seconds(0.0),
+            artwork: None,
             palette: &palette,
             backdrop: false,
             caps: None,
@@ -725,6 +821,7 @@ mod against_the_glyphs {
             theme: &theme,
             view: View::Flat,
             elapsed: Elapsed::seconds(0.0),
+            artwork: None,
             palette: &palette,
             backdrop: false,
             caps: None,
@@ -758,6 +855,53 @@ mod against_the_glyphs {
                  eighths and this draws {in_eighths} - the two have parted \
                  company by more than the eighth a block character rounds to",
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod looking {
+    use super::*;
+
+    #[test]
+    fn write_the_segment_skin() {
+        let Ok(into) = std::env::var("RAV_LOOK") else {
+            return;
+        };
+        let (wide, tall) = (480.0f32, 240.0f32);
+        let screen = Screen::new(Length(wide), Length(tall));
+        let layout = BarLayout::new(Length(24.0), Length(8.0));
+        let theme = Theme::default();
+        let palette = Palette::default();
+        let levels: Vec<f32> = (0..16)
+            .map(|i| 0.25 + 0.6 * ((i as f32) * 0.7).sin().abs())
+            .collect();
+        let peaks: Vec<f32> = levels.iter().map(|l| (l + 0.12).min(1.0)).collect();
+        for (name, art) in [
+            ("blocks", None),
+            (
+                "segment",
+                Some(include_str!("../../assets/skins/segment.svg")),
+            ),
+        ] {
+            let look = Look {
+                theme: &theme,
+                view: View::Flat,
+                elapsed: Elapsed::seconds(0.0),
+                artwork: art,
+                palette: &palette,
+                backdrop: true,
+                caps: Some(Length(4.0)),
+                ladder: Some((rav_appearance::skin::ladders::BLOCKS, Length(24.0))),
+            };
+            let rgba = Frame::new(&levels, &peaks, &look, layout, screen)
+                .pixels()
+                .unwrap();
+            let size = tiny_skia::IntSize::from_wh(wide as u32, tall as u32).unwrap();
+            tiny_skia::Pixmap::from_vec(rgba, size)
+                .unwrap()
+                .save_png(format!("{into}/skin-{name}.png"))
+                .unwrap();
         }
     }
 }
