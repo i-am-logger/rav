@@ -120,12 +120,18 @@ impl Frame {
     /// it keeps both, and the drawn skin costs about what the block one does.
     pub fn painted_onto(&self, canvas: &mut Canvas) {
         canvas.clear();
-        // A drawn skin, rasterised to whatever a rung is on this terminal. The
-        // canvas declines it at any other size and under any transform, so this
-        // is an offer rather than an instruction.
-        if let (Some(svg), Some((_, rung))) = (self.artwork, self.ladder) {
-            canvas.wants_artwork(svg, self.layout.bar_width().rounded_up(), rung.rounded_up());
-        }
+        // An offer rather than an instruction: the canvas declines a drawing at
+        // any size but the one it was rasterised for, and under any transform.
+        //
+        // Told every frame, including that there is none. A canvas keeps its
+        // stamped ladder between frames, so a style that has stopped wanting
+        // one has to say so, or the mask it left behind goes on shaping bars
+        // that are not made of it.
+        canvas.wants_artwork(
+            self.artwork,
+            self.layout.bar_width().rounded_up(),
+            self.ladder.map_or(0, |(_, rung)| rung.rounded_up()),
+        );
         let styles = [Style {
             bars: &self.bars,
             grid: self.grid.as_ref(),
@@ -275,6 +281,45 @@ mod tests {
             at(&drawn, x, y).3 < 60,
             "the drawn skin filled a corner it cuts away: {:?}",
             at(&drawn, x, y),
+        );
+    }
+
+    #[test]
+    fn a_style_that_stopped_wanting_a_drawing_stops_being_shaped_by_one() {
+        // The canvas keeps its stamped ladder between frames, which is what
+        // makes a drawn skin affordable - and what makes this the mistake to
+        // guard. Wear a skin, cycle to a style that has no artwork, and the
+        // mask left behind would go on cutting the corners off a block ladder:
+        // `b` back to being labels over one picture, which is the whole defect
+        // the ladders were built to fix.
+        const CORNERS: &str = include_str!("../../assets/skins/segment.svg");
+        let theme = Theme::default();
+        let palette = Palette::default();
+        let paint = |canvas: &mut Canvas, artwork: Option<&'static str>| {
+            let look = Look {
+                theme: &theme,
+                view: View::Flat,
+                elapsed: Elapsed::seconds(0.0),
+                artwork,
+                palette: &palette,
+                backdrop: false,
+                caps: None,
+                ladder: Some((rav_appearance::skin::ladders::BLOCKS, Length(20.0))),
+            };
+            Frame::new(&[1.0], &[1.0], &look, layout(), screen()).painted_onto(canvas);
+            canvas.to_rgba()
+        };
+
+        // One canvas throughout, as the render loop keeps it.
+        let mut canvas = Canvas::for_screen(&screen()).expect("a screen with area");
+        let plain_first = paint(&mut canvas, None);
+        let drawn = paint(&mut canvas, Some(CORNERS));
+        let plain_again = paint(&mut canvas, None);
+
+        assert_ne!(plain_first, drawn, "the drawing changed nothing");
+        assert_eq!(
+            plain_first, plain_again,
+            "the ladder kept the shape of a skin the style no longer wants",
         );
     }
 
