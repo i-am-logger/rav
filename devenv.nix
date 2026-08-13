@@ -445,7 +445,37 @@
       # the only task here that compiles for a second target.
       after = [ "test:unit" ];
     };
+    "test:package" = {
+      # A file the binary embeds must survive being packaged, or `cargo install`
+      # gets a crate that does not compile. Excluding `assets/` as a directory
+      # did exactly that to the built-in segment skin, and nothing caught it:
+      # the repository builds, the tests pass, and the file is only missing in
+      # the tarball nobody builds until release.
+      #
+      # crates.io is immutable and release-plz publishes in dependency order, so
+      # the failure lands after rav-core and rav-appearance are already up -
+      # two versions burned, and the number can never be reused.
+      #
+      # Paths are read out of the source rather than listed here, so an asset
+      # embedded later is covered without anyone remembering to add it.
+      exec = ''
+        set -eu
+        list=$(cargo package --quiet --list -p rav --allow-dirty)
+        status=0
+        for path in $(grep -rEho 'include_(str|bytes)!\("\.\./[^"]*"\)' src crates \
+          | sed -E 's/.*\("//; s/"\)$//; s|^(\.\./)+||' | sort -u); do
+          printf '%s\n' "$list" | grep -qxF "$path" && continue
+          echo "embedded but not packaged: $path" >&2
+          status=1
+        done
+        exit $status
+      '';
+      # Last, for the same ./target lock reason as test:portable.
+      after = [ "test:portable" ];
+    };
   };
 
-  enterTest = lib.mkForce "devenv tasks run test:fmt test:clippy test:nix test:unit test:portable";
+  # Named one by one, so a task added above is not in the suite until it is
+  # added here too - `devenv test` runs this line, not the task list.
+  enterTest = lib.mkForce "devenv tasks run test:fmt test:clippy test:nix test:unit test:portable test:package";
 }
