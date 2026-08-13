@@ -9,7 +9,7 @@ members = ["crates/rav-core", "crates/rav-appearance"]
 # versions have to move together - a rav built against a different rav-core is
 # not a configuration anyone should be able to reach by editing one file.
 [workspace.package]
-version = "1.0.0-beta.10"
+version = "1.0.0-beta.11"
 edition = "2024"
 # The floor the dependency graph imposes, not rav's own source: instability
 # (reached through ratatui) and the darling family all declare 1.88.
@@ -23,8 +23,8 @@ repository = "https://github.com/i-am-logger/rav"
 proptest.workspace = true
 
 [workspace.dependencies]
-rav-core = { path = "crates/rav-core", version = "1.0.0-beta.10" }
-rav-appearance = { path = "crates/rav-appearance", version = "1.0.0-beta.10" }
+rav-core = { path = "crates/rav-core", version = "1.0.0-beta.11" }
+rav-appearance = { path = "crates/rav-appearance", version = "1.0.0-beta.11" }
 # Dev-only, so nothing published gains a dependency. Shared here for the same
 # reason the versions are: two crates disagreeing about a test framework is a
 # thing that happens quietly.
