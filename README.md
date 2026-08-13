@@ -60,7 +60,7 @@ Everything else is a keypress, and `h` shows the lot with their current values:
 | `Space` / `Tab` / `o` | switch analyser ↔ oscilloscope |
 | `t` | theme — rav, winamp, terminal, mono |
 | `b` | bar style — blocks, solid, thick, half, line, shade |
-| `v` | viewing angle — flat, raked, turned, corridor; pixels only |
+| `v` | viewing angle — flat, raked, turned, corridor, swaying; pixels only |
 | `p` | peak caps — fine, coarse, off |
 | `g` | grid behind the bars, on/off |
 | `w` | bandwidth: wide (grouped) or thin |

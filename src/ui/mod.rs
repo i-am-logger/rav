@@ -271,8 +271,12 @@ pub struct App {
     /// Whether the first non-silent tap buffer has been seen.
     #[cfg(target_os = "macos")]
     tap_reported: bool,
-    /// When the analyser started, for the silent-tap warning below.
-    #[cfg(target_os = "macos")]
+    /// When the analyser started.
+    ///
+    /// Two readers, and neither is optional on one platform: the silent-tap
+    /// warning below is macOS-only, and a swaying view is not - it needs to
+    /// know how far through its cycle it is, on every surface that can draw
+    /// one.
     started: Instant,
     should_quit: bool,
     last_frame: Instant,
@@ -350,7 +354,6 @@ impl App {
             tap_scratch: Vec::new(),
             #[cfg(target_os = "macos")]
             tap_reported: false,
-            #[cfg(target_os = "macos")]
             started: Instant::now(),
             should_quit: false,
             last_frame: Instant::now(),
@@ -519,6 +522,14 @@ impl App {
             // same picture, and a ladder on its own pitch would not be.
             ladder: Some((self.bar_style.skin(), cell.down(Cells(1)))),
             view: self.view,
+            // From the clock rather than counted in frames: a sway paced by
+            // frames would cross faster on a terminal that repaints quickly,
+            // which is the mistake the ballistics already avoid.
+            //
+            // Wrapped into one cycle in `f64` first - see `sway_phase`, which
+            // is where the reason is written down. Sending the raw uptime
+            // would work all day and then quietly stop moving.
+            elapsed: rav_appearance::scene::sway_phase(self.started.elapsed().as_secs_f64()),
         };
         // `coarse` and `fine` are the same cap on a cell grid - one position per
         // row is all a cell offers - so the difference has to be made here or
@@ -2375,7 +2386,7 @@ mod tests {
             because: "for the test",
         };
         assert_eq!(a.view, View::Flat, "rav does not open at an angle");
-        for expected in ["raked", "turned", "corridor", "flat"] {
+        for expected in ["raked", "turned", "corridor", "swaying", "flat"] {
             a.apply(Action::CycleView);
             assert_eq!(a.view.label(), expected);
             let row = a

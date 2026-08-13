@@ -11,9 +11,11 @@
 
 use crate::render::{Band, Canvas, CapStyle, Draw, Ramp, Scene, Style};
 use crate::visual::{Palette, Theme};
+#[cfg(test)]
+use rav_appearance::scene::SWAY_SECONDS;
 use rav_appearance::{Skin, View};
 use rav_core::geometry::{BarLayout, Screen};
-use rav_core::units::{Length, Level};
+use rav_core::units::{Elapsed, Length, Level};
 
 /// How the picture should look, before any of it is resolved to colours.
 ///
@@ -40,6 +42,8 @@ pub struct Look<'a> {
     /// A cell grid draws `Flat` whatever this says - there is no room in a cell
     /// for a bar that leans - so it reaches only the pixel surface.
     pub view: View,
+    /// How long rav has been running, for the one angle that moves.
+    pub elapsed: Elapsed,
 }
 
 /// Everything a frame needs, held for as long as it takes to draw.
@@ -50,6 +54,7 @@ pub struct Frame {
     cap: Option<CapStyle>,
     ladder: Option<(Skin, Length)>,
     view: View,
+    elapsed: Elapsed,
     layout: BarLayout,
     screen: Screen,
 }
@@ -81,6 +86,7 @@ impl Frame {
             }),
             ladder: look.ladder,
             view: look.view,
+            elapsed: look.elapsed,
             layout,
             screen,
         }
@@ -104,6 +110,7 @@ impl Frame {
             layout: self.layout,
             screen: self.screen,
             view: self.view,
+            elapsed: self.elapsed,
             styles: &styles,
         }
         .draw(&mut canvas);
@@ -141,6 +148,7 @@ mod tests {
         Look {
             theme: Box::leak(Box::new(Theme::default())),
             view: View::Flat,
+            elapsed: Elapsed::seconds(0.0),
             palette: Box::leak(Box::new(Palette::default())),
             backdrop: true,
             caps: None,
@@ -158,6 +166,7 @@ mod tests {
         let look = Look {
             theme: &theme,
             view: View::Flat,
+            elapsed: Elapsed::seconds(0.0),
             palette: &palette,
             backdrop,
             caps,
@@ -170,11 +179,17 @@ mod tests {
 
     /// The same frame at a chosen viewing angle.
     fn angled(view: View) -> Vec<u8> {
+        angled_at(view, Elapsed::seconds(0.0))
+    }
+
+    /// The same, at a moment in a movement - which only `Swaying` reads.
+    fn angled_at(view: View, elapsed: Elapsed) -> Vec<u8> {
         let theme = Theme::default();
         let palette = Palette::default();
         let look = Look {
             theme: &theme,
             view,
+            elapsed,
             palette: &palette,
             backdrop: true,
             caps: Some(Length(2.0)),
@@ -189,6 +204,54 @@ mod tests {
         )
         .pixels()
         .expect("a screen with area")
+    }
+
+    #[test]
+    fn only_the_swaying_field_is_a_different_picture_a_moment_later() {
+        // Motion of the picture rather than motion in it, which is the last of
+        // what #68 asked for - and the reason a scene carries the time at all.
+        // Every other angle is a setting: the same levels drawn a second later
+        // are the same bytes, and a surface that redrew them would be spending
+        // a frame to send what the terminal already has.
+        let quarter = Elapsed::seconds(SWAY_SECONDS / 4.0);
+        for still in [View::Flat, View::Raked, View::Turned, View::Corridor] {
+            assert_eq!(
+                angled_at(still, Elapsed::seconds(0.0)),
+                angled_at(still, quarter),
+                "{} moved, and nothing but the sway should",
+                still.label(),
+            );
+        }
+        assert_ne!(
+            angled_at(View::Swaying, Elapsed::seconds(0.0)),
+            angled_at(View::Swaying, quarter),
+            "the swaying field stood still",
+        );
+
+        // A full period brings it back where it started, so the motion is a
+        // cycle rather than a drift that eventually faces backwards.
+        assert_eq!(
+            angled_at(View::Swaying, Elapsed::seconds(0.0)),
+            angled_at(View::Swaying, Elapsed::seconds(SWAY_SECONDS)),
+            "a whole sway did not come back round",
+        );
+
+        // Back through the middle at half a period. On its own that proves
+        // nothing about which side it went - `abs(sin)` satisfies it too, and a
+        // field that only ever leans one way would pass.
+        assert_eq!(
+            angled_at(View::Swaying, Elapsed::seconds(0.0)),
+            angled_at(View::Swaying, Elapsed::seconds(SWAY_SECONDS / 2.0)),
+            "the sway did not come back through the middle",
+        );
+        // So: the quarter and three-quarter points are the two extremes, and
+        // they have to be different pictures. That is what makes it a sway
+        // rather than a lean repeated.
+        assert_ne!(
+            angled_at(View::Swaying, quarter),
+            angled_at(View::Swaying, Elapsed::seconds(SWAY_SECONDS * 3.0 / 4.0)),
+            "both ends of the sway are the same side",
+        );
     }
 
     #[test]
@@ -447,6 +510,7 @@ mod tests {
         let look = Look {
             theme: &theme,
             view: View::Flat,
+            elapsed: Elapsed::seconds(0.0),
             palette: &palette,
             backdrop: false,
             caps: None,
@@ -530,6 +594,7 @@ mod tests {
         let look = Look {
             theme: &theme,
             view: View::Flat,
+            elapsed: Elapsed::seconds(0.0),
             palette: &palette,
             backdrop: false,
             caps: None,
@@ -571,6 +636,7 @@ mod tests {
         let look = Look {
             theme: &theme,
             view: View::Flat,
+            elapsed: Elapsed::seconds(0.0),
             palette: &palette,
             backdrop: false,
             caps: None,
@@ -658,6 +724,7 @@ mod against_the_glyphs {
         let look = Look {
             theme: &theme,
             view: View::Flat,
+            elapsed: Elapsed::seconds(0.0),
             palette: &palette,
             backdrop: false,
             caps: None,
