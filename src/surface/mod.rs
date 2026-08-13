@@ -22,6 +22,10 @@ pub mod frame;
 pub mod kitty;
 pub mod overlay;
 pub mod pixels;
+/// Behind `gui`, which is off by default - a terminal visualiser should not
+/// make everyone who installs it build a windowing stack.
+#[cfg(feature = "gui")]
+pub mod window;
 
 use crate::render::Capabilities;
 use rav_core::units::Cells;
