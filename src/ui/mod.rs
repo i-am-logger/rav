@@ -700,7 +700,7 @@ impl App {
     ///
     /// cpal delivers interleaved frames. Averaging rather than summing keeps a
     /// correlated full-scale stereo signal at full scale instead of clipping.
-    fn push_samples(&mut self, samples: &[f32]) {
+    pub(crate) fn push_samples(&mut self, samples: &[f32]) {
         let n = self.window.len();
         for frame in samples.chunks(self.channels) {
             let mono = frame.iter().sum::<f32>() / frame.len() as f32;
