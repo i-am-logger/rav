@@ -212,20 +212,6 @@ impl Draw for Scene<'_> {
         // corners, and it is the same for every band. Only the depth differs.
         let placing = self.view.placing(screen);
 
-        // Furthest first when the bands stand at different depths, because near
-        // over far is all a painter has instead of a depth buffer. Nothing else
-        // in rav has ever needed an order - a fence of bars on one plane cannot
-        // overlap - so this is where that stops being true.
-        //
-        // Counted rather than collected: a `Vec` of indices per frame is an
-        // allocation in the one loop that runs sixty times a second.
-        let order = |step: usize| {
-            if self.view.recedes() {
-                drawable - 1 - step
-            } else {
-                step
-            }
-        };
         let stand = |canvas: &mut Canvas, index: usize| {
             let depth = self.view.depth(index, drawable, screen);
             canvas.place_through(if depth == 0.0 {
@@ -234,38 +220,66 @@ impl Draw for Scene<'_> {
                 Transform::moving(0.0, 0.0, depth).then(placing)
             });
         };
-
-        for step in 0..drawable {
-            let index = order(step);
+        let backdrop = |canvas: &mut Canvas, index: usize| {
             let band = &self.bands[index];
             if let Some(grid) = self.style_of(band).and_then(|style| style.grid) {
-                stand(canvas, index);
-                let backdrop = self.layout.column(index).backdrop(screen);
-                canvas.fill_ramped(backdrop, grid, screen);
+                let area = self.layout.column(index).backdrop(screen);
+                canvas.fill_ramped(area, grid, screen);
             }
-        }
-
-        for step in 0..drawable {
-            let index = order(step);
+        };
+        let bar = |canvas: &mut Canvas, index: usize| {
             let band = &self.bands[index];
             if let Some(style) = self.style_of(band) {
-                stand(canvas, index);
-                let bar = self.layout.column(index).bar(band.level, screen);
+                let area = self.layout.column(index).bar(band.level, screen);
                 match style.ladder {
-                    Some((skin, rung)) => draw_ladder(canvas, bar, skin, rung, style.bars, screen),
-                    None => canvas.fill_ramped(bar, style.bars, screen),
+                    Some((skin, rung)) => draw_ladder(canvas, area, skin, rung, style.bars, screen),
+                    None => canvas.fill_ramped(area, style.bars, screen),
                 }
             }
-        }
-
-        for step in 0..drawable {
-            let index = order(step);
+        };
+        let cap = |canvas: &mut Canvas, index: usize| {
             let band = &self.bands[index];
             if let Some(cap) = self.style_of(band).and_then(|style| style.cap) {
-                stand(canvas, index);
                 let column = self.layout.column(index);
                 canvas.fill(column.cap(band.peak, cap.thickness, screen), cap.colour);
             }
+        };
+
+        if self.view.recedes() {
+            // A whole band at a time, furthest first. Once the bands are at
+            // different depths, near over far is the only order that means
+            // anything - and it has to hold across the three layers, not merely
+            // inside each: a far *cap* drawn in a later pass would land on top
+            // of a near *bar* drawn in an earlier one, which is a distant peak
+            // hanging in front of the loudest band in the picture.
+            //
+            // Counted rather than collected: a `Vec` of indices per frame is an
+            // allocation in the one loop that runs sixty times a second.
+            for step in 0..drawable {
+                let index = drawable - 1 - step;
+                stand(canvas, index);
+                backdrop(canvas, index);
+                bar(canvas, index);
+                cap(canvas, index);
+            }
+            return;
+        }
+
+        // On one plane nothing can overlap, so there is no depth for an order to
+        // respect and a different rule takes over: every backdrop before any
+        // bar, and every bar before any cap. That is what keeps a band's cap
+        // clear of its neighbour's backdrop when the two wear different styles.
+        for index in 0..drawable {
+            stand(canvas, index);
+            backdrop(canvas, index);
+        }
+        for index in 0..drawable {
+            stand(canvas, index);
+            bar(canvas, index);
+        }
+        for index in 0..drawable {
+            stand(canvas, index);
+            cap(canvas, index);
         }
     }
 }
@@ -641,6 +655,63 @@ mod tests {
             (0, 255, 0),
             "the far band was painted over the near one",
         );
+    }
+
+    #[test]
+    fn a_far_cap_does_not_hang_in_front_of_a_near_bar() {
+        // Ordering the bands inside each of the three layers is not enough once
+        // they are at different depths: caps are drawn after every bar, so a
+        // distant peak would land on top of the loudest band in the picture. In
+        // a corridor a whole band goes down at a time instead.
+        //
+        // The same three columns of forty as the test above, so the middle band
+        // covers 45 to 75 and the far one 72 to 96. The far band's cap rides at
+        // the top of its bar; the middle band is full height and nearer, and
+        // owns every pixel the two share.
+        let green = Ramp::new(vec![Colour::GREEN]);
+        let blue = Ramp::new(vec![Colour::BLUE]);
+        let styles = [
+            Style {
+                bars: &green,
+                grid: None,
+                cap: None,
+                ladder: None,
+            },
+            Style {
+                bars: &blue,
+                grid: None,
+                cap: Some(CapStyle {
+                    colour: Colour::WHITE,
+                    thickness: Length(8.0),
+                }),
+                ladder: None,
+            },
+        ];
+        let three = [
+            Band::new(Level::FULL, Level::FULL),
+            Band::new(Level::FULL, Level::FULL),
+            Band::new(Level::FULL, Level::FULL).styled(StyleId(1)),
+        ];
+        let screen = screen(120.0, 100.0);
+        let mut canvas = Canvas::for_screen(&screen).unwrap();
+        Scene {
+            bands: &three,
+            layout: BarLayout::new(Length(40.0), Length(0.0)),
+            screen,
+            view: rav_appearance::View::Corridor,
+            styles: &styles,
+        }
+        .draw(&mut canvas);
+
+        // Down the strip the two bands share, wherever the far cap reaches.
+        for y in 20..80 {
+            let there = at(&canvas, 73, y);
+            assert_ne!(
+                (there.red, there.green, there.blue),
+                (255, 255, 255),
+                "the far band's cap was drawn over the near band's bar, at y {y}",
+            );
+        }
     }
 
     #[test]
