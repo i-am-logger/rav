@@ -51,6 +51,19 @@ green result. 54 tests stopped running that way once.
 the same command you can run locally, which is where the
 `#[cfg(target_os = "macos")]` mistakes surface.
 
+**`devenv test` is the suite; those four commands are not.** It runs three more,
+and each exists because the four above came back green while something was
+broken:
+
+| task | what the four miss |
+|---|---|
+| `test:default` | everything else runs `--all-features`, which nobody installs. A method reached only from behind a feature is *dead code* in the default build, and this crate denies that — so the default build failed while the suite was green |
+| `test:package` | every other check builds the repository. Nothing built the **tarball**, and `assets/` was excluded from it while the binary embedded a file from there. The published crate would not have compiled |
+| `test:portable` | `rav-core` and `rav-appearance` claim to run on a microcontroller. `no_std` stops them reaching for a filesystem; it does not stop a machine assumption, which building for `wasm32` does |
+
+Adding a check means adding a task **and** naming it in `enterTest`, which lists
+them one at a time. A task that is not named there does not run.
+
 CI does **not** build the flake, so run `nix build .#default` yourself before a
 push that touches packaging. Flakes only see **git-tracked** files, so a new asset
 that has not been `git add`ed fails there and nowhere else — and `nix run
