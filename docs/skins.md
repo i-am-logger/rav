@@ -1,7 +1,7 @@
 # Drawing a skin
 
 A skin is one SVG: the shape of a single **rung**, the unit a bar is built from.
-rav stacks it up each bar and clips it to the level.
+rav stacks it up each bar and clips the stack to the level.
 
 ```
 rav --skin ./segment.svg
