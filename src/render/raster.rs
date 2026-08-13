@@ -205,23 +205,51 @@ impl Draw for Scene<'_> {
     /// neighbour's backdrop when the two wear different styles.
     fn draw(&self, canvas: &mut Canvas) {
         canvas.clear();
-        // Before anything is drawn, because it is how the picture is looked at
-        // rather than a property of any one bar. `Flat` leaves the canvas on the
-        // path it has always taken.
-        canvas.place_through(self.view.placing(&self.screen));
-
         let drawable = self.visible_bands();
         let screen = &self.screen;
 
-        for (index, band) in self.bands.iter().take(drawable).enumerate() {
+        // Computed once: it costs a rotation and a projection of the field's own
+        // corners, and it is the same for every band. Only the depth differs.
+        let placing = self.view.placing(screen);
+
+        // Furthest first when the bands stand at different depths, because near
+        // over far is all a painter has instead of a depth buffer. Nothing else
+        // in rav has ever needed an order - a fence of bars on one plane cannot
+        // overlap - so this is where that stops being true.
+        //
+        // Counted rather than collected: a `Vec` of indices per frame is an
+        // allocation in the one loop that runs sixty times a second.
+        let order = |step: usize| {
+            if self.view.recedes() {
+                drawable - 1 - step
+            } else {
+                step
+            }
+        };
+        let stand = |canvas: &mut Canvas, index: usize| {
+            let depth = self.view.depth(index, drawable, screen);
+            canvas.place_through(if depth == 0.0 {
+                placing
+            } else {
+                Transform::moving(0.0, 0.0, depth).then(placing)
+            });
+        };
+
+        for step in 0..drawable {
+            let index = order(step);
+            let band = &self.bands[index];
             if let Some(grid) = self.style_of(band).and_then(|style| style.grid) {
+                stand(canvas, index);
                 let backdrop = self.layout.column(index).backdrop(screen);
                 canvas.fill_ramped(backdrop, grid, screen);
             }
         }
 
-        for (index, band) in self.bands.iter().take(drawable).enumerate() {
+        for step in 0..drawable {
+            let index = order(step);
+            let band = &self.bands[index];
             if let Some(style) = self.style_of(band) {
+                stand(canvas, index);
                 let bar = self.layout.column(index).bar(band.level, screen);
                 match style.ladder {
                     Some((skin, rung)) => draw_ladder(canvas, bar, skin, rung, style.bars, screen),
@@ -230,8 +258,11 @@ impl Draw for Scene<'_> {
             }
         }
 
-        for (index, band) in self.bands.iter().take(drawable).enumerate() {
+        for step in 0..drawable {
+            let index = order(step);
+            let band = &self.bands[index];
             if let Some(cap) = self.style_of(band).and_then(|style| style.cap) {
+                stand(canvas, index);
                 let column = self.layout.column(index);
                 canvas.fill(column.cap(band.peak, cap.thickness, screen), cap.colour);
             }
@@ -550,6 +581,66 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn in_a_corridor_the_near_band_is_drawn_over_the_far_one() {
+        // The first thing in rav that needs a drawing order at all. A fence of
+        // bars on one plane cannot overlap, so the three passes could run in any
+        // order and did; put the bands at different depths and the far one
+        // shrinks toward the middle of the picture, straight across its
+        // neighbour. Near over far is the whole of what a painter has instead of
+        // a depth buffer, and backwards it puts the quiet distance on top of the
+        // loud foreground.
+        let near_ramp = Ramp::new(vec![Colour::GREEN]);
+        let far_ramp = Ramp::new(vec![Colour::BLUE]);
+        let styles = [
+            Style {
+                bars: &near_ramp,
+                grid: None,
+                cap: None,
+                ladder: None,
+            },
+            Style {
+                bars: &far_ramp,
+                grid: None,
+                cap: None,
+                ladder: None,
+            },
+        ];
+        // Three columns of forty on a screen of a hundred and twenty, so the
+        // middle of the picture falls inside the middle column rather than on a
+        // boundary. Two columns either side of the middle shrink toward it by
+        // different amounts and genuinely cross: worked out rather than hoped
+        // for, because the first version of this used two equal halves, where
+        // the far one's near edge lands exactly on the middle and nothing ever
+        // overlaps - it passed with the order reversed.
+        //
+        // At the eye three screens back, the middle band stands at `w = 4/3` and
+        // covers 45 to 75; the far one at `w = 5/3` covers 72 to 96. They share
+        // 72 to 75, and the middle band is the nearer of the two.
+        let three = [
+            Band::new(Level::FULL, Level::FULL),
+            Band::new(Level::FULL, Level::FULL),
+            Band::new(Level::FULL, Level::FULL).styled(StyleId(1)),
+        ];
+        let screen = screen(120.0, 100.0);
+        let scene = Scene {
+            bands: &three,
+            layout: BarLayout::new(Length(40.0), Length(0.0)),
+            screen,
+            view: rav_appearance::View::Corridor,
+            styles: &styles,
+        };
+        let mut canvas = Canvas::for_screen(&screen).unwrap();
+        scene.draw(&mut canvas);
+
+        let overlapped = at(&canvas, 73, 50);
+        assert_eq!(
+            (overlapped.red, overlapped.green, overlapped.blue),
+            (0, 255, 0),
+            "the far band was painted over the near one",
+        );
     }
 
     #[test]

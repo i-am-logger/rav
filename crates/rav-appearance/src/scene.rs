@@ -93,6 +93,13 @@ pub enum View {
     Raked,
     /// Turned to one side - a panel on a speaker grille, seen from off-axis.
     Turned,
+    /// Standing back from the bass and away toward the treble, so the spectrum
+    /// reads as a corridor rather than a fence.
+    ///
+    /// The only view where the bars are at different depths from each other
+    /// rather than the whole field being at an angle - so it is the only one
+    /// that changes what order they have to be drawn in.
+    Corridor,
 }
 
 impl View {
@@ -101,6 +108,7 @@ impl View {
             Self::Flat => "flat",
             Self::Raked => "raked",
             Self::Turned => "turned",
+            Self::Corridor => "corridor",
         }
     }
 
@@ -108,8 +116,36 @@ impl View {
         match self {
             Self::Flat => Self::Raked,
             Self::Raked => Self::Turned,
-            Self::Turned => Self::Flat,
+            Self::Turned => Self::Corridor,
+            Self::Corridor => Self::Flat,
         }
+    }
+
+    /// Whether the bands stand at different depths from one another.
+    ///
+    /// Which decides the order they are drawn in, and nothing else: near over
+    /// far is the whole of what a painter has instead of a depth buffer, and
+    /// getting it backwards puts the quiet distance on top of the loud
+    /// foreground.
+    pub fn recedes(self) -> bool {
+        matches!(self, Self::Corridor)
+    }
+
+    /// How far back the band at `index` of `bands` stands.
+    ///
+    /// Bass near, treble far, which is the way round a spectrum is already
+    /// read - and the way round that puts the bands people watch closest to
+    /// them. Zero for every view that keeps the field on one plane, so those
+    /// compose to exactly the transform they had before this existed.
+    pub fn depth(self, index: usize, bands: usize, screen: &Screen) -> f32 {
+        if !self.recedes() || bands < 2 {
+            return 0.0;
+        }
+        let along = index.min(bands - 1) as f32 / (bands - 1) as f32;
+        // Two thirds of the way to the eye at the far end: enough for the
+        // treble to read as distant, short of the vanishing point where a bar
+        // is a few pixels and its colour is the only thing left of it.
+        along * screen.width().get() * 2.0
     }
 
     /// The transform this comes to on a screen of a given size.
@@ -139,6 +175,11 @@ impl View {
             Self::Flat => return Transform::IDENTITY,
             Self::Raked => (Transform::leaning(0.35), down * 3.0),
             Self::Turned => (Transform::turning(0.44), across * 3.0),
+            // No rotation: the field stays square on and the bands travel back
+            // through it. Everything on the near plane is left exactly where it
+            // was, so the fit below finds nothing to do and the picture keeps
+            // the whole screen.
+            Self::Corridor => (Transform::IDENTITY, across * 3.0),
         };
         let centred = |about: Transform| {
             Transform::moving(-middle_x, -middle_y, 0.0)
@@ -281,7 +322,7 @@ mod tests {
         // than handed to a surface as a matrix to centre for itself.
         let screen = Screen::new(Length(240.0), Length(120.0));
         let middle = rav_core::transform::Point::flat(Length(120.0), Length(60.0));
-        for view in [View::Raked, View::Turned] {
+        for view in [View::Raked, View::Turned, View::Corridor] {
             let stays = view.placing(&screen).apply(middle).unwrap();
             assert!(
                 (stays.x.get() - 120.0).abs() < 0.01 && (stays.y.get() - 60.0).abs() < 0.01,
@@ -298,7 +339,7 @@ mod tests {
         // of every offered view has somewhere to land.
         let screen = Screen::new(Length(240.0), Length(120.0));
         let field = screen.bounds();
-        for view in [View::Flat, View::Raked, View::Turned] {
+        for view in [View::Flat, View::Raked, View::Turned, View::Corridor] {
             assert!(
                 view.placing(&screen).quad(field).is_some(),
                 "{} put a corner where it cannot be drawn",
@@ -317,7 +358,7 @@ mod tests {
         // whatever reads best and none of them can spill.
         let screen = Screen::new(Length(480.0), Length(240.0));
         let field = screen.bounds();
-        for view in [View::Flat, View::Raked, View::Turned] {
+        for view in [View::Flat, View::Raked, View::Turned, View::Corridor] {
             let quad = view.placing(&screen).quad(field).expect("undrawable");
             for corner in quad.corners {
                 let (x, y) = (corner.x.get(), corner.y.get());
@@ -335,7 +376,7 @@ mod tests {
         // Three presses and the picture is where it started, like every other
         // cycling setting in rav.
         let mut view = View::Flat;
-        for expected in [View::Raked, View::Turned, View::Flat] {
+        for expected in [View::Raked, View::Turned, View::Corridor, View::Flat] {
             view = view.next();
             assert_eq!(view, expected);
         }

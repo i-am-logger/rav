@@ -2302,7 +2302,7 @@ mod tests {
 
         let mut a = app();
         assert_eq!(a.view, View::Flat, "rav does not open at an angle");
-        for expected in ["raked", "turned", "flat"] {
+        for expected in ["raked", "turned", "corridor", "flat"] {
             a.apply(Action::CycleView);
             assert_eq!(a.view.label(), expected);
             let row = a
