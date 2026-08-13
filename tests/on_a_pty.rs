@@ -188,7 +188,7 @@ impl OnAPty {
                             // that never answers is a terminal that cannot -
                             // so without this the default path could only ever
                             // be tested as the one it falls back to.
-                            if !answered_the_query && text.contains("a=q") {
+                            if !answered_the_query && asked_about_images(&text) {
                                 answered_the_query = true;
                                 pty.write_all(CAN_DRAW_IMAGES).expect("answer the query");
                                 pty.flush().ok();
@@ -279,16 +279,35 @@ fn wait_for(counted: &Receiver<usize>, pictures: usize) {
     let deadline = Instant::now() + PATIENCE;
     let mut so_far = 0;
     while so_far < pictures {
-        let left = deadline.saturating_duration_since(Instant::now());
+        let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+            panic!("{so_far} of {pictures} pictures arrived in {PATIENCE:?}");
+        };
         match counted.recv_timeout(left) {
             Ok(count) => so_far = count,
-            Err(_) => panic!("{so_far} of {pictures} pictures arrived in {PATIENCE:?}"),
+            Err(RecvTimeoutError::Timeout) => {
+                panic!("{so_far} of {pictures} pictures arrived in {PATIENCE:?}")
+            }
+            // Told apart from a timeout because they mean different things: the
+            // reader ends when the pty closes, which is rav gone - so this is a
+            // process that left rather than one that is drawing the wrong thing.
+            Err(RecvTimeoutError::Disconnected) => {
+                panic!("rav left after {so_far} of {pictures} pictures")
+            }
         }
-        assert!(
-            Instant::now() < deadline || so_far >= pictures,
-            "{so_far} of {pictures} pictures arrived in {PATIENCE:?}",
-        );
     }
+}
+
+/// Whether that is rav asking the terminal if it can draw images.
+///
+/// Read as a whole command rather than by searching the stream for `a=q`: this
+/// runs over every byte a terminal receives, bars and status line included, and
+/// two characters can turn up anywhere. A command runs from `ESC _ G` to the
+/// string terminator, and the question is whether *that* carries the key.
+fn asked_about_images(seen: &str) -> bool {
+    seen.split("\x1b_G")
+        .skip(1)
+        .filter_map(|command| command.split("\x1b\\").next())
+        .any(|command| command.split(',').any(|pair| pair == "a=q"))
 }
 
 /// The staged frames this run left behind, which should be none of them.
@@ -428,4 +447,25 @@ fn a_terminal_that_says_it_can_draw_images_is_given_them() {
         "a frame promised a size the picture is not",
     );
     assert!(seen.contains("\x1b_Ga=d,d=A"), "the images were left up");
+}
+
+#[test]
+fn only_a_whole_query_counts_as_one() {
+    // The harness reads every byte the terminal receives, and `a=q` is two
+    // characters that can turn up in a status line or a theme name. Answering
+    // one of those would tell rav a terminal draws images when nothing asked.
+    assert!(asked_about_images(
+        "\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\"
+    ));
+    assert!(!asked_about_images("nothing here, though it says a=q"));
+    assert!(
+        !asked_about_images("\x1b_Ga=T,q=2,i=1,f=32,s=2400,v=1440\x1b\\"),
+        "a frame going out is not a question",
+    );
+    assert!(
+        asked_about_images("\x1b_Gi=31,s=1,v=1,a=q,t=d"),
+        "a query still arriving is still a query - it came from rav and there \
+         is nothing else it could be, so waiting for the terminator would cost \
+         a round trip to learn what is already known",
+    );
 }
