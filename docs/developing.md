@@ -76,6 +76,14 @@ at, so a re-record drops straight in.
 | `RAV_DEMO_FPS` | 25 by default, and it sets the capture rate too; see below |
 | `RAV_DEMO_OUT`, `RAV_DEMO_LEAD`, `RAV_DEMO_SETTLE` | the rest |
 
+**Record it in a terminal that can draw images** — WezTerm, Ghostty or kitty.
+rav draws pixels wherever the terminal says it can, so a recording made anywhere
+else shows the fall back rather than the thing: block characters, a peak cap
+erasing the grid it crosses, and four seconds of `v` doing nothing but printing
+`needs pixels`. The committed `assets/demo.gif` predates the pixel surface
+entirely and was shot in Terminal.app, which cannot even show rav's colours —
+it reports `colors#256` and no `Tc`.
+
 The capture and the GIF run at the same rate — one variable, so they cannot
 drift. Capturing above the GIF rate and sampling back down throws away real
 motion; capturing below it cannot be recovered downstream.
