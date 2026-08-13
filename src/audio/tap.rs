@@ -385,6 +385,18 @@ fn tap_uid(tap: AudioObjectID) -> Result<Retained<NSString>> {
     if status != 0 || value.is_null() {
         bail!("reading kAudioTapPropertyUID failed (OSStatus {status})");
     }
+    // SAFETY: `kAudioTapPropertyUID` hands back a CFString the caller owns -
+    // `AudioHardware.h` says so in as many words: "The caller is responsible
+    // for releasing the returned CFObject." So it arrives at +1, and
+    // `from_raw` is the constructor that takes ownership *without* retaining
+    // again, which is what balances it. `Retained` releases on drop.
+    //
+    // The two ways to get this wrong are a leak and a double free, and neither
+    // shows up in a test - which is why the header is quoted rather than
+    // paraphrased. `retain` here would leak; `from_raw` on a +0 object, as the
+    // Get Rule properties hand back, would over-release.
+    //
+    // Null is checked above, and `from_raw` returns `None` for it anyway.
     let uid = unsafe { Retained::from_raw(value as *mut NSString) }.context("tap UID was nil")?;
     Ok(uid)
 }
@@ -468,6 +480,13 @@ fn aggregate_reading(
     // Preallocated so the realtime callback never grows the Vec. Allocating on
     // the audio thread can take the allocator lock, which is exactly what a
     // realtime callback must not do.
+    //
+    // Twice the cap, and the factor is the whole of the guarantee. The callback
+    // drains down to `MAX_QUEUED` and *then* appends, so the high-water mark is
+    // `MAX_QUEUED` plus one buffer - and this only reallocates if a single
+    // CoreAudio buffer carried more than `MAX_QUEUED` samples, which is a full
+    // second of audio at 48kHz and not a size any device delivers. One times
+    // the cap would reallocate on the first append after a full queue.
     let buffer: Shared = Arc::new(TapChannel {
         buffer: Mutex::new(TapBuffer {
             samples: Vec::with_capacity(MAX_QUEUED * 2),
@@ -530,6 +549,14 @@ extern "C" fn io_proc(
         return 0;
     }
     let count = buffer.data_byte_size as usize / std::mem::size_of::<f32>();
+    // SAFETY: the most dangerous line here, so the obligations are named rather
+    // than left to be re-derived. `data` is non-null, checked above.  The length
+    // comes from the buffer's own `data_byte_size` rather than from a frame or
+    // channel count, so it cannot claim more than CoreAudio wrote - deriving it
+    // any other way is how this reads off the end. The format is checked to be
+    // 32-bit float when the tap is created, so `f32` is the element type.
+    // CoreAudio owns the memory for the length of this call and the slice does
+    // not outlive it: everything below copies out of it before returning.
     let samples = unsafe { std::slice::from_raw_parts(buffer.data as *const f32, count) };
 
     if let Ok(mut out) = shared.buffer.try_lock() {
