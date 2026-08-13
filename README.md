@@ -42,7 +42,7 @@ rav --theme winamp    # rav, winamp, terminal, mono, or a path to a theme
 rav --list-devices    # what rav can capture from
 rav -d "<name>"       # capture from a named device
 rav --clean           # log almost nothing
-rav --surface kitty   # auto, glyphs, kitty or window
+rav --surface glyphs  # auto, glyphs, kitty or window
 ```
 
 A terminal that can draw images gets **pixels**: a peak cap rides over the

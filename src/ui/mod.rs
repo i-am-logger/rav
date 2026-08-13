@@ -910,10 +910,11 @@ impl App {
             // No key, because there is none: `--surface` is a flag.
             //
             // "Drawing on" while the pixels are going and "would draw on" when
-            // they are not. The distinction is the whole of what this row is
-            // for: `auto` still picks glyphs however capable the terminal is,
-            // so a reader who sees "pixels" needs to know whether that is a
-            // report or a forecast.
+            // they are not, which is the whole of what this row is for. A
+            // terminal that says it can draw images is given them, and then
+            // asked how big it is - and one that will not say drops back to
+            // block characters. So "pixels" here can still be a forecast the
+            // next frame overturns, and a reader has to be able to tell.
             HelpRow {
                 key: "",
                 description: if self.painting {

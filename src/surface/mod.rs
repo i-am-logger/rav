@@ -1,10 +1,22 @@
-//! Which surface rav would draw on, and asking the terminal whether it can.
+//! Which surface rav draws on, and asking the terminal whether it can draw
+//! images at all.
 //!
-//! Reporting only. Nothing here changes what is drawn - the choice is made,
-//! logged and shown in the help overlay, and the glyph renderer draws every
-//! frame regardless. A probe that hangs or garbles a terminal is the worst bug
-//! class in this area, so it ships first with its only possible symptom being a
-//! wrong label.
+//! The question is asked once, before the alternate screen: a query the
+//! terminal either accepts or does not, chained with a device attributes
+//! request so one that has never heard of graphics is a definite no
+//! immediately rather than a timeout's worth of silence.
+//!
+//! A terminal that says yes is given pixels. Everything else gets block
+//! characters, and so does a multiplexer, because an image escape does not
+//! survive one intact and a garbled screen is worse than a plain one.
+//! `--surface` overrides the lot in either direction.
+//!
+//! **This is not the last word.** The answer here is what the terminal says it
+//! can do; whether it says how big it is in pixels is a separate question, asked
+//! every frame, and a terminal that will not say drops back to block characters
+//! however this came out - see `App::paint`. So the help overlay distinguishes
+//! what rav is drawing on from what it would draw on, and this module is only
+//! ever half of that answer.
 
 pub mod frame;
 pub mod kitty;
