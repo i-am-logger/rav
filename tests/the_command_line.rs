@@ -72,6 +72,10 @@ fn a_skin_that_will_not_parse_stops_the_run_and_names_the_file() {
 #[test]
 fn a_skin_that_is_not_there_stops_the_run_and_names_the_file() {
     let path = std::env::temp_dir().join(format!("rav-cli-{}-absent.svg", std::process::id()));
+    // A pid comes round again, and so does a temp directory that was never
+    // cleared. Without this, the one run where the name is already taken turns
+    // this into the case two tests down and passes for the wrong reason.
+    std::fs::remove_file(&path).ok();
     let (started, said) = rav_wearing(&path);
 
     assert!(!started, "rav started with no skin to wear");

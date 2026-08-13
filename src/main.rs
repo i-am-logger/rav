@@ -73,11 +73,13 @@ async fn main() -> std::process::ExitCode {
     match rav_main().await {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(problem) => {
-            // To stdout, deliberately. Everything rav can fail at happens after
-            // stderr has been pointed at the log file, so reporting the usual
-            // way means a mistyped `--theme` looks like rav dying in silence:
-            // exit 1, a blank terminal, and the reason in a file the user has
-            // no reason to look in.
+            // To stdout, deliberately. Nearly everything rav can fail at
+            // happens after stderr has been pointed at the log file, so
+            // reporting the usual way means a mistyped `--theme` looks like rav
+            // dying in silence: exit 1, a blank terminal, and the reason in a
+            // file the user has no reason to look in. The skin check runs
+            // before that redirection and would print either way; it goes here
+            // too, so one flag is not reported somewhere else than the next.
             println!("rav: {problem:#}");
             std::process::ExitCode::FAILURE
         }
@@ -102,11 +104,8 @@ async fn rav_main() -> Result<()> {
             // A skin that will not parse draws nothing, and drawing nothing is
             // indistinguishable from the plain ladder - so without this a typo
             // in someone's own file looks like rav ignoring the flag.
-            anyhow::ensure!(
-                rav::render::sprite::parses(&svg),
-                "Cannot parse the skin at {} - it is not an SVG this can draw",
-                path.display(),
-            );
+            rav::render::sprite::parses(&svg)
+                .with_context(|| format!("Cannot parse the skin at {}", path.display()))?;
             Some(Box::leak(svg.into_boxed_str()))
         }
         None => None,
