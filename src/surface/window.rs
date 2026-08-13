@@ -207,7 +207,24 @@ impl ApplicationHandler for Showing {
         // The ceiling is `App`'s, not one of this surface's own. `App::run` has
         // the same deadline for the same reason; what it does not have is any
         // way to lend it, since it does not drive this loop.
+        // On every wake, above the ceiling, exactly as `App::run` does it: only
+        // the drawing is capped, and the analysis runs on the signal. Putting
+        // these below the deadline would make the interval between spectra a
+        // property of the frame rate, which is what `App::advance` says not to
+        // do - the ballistics integrate `dt` and would survive it, but anything
+        // measuring across time rather than within one frame would inherit the
+        // jitter into its measurement.
+        //
+        // What a window still cannot do is wake *because* audio arrived: winit
+        // knows nothing about the channel, so a wake is the frame deadline or a
+        // user event. Waking on a buffer would need an `EventLoopProxy` fed
+        // from the receiving side, which is a thread and a second event type -
+        // worth it when something here measures across frames, and not before.
         let now = Instant::now();
+        while let Ok(data) = self.audio.try_recv() {
+            self.app.push_samples(&data.samples);
+        }
+        self.app.advance();
         if now >= self.next_frame {
             // A moving deadline, carrying the remainder - the form that asks
             // "has min_frame passed since the last frame" quantises to the wake
@@ -259,11 +276,8 @@ impl Showing {
             return Ok(());
         };
 
-        // Everything the terminal loop does, in the order it does it.
-        while let Ok(data) = self.audio.try_recv() {
-            self.app.push_samples(&data.samples);
-        }
-        self.app.advance();
+        // The audio and the analysis happened in `about_to_wait`, on every wake
+        // rather than on every frame. This is only the drawing.
 
         // Only when it changes. Setting a title is a round trip to the window
         // server, and this runs on every frame.
