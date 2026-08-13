@@ -5,8 +5,19 @@ code — so adding one means writing a file, not touching Rust.
 
 ```
 rav --theme ./sunset.toml     # a path
-rav --theme sunset            # a name, looked up in ./themes then ~/.config/rav/themes
+rav --theme sunset            # a name, looked up in ./themes then your config directory
 ```
+
+A name is looked for in `./themes` first, then under `rav/themes` in whatever
+your platform calls the config directory. That is **not** `~/.config` everywhere:
+
+| | |
+|---|---|
+| Linux | `~/.config/rav/themes` |
+| macOS | `~/Library/Application Support/rav/themes` |
+
+A path always works and never has to be guessed at, which is what `--theme
+./sunset.toml` is for.
 
 Press `t` in rav to cycle the built-ins; a theme loaded with `--theme` joins the
 rotation.
