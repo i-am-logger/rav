@@ -232,6 +232,15 @@ async fn rav_main() -> Result<()> {
     if let Some(path) = args.skin.as_deref() {
         let svg = std::fs::read_to_string(path)
             .with_context(|| format!("Cannot read the skin at {}", path.display()))?;
+        // Parsed before the screen is taken, for the same reason it is read
+        // here. A skin that will not parse draws nothing, and drawing nothing
+        // is indistinguishable from the plain ladder - so without this a typo
+        // in someone's own file looks like rav ignoring the flag.
+        anyhow::ensure!(
+            rav::render::sprite::parses(&svg),
+            "Cannot parse the skin at {} - it is not an SVG this can draw",
+            path.display(),
+        );
         app.wear_skin(Box::leak(svg.into_boxed_str()));
         info!("Using skin: {}", path.display());
     }

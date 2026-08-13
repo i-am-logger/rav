@@ -44,6 +44,16 @@ pub struct Sprite {
     down: u32,
 }
 
+/// Whether that is an SVG this can draw, without drawing it.
+///
+/// Startup asks before taking the screen. Once the frame loop has it, artwork
+/// that will not parse is only a reason to draw the plain ladder - which reads
+/// as rav ignoring the flag rather than as the file being wrong, and is why the
+/// question is worth asking early where the answer can still be printed.
+pub fn parses(svg: &str) -> bool {
+    usvg::Tree::from_str(svg, &usvg::Options::default()).is_ok()
+}
+
 impl Sprite {
     /// Parse an SVG and rasterise it to fill a rung of this size.
     ///
