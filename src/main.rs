@@ -121,12 +121,26 @@ async fn rav_main() -> Result<()> {
         "info"
     };
 
-    // Always write logs to file to avoid TUI interference
+    // Always to a file, never to the terminal, which rav is about to paint on.
+    //
+    // An error rather than a panic, and it is the only startup failure that
+    // ever was one: a read-only working directory is an ordinary thing to run
+    // from - `/`, a system directory, anywhere someone landed after installing
+    // - and it deserves the same one-line report a mistyped flag gets rather
+    // than an abort and a backtrace.
     let log_file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open("rav.log")
-        .expect("Failed to create log file");
+        .with_context(|| {
+            format!(
+                "Cannot write rav.log in {} - rav logs beside wherever it is started, \
+                 so run it somewhere writable",
+                std::env::current_dir()
+                    .map(|at| at.display().to_string())
+                    .unwrap_or_else(|_| "this directory".to_string()),
+            )
+        })?;
 
     // Not everything that writes to this terminal goes through `tracing`.
     // libasound reports from C straight to stderr, and merely enumerating the
