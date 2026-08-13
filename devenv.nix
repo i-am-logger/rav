@@ -430,7 +430,13 @@
       # clocks and fails this target with dozens of errors, which is the crate
       # boundary doing its job rather than a gap in this one.
       exec = "cargo build -p rav-core -p rav-appearance --target wasm32-unknown-unknown";
-      after = [ "test:clippy" ];
+      # After test:unit, not beside it. The `after` edges above exist to keep
+      # cargo invocations off each other's toes over the single lock on
+      # ./target, and a task that only waits for clippy runs concurrently with
+      # the tests - which is the contention those edges were measured to stop.
+      # Last in the chain also puts it after the cheapest failures, and it is
+      # the only task here that compiles for a second target.
+      after = [ "test:unit" ];
     };
   };
 
