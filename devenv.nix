@@ -38,6 +38,17 @@
     # record-demo reads the focused window and sends the tour's keys through
     # this. macOS does both through osascript, which ships with the system.
     xdotool
+
+    # winit and softbuffer, behind the `gui` feature. Off by default and still
+    # compiled here, because clippy and the tests run under --all-features -
+    # so these arrive with the feature rather than after it turns CI red.
+    # Both backends: winit carries X11 and Wayland and chooses at runtime.
+    libxkbcommon
+    wayland
+    xorg.libX11
+    xorg.libXcursor
+    xorg.libXi
+    xorg.libXrandr
   ];
 
   # Development scripts

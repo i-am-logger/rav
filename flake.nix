@@ -43,7 +43,24 @@
             inherit src;
             strictDeps = true;
             nativeBuildInputs = lib.optionals stdenv.isLinux [ pkgs.pkg-config ];
-            buildInputs = lib.optionals stdenv.isLinux [ pkgs.alsa-lib ];
+            buildInputs = lib.optionals stdenv.isLinux ([ pkgs.alsa-lib ]
+              # The `gui` feature is off here, but `devenv test` runs clippy and
+              # the tests under --all-features, so winit and softbuffer are
+              # compiled on Linux in CI whether or not anyone turns them on.
+              # These have to arrive with the feature, not after the build that
+              # first needs them goes red.
+              #
+              # X11 and Wayland both, because winit's default features carry
+              # both backends and picks at runtime - a build with one is a
+              # binary that cannot open a window on half of Linux.
+              ++ (with pkgs; [
+              libxkbcommon
+              wayland
+              xorg.libX11
+              xorg.libXcursor
+              xorg.libXi
+              xorg.libXrandr
+            ]));
           };
 
           # The dependencies as a store path of their own, built from a stub

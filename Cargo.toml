@@ -113,6 +113,22 @@ dirs = "5.0"
 resvg = { version = "0.48", default-features = false }
 usvg = { version = "0.48", default-features = false }
 
+# A window of rav's own. Optional and off by default: a terminal visualiser
+# should not make everyone who installs it build a windowing stack.
+#
+# softbuffer rather than wgpu, because the frame is already a `Pixmap` on the
+# CPU - this is one more blit target, not a second renderer, and wgpu would
+# bring a GPU abstraction to move bytes that are already where they need to be.
+winit = { version = "0.30", optional = true }
+softbuffer = { version = "0.4", optional = true }
+
+# `--all-features` is what devenv runs clippy and the tests under, so this is
+# compiled on both platforms in CI whether or not anybody turns it on. The
+# Linux system libraries it needs are in `flake.nix` and `devenv.nix` for the
+# same reason.
+[features]
+gui = ["dep:winit", "dep:softbuffer"]
+
 [[bin]]
 name = "rav"
 path = "src/main.rs"
