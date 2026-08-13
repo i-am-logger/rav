@@ -48,11 +48,11 @@ readme = "README.md"
 # crates.io allows at most five keywords, each at most 20 characters.
 keywords = ["winamp", "audio", "visualizer", "spectrum", "tui"]
 categories = ["multimedia::audio", "command-line-utilities", "visualization"]
-# `assets/` is for the README and the repository, and crates.io resolves a
-# README's relative paths against the repository rather than the package - so
-# excluding the whole directory costs nothing and keeps brand artwork out of
-# what people download to build the binary.
-exclude = ["assets/", ".github/", "devenv.nix", "devenv.yaml", "devenv.lock"]
+# Named file by file, never `assets/` as a directory: the built-in segment skin
+# lives there and is an `include_str!`, so excluding the directory produces a
+# package that does not compile. The demo is 2.4MB and is linked absolutely from
+# the README, which crates.io serves from the repository rather than the package.
+exclude = ["assets/demo.gif", ".github/", "devenv.nix", "devenv.yaml", "devenv.lock"]
 
 # Denied rather than warned: a warning in a `nix build` scrolls past in CI logs
 # and nobody sees it. `dead_code` is a member of `unused`, so this covers the
