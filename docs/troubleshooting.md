@@ -79,6 +79,7 @@ reports rather than forecasts: **drawing on** while the pixels are going,
 | `pixels (your terminal can draw images)` | pixels are going, and nothing needs fixing. `asked for` in place of the reason means `--surface kitty` on the command line |
 | `glyphs (your terminal will not say how big it is in pixels)` | rav asked the terminal how big it is and got no answer. Deriving a cell size from the font is the rounding the pixel surface exists to remove, so rav declines to guess |
 | `glyphs (tmux or screen is in the way)` | image escapes do not pass through a multiplexer intact. An explicit `--surface kitty` is still honoured — asking always wins — but it is the terminal underneath that has to answer |
+| `glyphs (this build has no window in it)` | `--surface window` on a build without the `gui` feature. It is off by default so that installing a terminal visualiser does not build a windowing stack; `cargo install rav --features gui` turns it on |
 
 **Pixels are the bars.** The oscilloscope is block characters on every surface,
 so `Space` takes the picture down and the panel goes back to saying *would*.
