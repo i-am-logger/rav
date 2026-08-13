@@ -250,6 +250,11 @@ pub struct App {
     bar_style: BarStyle,
     /// The angle the field is bolted at. Pixels only - see `Action::CycleView`.
     view: View,
+    /// A drawing to build the bars from, if one was given on the command line.
+    ///
+    /// Replaces the artwork the `segment` style carries. `None` is the built-in
+    /// one, which is what every run that did not ask uses.
+    skin: Option<&'static str>,
     show_help: bool,
     /// Briefly shown after a settings key, so a change is visible without a
     /// permanent status bar cluttering the display.
@@ -347,6 +352,7 @@ impl App {
             // answers to that question agree only until one of them moves.
             bar_style: BarStyle::from_skin(preset.skin).unwrap_or_default(),
             view: View::default(),
+            skin: None,
             show_help: false,
             status: None,
             source: None,
@@ -533,7 +539,7 @@ impl App {
             // is where the reason is written down. Sending the raw uptime
             // would work all day and then quietly stop moving.
             elapsed: rav_appearance::scene::sway_phase(self.started.elapsed().as_secs_f64()),
-            artwork: self.bar_style.artwork(),
+            artwork: self.skin.or_else(|| self.bar_style.artwork()),
         };
         // `coarse` and `fine` are the same cap on a cell grid - one position per
         // row is all a cell offers - so the difference has to be made here or
@@ -685,6 +691,16 @@ impl App {
     /// Show a message for a couple of seconds.
     fn note(&mut self, text: String) {
         self.status = Some((text, Instant::now()));
+    }
+
+    /// Draw the bars from this drawing rather than the built-in one.
+    ///
+    /// Opens on the style that uses it, because a skin nobody can see is
+    /// indistinguishable from a skin that failed to load - and `b` walks away
+    /// from it and back like any other.
+    pub fn wear_skin(&mut self, svg: &'static str) {
+        self.skin = Some(svg);
+        self.bar_style = BarStyle::Segment;
     }
 
     /// Whether a viewing angle would change anything.
@@ -2422,6 +2438,35 @@ mod tests {
                 .expect("no viewing angle row");
             assert_eq!(row.value.as_deref(), Some(expected));
         }
+    }
+
+    #[test]
+    fn a_skin_from_a_file_replaces_the_built_in_one_and_shows_itself() {
+        // A skin nobody can see is indistinguishable from one that failed to
+        // load, so wearing it also selects the style that draws it. `b` walks
+        // away from there and back like any other.
+        const MINE: &str = "<svg/>";
+        let mut a = app();
+        assert_ne!(a.bar_style, BarStyle::Segment, "not where it opens");
+
+        a.wear_skin(MINE);
+        assert_eq!(a.bar_style, BarStyle::Segment, "it chose another style");
+        assert_eq!(a.skin, Some(MINE));
+
+        // And it outranks the built-in artwork rather than sitting beside it:
+        // the drawing a user handed over is the one they expect to see.
+        assert!(
+            std::ptr::eq(
+                a.skin.or_else(|| a.bar_style.artwork()).unwrap().as_ptr(),
+                MINE.as_ptr()
+            ),
+            "the built-in drawing won",
+        );
+
+        // Cycling away leaves the skin in hand, so coming back shows it again
+        // rather than reverting to the built-in.
+        a.apply(Action::CycleBarStyle);
+        assert_eq!(a.skin, Some(MINE), "cycling threw the skin away");
     }
 
     #[test]

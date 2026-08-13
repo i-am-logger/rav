@@ -43,7 +43,13 @@ rav --list-devices    # what rav can capture from
 rav -d "<name>"       # capture from a named device
 rav --clean           # log almost nothing
 rav --surface glyphs  # auto, glyphs, kitty or window
+rav --skin bar.svg    # draw the bars from your own shape
 ```
+
+`--skin` takes an SVG and builds the bars from it - only its shape is used, so the
+theme still decides the colour — and it needs a terminal drawing pixels. It
+selects the `segment` bar style, since a skin nobody can see is
+indistinguishable from one that failed to load.
 
 A terminal that can draw images gets **pixels**: a peak cap rides over the
 backdrop instead of erasing the cell it crosses, the bar ladder is even at any

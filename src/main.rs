@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -39,6 +39,12 @@ struct Args {
     /// Theme: `rav`, `winamp`, `terminal`, `mono`, or a name/path of a theme file
     #[arg(long, value_name = "NAME|PATH")]
     theme: Option<String>,
+
+    /// An SVG to draw a bar's rungs from, in place of the built-in `segment`.
+    /// Only its shape is used - the theme still decides the colour. Implies
+    /// that style at startup, and needs a terminal drawing pixels
+    #[arg(long, value_name = "PATH")]
+    skin: Option<std::path::PathBuf>,
 
     /// Which surface to draw on. `auto` draws pixels wherever the terminal says
     /// it can draw images - WezTerm, Ghostty, kitty - and block characters
@@ -212,6 +218,22 @@ async fn rav_main() -> Result<()> {
     if let Some(theme) = args.theme.as_deref() {
         app.set_theme(rav::visual::theme::load(theme)?);
         info!("Using theme: {theme}");
+    }
+
+    // Read here rather than in `App` for the same reason a theme is: a path
+    // that cannot be read is a mistake worth stopping for, and reporting it
+    // once the alternate screen is up means reporting it where nobody can
+    // read it.
+    //
+    // Leaked deliberately. A drawn skin is identified by the address of its
+    // text - see `render::sprite` - and this is read once for the life of the
+    // process, so one leak buys an identity check that cannot go wrong. A
+    // `String` handed in instead would be freed and its address reused.
+    if let Some(path) = args.skin.as_deref() {
+        let svg = std::fs::read_to_string(path)
+            .with_context(|| format!("Cannot read the skin at {}", path.display()))?;
+        app.wear_skin(Box::leak(svg.into_boxed_str()));
+        info!("Using skin: {}", path.display());
     }
 
     // Here, and not inside `App`, because asking the terminal has to happen
