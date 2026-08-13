@@ -173,7 +173,14 @@ async fn rav_main() -> Result<()> {
             .init();
     }
 
-    info!("🚀 RAV Audio Visualizer starting up...");
+    // With the pid, because the log is appended to and two ravs running at once
+    // interleave with nothing to tell them apart - which is not hypothetical:
+    // a stray run from hours earlier was read as the current one, and its
+    // frame counts taken for this run's.
+    info!(
+        "🚀 RAV Audio Visualizer starting up... (pid {})",
+        std::process::id()
+    );
 
     // Load configuration
     let config = Config::load(args.config.as_deref()).await?;

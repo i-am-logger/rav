@@ -50,9 +50,17 @@ it says which rav chose. Neither line at all means nothing is arriving; a peak
 near zero means the source is silent rather than absent.
 
 Read it from the bottom. The file is appended to, so it holds every run since
-you last deleted it — and if two ravs are going at once their lines interleave
-with nothing to tell them apart. `🚀 RAV Audio Visualizer starting up` marks
-where the newest run begins.
+you last deleted it, and two ravs going at once interleave their lines.
+`🚀 RAV Audio Visualizer starting up` marks where a run begins and carries that
+run's **pid**, which is what tells two of them apart:
+
+```
+🚀 RAV Audio Visualizer starting up... (pid 41337)
+```
+
+`ps` will say whether that pid is still going. A run you thought had finished
+and has not is the reason to check: its lines go on arriving under yours, and
+they look exactly like yours.
 
 `rav --list-devices` shows what rav can see and `rav -d "<name>"` selects one.
 On Linux that list is ALSA PCMs only — a PipeWire/PulseAudio `.monitor` source
