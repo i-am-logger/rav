@@ -39,10 +39,16 @@
     # this. macOS does both through osascript, which ships with the system.
     xdotool
 
-    # winit and softbuffer, behind the `gui` feature. Off by default and still
-    # compiled here, because clippy and the tests run under --all-features -
-    # so these arrive with the feature rather than after it turns CI red.
-    # Both backends: winit carries X11 and Wayland and chooses at runtime.
+    # For *running* the `gui` window here, not for building it. winit and
+    # softbuffer dlopen X11 and Wayland rather than linking them, so
+    # `--all-features` compiles on a Linux box with none of these - measured, by
+    # taking them out and watching CI stay green.
+    #
+    # Which also means `cargo install rav --features gui` needs no system
+    # packages beyond what a desktop already has. A headless machine builds it
+    # and cannot open a window, and that is a property of being headless.
+    #
+    # Both backends, because winit carries both and chooses at runtime.
     libxkbcommon
     wayland
     xorg.libX11
