@@ -17,11 +17,33 @@ use rav_appearance::theme::Theme;
 /// The tour as `record-demo` defaults it, or `None` where `devenv.nix` is not
 /// beside us - a crate unpacked from the registry has the tests and not the
 /// development environment, and that is not a failure.
+///
+/// Absent and unreadable are told apart on purpose. A file that is there and
+/// does not parse means `record-demo` has been rewritten, and returning `None`
+/// for it would leave both of these skipping in the one repository that has the
+/// script - green, and guarding nothing. That is the failure they exist to
+/// catch in the recording, so they had better not be it themselves.
 fn default_tour() -> Option<String> {
     let nix = std::fs::read_to_string("devenv.nix").ok()?;
-    let line = nix.lines().find(|line| line.contains("RAV_DEMO_TOUR:-"))?;
-    let after = line.split("RAV_DEMO_TOUR:-").nth(1)?;
-    Some(after.split('}').next()?.to_string())
+    let line = nix
+        .lines()
+        .find(|line| line.contains("RAV_DEMO_TOUR:-"))
+        .expect("devenv.nix is here but names no RAV_DEMO_TOUR - has record-demo moved?");
+    let after = line
+        .split("RAV_DEMO_TOUR:-")
+        .nth(1)
+        .expect("RAV_DEMO_TOUR is named but has no default after `:-`");
+    let tour = after
+        .split('}')
+        .next()
+        .expect("the default is never closed")
+        .trim()
+        .to_string();
+    assert!(
+        tour.split_whitespace().all(|step| step.contains(':')),
+        "the tour is not `seconds:key` steps any more: {tour}",
+    );
+    Some(tour)
 }
 
 /// How many times the tour sends that key.
