@@ -710,15 +710,26 @@ impl App {
         self.bar_style = BarStyle::Segment;
     }
 
-    /// Whether a drawn style is actually being drawn.
+    /// Why a drawn style is not being drawn, if it is not.
     ///
-    /// A drawing is applied as a clip mask, and a mask is in the pixmap's own
+    /// Two ways to lose it, and they want different words. A cell grid has no
+    /// way to put a picture on the screen and falls back to the block glyph. And
+    /// a drawing is applied as a clip mask, which is in the pixmap's own
     /// coordinates - so once the field is at an angle the bar and its mask no
-    /// longer agree and the surface falls back to the plain ladder rather than
-    /// drawing them apart. True for every style made of fractions, which have
-    /// nothing to lose either way.
-    fn drawing_reaches_the_bars(&self) -> bool {
-        self.bar_style.artwork().is_none() || self.view == View::Flat
+    /// longer agree, and the surface draws the plain ladder rather than drawing
+    /// them apart.
+    ///
+    /// `None` for every style made of fractions, which have nothing to lose
+    /// either way, and for a drawn one that is reaching the bars.
+    fn drawing_is_missing(&self) -> Option<&'static str> {
+        self.bar_style.artwork()?;
+        if !self.can_be_angled() {
+            Some("needs pixels")
+        } else if self.view != View::Flat {
+            Some("needs a flat view")
+        } else {
+            None
+        }
     }
 
     /// Whether a viewing angle would change anything.
@@ -945,10 +956,9 @@ impl App {
             HelpRow {
                 key: "b",
                 description: "bar style",
-                value: Some(if self.drawing_reaches_the_bars() {
-                    self.bar_style.label().to_string()
-                } else {
-                    format!("{} - needs a flat view", self.bar_style.label())
+                value: Some(match self.drawing_is_missing() {
+                    None => self.bar_style.label().to_string(),
+                    Some(why) => format!("{} - {why}", self.bar_style.label()),
                 }),
             },
             HelpRow {
@@ -2474,12 +2484,15 @@ mod tests {
                 .and_then(|row| row.value)
                 .expect("no bar style row")
         };
+        // A cell grid has no way to put a picture on the screen at all.
         let mut a = app();
+        a.wear_skin("<svg/>");
+        assert_eq!(style_row(&a), "segment - needs pixels");
+
         a.surface = Chosen {
             surface: crate::surface::Surface::Kitty,
             because: "for the test",
         };
-        a.wear_skin("<svg/>");
         assert_eq!(style_row(&a), "segment");
 
         a.apply(Action::CycleView);
