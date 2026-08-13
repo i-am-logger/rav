@@ -484,6 +484,27 @@ impl App {
     /// cursor now is, then write the overlay's own cells. An image lands
     /// wherever the cursor happens to be, and the overlay goes on afterwards
     /// because a written cell blanks the picture beneath it.
+    /// Measure what has arrived and move the bars to now.
+    ///
+    /// The two belong together, and belong on the signal's schedule rather than
+    /// the display's: the ballistics integrate `dt`, so stepping them on
+    /// whatever cadence a surface happens to repaint at throws away the
+    /// accuracy that buys. A surface that skipped this on a coalesced frame
+    /// would make the interval between spectra a property of its own frame
+    /// rate.
+    ///
+    /// Hands back the gain, which the oscilloscope wants, and the instant it
+    /// measured at, which is what a frame ceiling is judged against - taking
+    /// the clock twice would put the two a hair apart for no reason.
+    pub(crate) fn advance(&mut self) -> (f32, Instant) {
+        let gain = self.measure();
+        let measured_at = Instant::now();
+        let dt = measured_at.duration_since(self.last_frame).as_secs_f32();
+        self.last_frame = measured_at;
+        self.ballistics.step(&self.bands, dt);
+        (gain, measured_at)
+    }
+
     /// The frame as pixels, and nothing about how it reaches a screen.
     ///
     /// Everything the two pixel surfaces have in common. A terminal that draws
@@ -495,7 +516,10 @@ impl App {
     /// `size` carries pixels and cells both, because the bar width is in cells
     /// and cells are what `+` and `-` move. A window has none of its own and
     /// says what it is counting instead.
-    fn frame_pixels(&mut self, size: &crossterm::terminal::WindowSize) -> Option<Vec<u8>> {
+    pub(crate) fn frame_pixels(
+        &mut self,
+        size: &crossterm::terminal::WindowSize,
+    ) -> Option<Vec<u8>> {
         use crate::surface::frame::{Frame, Look};
         use rav_core::geometry::Screen;
         use rav_core::units::{CellSize, Cells, Length};
@@ -1216,12 +1240,7 @@ impl App {
             // plainer one: it is framerate-independent because it integrates
             // dt, and stepping it on the display's cadence rather than the
             // signal's threw away the accuracy that buys.
-            let gain = self.measure();
-
-            let measured_at = Instant::now();
-            let dt = measured_at.duration_since(self.last_frame).as_secs_f32();
-            self.last_frame = measured_at;
-            self.ballistics.step(&self.bands, dt);
+            let (gain, measured_at) = self.advance();
 
             // Only the drawing is capped. Everything above ran on the signal.
             if measured_at < next_frame {
