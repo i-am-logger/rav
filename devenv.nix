@@ -458,16 +458,56 @@
       #
       # Paths are read out of the source rather than listed here, so an asset
       # embedded later is covered without anyone remembering to add it.
+      #
+      # Each package is checked against its own tarball. rav shipping a file
+      # says nothing about whether rav-appearance ships it, and rav-appearance
+      # is published first - so the wrong tarball is the burn case, not a
+      # tidiness point. A path above a package root cannot be packaged at all,
+      # which this reports rather than tolerates.
       exec = ''
-        set -eu
-        list=$(cargo package --quiet --list -p rav --allow-dirty)
+        set -euo pipefail
         status=0
-        for path in $(grep -rEho 'include_(str|bytes)!\("\.\./[^"]*"\)' src crates \
-          | sed -E 's/.*\("//; s/"\)$//; s|^(\.\./)+||' | sort -u); do
-          printf '%s\n' "$list" | grep -qxF "$path" && continue
-          echo "embedded but not packaged: $path" >&2
-          status=1
-        done
+        embedded() {
+          # grep exits 1 when a crate embeds nothing, which is the normal case,
+          # and 2 or more when the scan itself failed. `|| true` would collapse
+          # the two and report "nothing embedded" for a search that never ran -
+          # a check that passes by not looking is worse than no check.
+          set +e
+          found=$(grep -rEho 'include_(str|bytes)!\("\.\./[^"]*"\)' "$1")
+          code=$?
+          # Every call the pattern above cannot read is a failure rather than a
+          # skip: a path long enough for rustfmt to wrap the line, or a raw
+          # string, would otherwise drop out of the check without saying so.
+          # Requiring the open paren keeps doc comments out of the count - they
+          # name the macro without calling it.
+          called=$(grep -rEoh 'include_(str|bytes)!\(' "$1" | wc -l | tr -d ' ')
+          literal=$(grep -rEoh 'include_(str|bytes)!\("' "$1" | wc -l | tr -d ' ')
+          concat=$(grep -rEoh 'include_(str|bytes)!\(concat!' "$1" | wc -l | tr -d ' ')
+          set -e
+          if [ $code -gt 1 ]; then
+            echo "scanning $1 failed: grep exited $code" >&2
+            return 1
+          fi
+          if [ "$called" -ne "$((literal + concat))" ]; then
+            echo "$1: an include_str!/include_bytes! call this check cannot read" >&2
+            return 1
+          fi
+          printf '%s' "$found" | sed -E 's/.*\("//; s/"\)$//; s|^(\.\./)+||' | sort -u
+        }
+        # `asset`, never `path`: zsh ties $path to $PATH, so a loop variable of
+        # that name empties the search path for everything after it.
+        check() {
+          list=$(cargo package --quiet --list -p "$1" --allow-dirty)
+          assets=$(embedded "$2")
+          for asset in $assets; do
+            printf '%s\n' "$list" | grep -qxF "$asset" && continue
+            echo "$1 embeds $asset, which is not in its package" >&2
+            status=1
+          done
+        }
+        check rav src
+        check rav-core crates/rav-core/src
+        check rav-appearance crates/rav-appearance/src
         exit $status
       '';
       # Last, for the same ./target lock reason as test:portable.
