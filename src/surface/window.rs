@@ -155,6 +155,7 @@ struct Showing {
     /// merely runs: a window that opened and paints nothing looks exactly like
     /// one that works, from here.
     drawn: u32,
+    shown: u32,
     measured: u32,
     woke: u32,
     counted_from: Instant,
@@ -236,12 +237,14 @@ impl ApplicationHandler for Showing {
         self.woke += 1;
         if self.counted_from.elapsed() >= std::time::Duration::from_secs(1) {
             tracing::debug!(
-                "{} frames and {} spectra from {} wakes",
+                "{} of {} frames shown, {} spectra, from {} wakes",
+                self.shown,
                 self.drawn,
                 self.measured,
                 self.woke
             );
             self.drawn = 0;
+            self.shown = 0;
             self.measured = 0;
             self.woke = 0;
             self.counted_from = now;
@@ -274,7 +277,6 @@ impl ApplicationHandler for Showing {
             if self.next_frame < now {
                 self.next_frame = now + self.min_frame;
             }
-            self.drawn += 1;
             if let Some(window) = &self.window {
                 window.request_redraw();
             }
@@ -315,6 +317,8 @@ impl Showing {
             return Ok(());
         };
 
+        self.drawn += 1;
+
         // The audio and the analysis happened in `about_to_wait`, on every wake
         // rather than on every frame. This is only the drawing.
 
@@ -339,11 +343,17 @@ impl Showing {
             .map_err(|why| anyhow::anyhow!("no buffer to draw into: {why}"))?;
         // A frame that does not fill the buffer is a resize caught mid-flight;
         // showing it stretched is worse than showing the last one again.
+        //
+        // Counted rather than passed over in silence. If the two ever stopped
+        // agreeing for good, this would be a window that draws nothing and
+        // says nothing about it - and the count sits in the same line as the
+        // frames, where a window drawing 0 of 60 is impossible to miss.
         if buffer.len() == self.packed.len() {
             buffer.copy_from_slice(&self.packed);
             buffer
                 .present()
                 .map_err(|why| anyhow::anyhow!("the frame would not go up: {why}"))?;
+            self.shown += 1;
         }
         Ok(())
     }
@@ -366,6 +376,7 @@ pub fn show(app: App, audio: Receiver<AudioData>) -> Result<()> {
         min_frame,
         next_frame: Instant::now(),
         drawn: 0,
+        shown: 0,
         measured: 0,
         woke: 0,
         counted_from: Instant::now(),
