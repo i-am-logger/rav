@@ -32,8 +32,26 @@
 //! - **Nothing waits.** Every send is a `try_send`, and the tap's callback takes
 //!   a `try_lock` it is allowed to lose.
 //!
-//! The one thing left on that thread is `flume` itself, which takes a brief
-//! internal lock. Closing that would mean a lock-free ring, and a dependency.
+//! # What is left, and why it stays
+//!
+//! `flume` itself. `try_send` takes a `std::sync::Mutex` and holds it for one
+//! `VecDeque::push_back` - read rather than assumed, and worth being exact
+//! about, because the alarming version is behind a feature rav does not enable:
+//! with `spin` on, flume's lock spins and then **sleeps** on the caller, which
+//! on this thread would be indefensible. Without it the lock is an ordinary
+//! mutex the consumer holds only long enough to pop.
+//!
+//! So the residual risk is a bounded one: if the consumer is preempted holding
+//! that lock, the callback waits for it. Small, and real.
+//!
+//! Closing it means a lock-free ring, and a ring cannot be awaited - the render
+//! loop selects on this channel, which is what makes rav event-driven rather
+//! than timer-driven. Something would still have to wake the loop, and every
+//! candidate for that takes a lock somewhere too. So the trade is a new
+//! dependency and a restructured event loop against a mutex held for a pointer
+//! push, and it is not worth it today. Written down rather than left implicit,
+//! because "no locks on the audio thread" is a rule this file otherwise keeps
+//! absolutely, and the exception should be one someone chose.
 //!
 //! [`synthetic`] is exempt and says so: it paces itself on a thread of its own,
 //! answers to nobody, and allocating there costs nothing.
