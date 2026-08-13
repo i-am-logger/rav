@@ -710,6 +710,28 @@ impl App {
         self.bar_style = BarStyle::Segment;
     }
 
+    /// Why a drawn style is not being drawn, if it is not.
+    ///
+    /// Two ways to lose it, and they want different words. A cell grid has no
+    /// way to put a picture on the screen and falls back to the block glyph. And
+    /// a drawing is applied as a clip mask, which is in the pixmap's own
+    /// coordinates - so once the field is at an angle the bar and its mask no
+    /// longer agree, and the surface draws the plain ladder rather than drawing
+    /// them apart.
+    ///
+    /// `None` for every style made of fractions, which have nothing to lose
+    /// either way, and for a drawn one that is reaching the bars.
+    fn drawing_is_missing(&self) -> Option<&'static str> {
+        self.bar_style.artwork()?;
+        if !self.can_be_angled() {
+            Some("needs pixels")
+        } else if self.view != View::Flat {
+            Some("needs a flat view")
+        } else {
+            None
+        }
+    }
+
     /// Whether a viewing angle would change anything.
     ///
     /// The pixel surface, showing the analyser. A cell holds one character
@@ -934,7 +956,10 @@ impl App {
             HelpRow {
                 key: "b",
                 description: "bar style",
-                value: Some(self.bar_style.label().to_string()),
+                value: Some(match self.drawing_is_missing() {
+                    None => self.bar_style.label().to_string(),
+                    Some(why) => format!("{} - {why}", self.bar_style.label()),
+                }),
             },
             HelpRow {
                 key: "v",
@@ -2445,6 +2470,38 @@ mod tests {
                 .expect("no viewing angle row");
             assert_eq!(row.value.as_deref(), Some(expected));
         }
+    }
+
+    #[test]
+    fn the_panel_says_when_a_drawn_style_is_not_being_drawn() {
+        // A drawing is a clip mask, and a mask is in the pixmap's coordinates,
+        // so an angled field falls back to the plain ladder. Silently, until
+        // this row said so.
+        let style_row = |a: &App| {
+            a.help_rows()
+                .into_iter()
+                .find(|row| row.key == "b")
+                .and_then(|row| row.value)
+                .expect("no bar style row")
+        };
+        // A cell grid has no way to put a picture on the screen at all.
+        let mut a = app();
+        a.wear_skin("<svg/>");
+        assert_eq!(style_row(&a), "segment - needs pixels");
+
+        a.surface = Chosen {
+            surface: crate::surface::Surface::Kitty,
+            because: "for the test",
+        };
+        assert_eq!(style_row(&a), "segment");
+
+        a.apply(Action::CycleView);
+        assert_eq!(a.view, View::Raked);
+        assert_eq!(style_row(&a), "segment - needs a flat view");
+
+        // A ladder made of fractions has nothing to lose at an angle.
+        a.apply(Action::CycleBarStyle);
+        assert_eq!(style_row(&a), a.bar_style.label());
     }
 
     #[test]
