@@ -171,8 +171,21 @@ impl OnAPty {
     }
 
     /// The same, resizing the window once it is drawing and waiting again.
+    ///
+    /// Three stretches after the drag, not one. Every wait here is on a *total*
+    /// count of pictures, and the frames already in flight when the resize
+    /// lands are drawn at the old size - so a single stretch leaves fewer than
+    /// [`ENOUGH`] at the new one as soon as the machine is busy, and the test
+    /// fails for the reason it was built to rule out. Waiting longer cannot
+    /// hide a rav that never resized: the assertion counts frames at the new
+    /// size, and more time only gives a working one room to produce them.
     fn quit_after_resizing_to(self, size: libc::winsize) -> String {
-        self.watched(&[Then::Resize(size), Then::Nothing])
+        self.watched(&[
+            Then::Resize(size),
+            Then::Nothing,
+            Then::Nothing,
+            Then::Nothing,
+        ])
     }
 
     /// The same, pressing a key once it is drawing and waiting again - so what

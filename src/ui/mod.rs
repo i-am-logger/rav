@@ -484,25 +484,83 @@ impl App {
     /// cursor now is, then write the overlay's own cells. An image lands
     /// wherever the cursor happens to be, and the overlay goes on afterwards
     /// because a written cell blanks the picture beneath it.
-    fn painted(
+    /// What rav has to say right now, or nothing.
+    ///
+    /// The warning outranks a transient note: a settings message that hides
+    /// "there is no audio" is worse than no message at all.
+    ///
+    /// Both surfaces want it and neither can reach the other's way of showing
+    /// it - a terminal writes cells, a window has no text of its own yet and
+    /// puts it in the title bar, which the desktop draws.
+    pub(crate) fn status_line(&self) -> Option<String> {
+        self.tap_warning()
+            .map(str::to_string)
+            .or_else(|| self.active_status().map(str::to_string))
+    }
+
+    /// Whether a key has asked rav to stop.
+    ///
+    /// A surface that drives its own loop needs to ask, where `App::run`
+    /// reads the field directly.
+    ///
+    /// Only the window asks, so this is behind the feature that has one - the
+    /// crate denies unused code, and a method with no caller is a build
+    /// failure rather than a warning nobody reads.
+    #[cfg(feature = "gui")]
+    pub(crate) fn wants_to_quit(&self) -> bool {
+        self.should_quit
+    }
+
+    /// The shortest gap between drawn frames.
+    ///
+    /// A ceiling, not a cadence, and it belongs to `App` rather than to a
+    /// surface: the configured refresh rate is what both of them are capped by,
+    /// and a second copy of this arithmetic in the window would be a window
+    /// that ignored the setting.
+    pub(crate) fn min_frame(&self) -> Duration {
+        let fps = self.config.display.refresh_rate.clamp(1, 240) as f64;
+        Duration::from_secs_f64(1.0 / fps)
+    }
+
+    /// Measure what has arrived and move the bars to now.
+    ///
+    /// The two belong together, and belong on the signal's schedule rather than
+    /// the display's: the ballistics integrate `dt`, so stepping them on
+    /// whatever cadence a surface happens to repaint at throws away the
+    /// accuracy that buys. A surface that skipped this on a coalesced frame
+    /// would make the interval between spectra a property of its own frame
+    /// rate.
+    ///
+    /// Hands back the gain, which the oscilloscope wants, and the instant it
+    /// measured at, which is what a frame ceiling is judged against - taking
+    /// the clock twice would put the two a hair apart for no reason.
+    pub(crate) fn advance(&mut self) -> (f32, Instant) {
+        let gain = self.measure();
+        let measured_at = Instant::now();
+        let dt = measured_at.duration_since(self.last_frame).as_secs_f32();
+        self.last_frame = measured_at;
+        self.ballistics.step(&self.bands, dt);
+        (gain, measured_at)
+    }
+
+    /// The frame as pixels, and nothing about how it reaches a screen.
+    ///
+    /// Everything the two pixel surfaces have in common. A terminal that draws
+    /// images and a window of rav's own want the same picture and differ only
+    /// in the delivery, so the encoding lives with each of them and the drawing
+    /// lives here. `None` where there is nothing to hand over - a screen with
+    /// no area, which is a terminal caught mid-resize.
+    ///
+    /// `size` carries pixels and cells both, because the bar width is in cells
+    /// and cells are what `+` and `-` move. A window has none of its own and
+    /// says what it is counting instead.
+    pub(crate) fn frame_pixels(
         &mut self,
-        out: &mut impl Write,
-        size: crossterm::terminal::WindowSize,
-        staging: &std::path::Path,
-        status: Option<&str>,
-        help: Option<&[HelpRow<'_>]>,
-    ) -> Result<bool> {
+        size: &crossterm::terminal::WindowSize,
+    ) -> Option<Vec<u8>> {
         use crate::surface::frame::{Frame, Look};
-        use crate::surface::overlay;
         use rav_core::geometry::Screen;
         use rav_core::units::{CellSize, Cells, Length};
-
-        // Only the analyser is drawn as pixels. The oscilloscope is still block
-        // characters, so `space` has to hand the screen back rather than leave
-        // the bars sitting there looking like a key that does nothing.
-        if self.visualisation != Visualisation::Analyzer {
-            return self.stop_painting(out).map(|()| false);
-        }
 
         let screen = Screen::new(
             Length(f32::from(size.width)),
@@ -581,7 +639,27 @@ impl App {
             pixels
         });
         self.cap_levels = caps;
-        let Some(pixels) = drawn else {
+        drawn
+    }
+
+    fn painted(
+        &mut self,
+        out: &mut impl Write,
+        size: crossterm::terminal::WindowSize,
+        staging: &std::path::Path,
+        status: Option<&str>,
+        help: Option<&[HelpRow<'_>]>,
+    ) -> Result<bool> {
+        use crate::surface::overlay;
+
+        // Only the analyser is drawn as pixels. The oscilloscope is still block
+        // characters, so `space` has to hand the screen back rather than leave
+        // the bars sitting there looking like a key that does nothing.
+        if self.visualisation != Visualisation::Analyzer {
+            return self.stop_painting(out).map(|()| false);
+        }
+
+        let Some(pixels) = self.frame_pixels(&size) else {
             return Ok(false);
         };
 
@@ -660,7 +738,7 @@ impl App {
     ///
     /// cpal delivers interleaved frames. Averaging rather than summing keeps a
     /// correlated full-scale stereo signal at full scale instead of clipping.
-    fn push_samples(&mut self, samples: &[f32]) {
+    pub(crate) fn push_samples(&mut self, samples: &[f32]) {
         let n = self.window.len();
         for frame in samples.chunks(self.channels) {
             let mono = frame.iter().sum::<f32>() / frame.len() as f32;
@@ -696,7 +774,7 @@ impl App {
     }
 
     /// Show a message for a couple of seconds.
-    fn note(&mut self, text: String) {
+    pub(crate) fn note(&mut self, text: String) {
         self.status = Some((text, Instant::now()));
     }
 
@@ -790,7 +868,7 @@ impl App {
         }
     }
 
-    fn apply(&mut self, action: Action) {
+    pub(crate) fn apply(&mut self, action: Action) {
         match action {
             Action::Quit => self.should_quit = true,
             Action::CycleVisualisation => {
@@ -1067,8 +1145,7 @@ impl App {
         // four to clear a 16.7ms gap, which turns a 60fps ceiling into 48. The
         // deadline carries the remainder instead, so the average comes out at
         // the rate that was asked for.
-        let fps = self.config.display.refresh_rate.clamp(1, 240) as f64;
-        let min_frame = Duration::from_secs_f64(1.0 / fps);
+        let min_frame = self.min_frame();
         let mut next_frame = Instant::now();
 
         // Only for a device that stops delivering *entirely*. A running device
@@ -1200,12 +1277,7 @@ impl App {
             // plainer one: it is framerate-independent because it integrates
             // dt, and stepping it on the display's cadence rather than the
             // signal's threw away the accuracy that buys.
-            let gain = self.measure();
-
-            let measured_at = Instant::now();
-            let dt = measured_at.duration_since(self.last_frame).as_secs_f32();
-            self.last_frame = measured_at;
-            self.ballistics.step(&self.bands, dt);
+            let (gain, measured_at) = self.advance();
 
             // Only the drawing is capped. Everything above ran on the signal.
             if measured_at < next_frame {
@@ -1222,13 +1294,8 @@ impl App {
             frames += 1;
             let scope_gain = gain;
 
-            // Both borrow all of `self`, so they are taken before the destructure.
-            // The warning outranks a transient note: a settings message that
-            // hides "there is no audio" is worse than no message at all.
-            let status = self
-                .tap_warning()
-                .map(str::to_string)
-                .or_else(|| self.active_status().map(str::to_string));
+            // Taken before the destructure below, which borrows all of `self`.
+            let status = self.status_line();
             let help_rows = if self.show_help {
                 Some(self.help_rows())
             } else {

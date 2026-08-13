@@ -22,6 +22,10 @@ pub mod frame;
 pub mod kitty;
 pub mod overlay;
 pub mod pixels;
+/// Behind `gui`, which is off by default - a terminal visualiser should not
+/// make everyone who installs it build a windowing stack.
+#[cfg(feature = "gui")]
+pub mod window;
 
 use crate::render::Capabilities;
 use rav_core::units::Cells;
@@ -138,10 +142,16 @@ pub fn choose(asked: Choice, multiplexed: bool, answers: impl FnOnce() -> bool) 
         because,
     };
     match asked {
-        // A window of rav's own is not built. Saying so beats reporting a
+        // Behind `gui`, and a build without it says so rather than reporting a
         // surface nothing draws on and leaving the user to wonder why the
         // picture looks exactly as it did before.
-        Choice::Window => glyphs("a window of rav's own is not built yet"),
+        #[cfg(feature = "gui")]
+        Choice::Window => Chosen {
+            surface: Surface::Window,
+            because: "asked for",
+        },
+        #[cfg(not(feature = "gui"))]
+        Choice::Window => glyphs("this build has no window in it"),
         // An explicit request is honoured even where auto would decline, so a
         // terminal that does not answer the query but does draw images is still
         // reachable. It is the user's terminal and they can see the result.
@@ -381,12 +391,23 @@ mod tests {
     }
 
     #[test]
-    fn asking_for_a_window_says_there_is_not_one_yet() {
-        // Reporting a surface nothing draws on leaves the user looking at a
-        // picture identical to the one before, wondering what the flag did.
+    fn asking_for_a_window_gets_one_where_the_build_has_one() {
         let asked = choose(Choice::Window, false, || false);
-        assert_eq!(asked.surface, Surface::Glyphs);
-        assert!(asked.because.contains("not built"), "{}", asked.because);
+
+        // Reporting a surface nothing draws on leaves the user looking at a
+        // picture identical to the one before, wondering what the flag did. So
+        // a build without the feature says which it is, rather than reporting
+        // a window and drawing block characters into it.
+        #[cfg(not(feature = "gui"))]
+        {
+            assert_eq!(asked.surface, Surface::Glyphs);
+            assert!(asked.because.contains("no window"), "{}", asked.because);
+        }
+        // And a build with it honours the flag. Asserted here rather than left
+        // to the feature being off in most builds: `--all-features` is what CI
+        // runs, so this is the arm that is actually checked.
+        #[cfg(feature = "gui")]
+        assert_eq!(asked.surface, Surface::Window);
     }
 
     #[test]

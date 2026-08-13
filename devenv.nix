@@ -38,6 +38,17 @@
     # record-demo reads the focused window and sends the tour's keys through
     # this. macOS does both through osascript, which ships with the system.
     xdotool
+
+    # winit and softbuffer, behind the `gui` feature. Off by default and still
+    # compiled here, because clippy and the tests run under --all-features -
+    # so these arrive with the feature rather than after it turns CI red.
+    # Both backends: winit carries X11 and Wayland and chooses at runtime.
+    libxkbcommon
+    wayland
+    xorg.libX11
+    xorg.libXcursor
+    xorg.libXi
+    xorg.libXrandr
   ];
 
   # Development scripts
@@ -445,6 +456,20 @@
       # rav-core and rav-appearance never run in CI, and a green build would
       # mean the binary compiled rather than that the mechanics work.
       exec = "cargo test --workspace --all-features";
+      after = [ "test:default" ];
+    };
+    "test:default" = {
+      # Everything else here runs `--all-features`, and that is not what anyone
+      # installs. The gap is not theoretical: this crate denies unused code, so
+      # a method reached only from behind a feature is a *build failure* in the
+      # default build while the whole suite is green - which is what the window
+      # did the day it landed, caught by CI rather than here.
+      #
+      # `check` rather than `clippy` or `test`: the lints that matter for this
+      # are the crate's own denials, and they fire at compile time. Under a
+      # second warm, because it is a second feature set and so a second set of
+      # artifacts rather than a recompile of the first.
+      exec = "cargo check --workspace --all-targets";
       after = [ "test:clippy" ];
     };
     "test:portable" = {
@@ -542,5 +567,5 @@
 
   # Named one by one, so a task added above is not in the suite until it is
   # added here too - `devenv test` runs this line, not the task list.
-  enterTest = lib.mkForce "devenv tasks run test:fmt test:clippy test:nix test:unit test:portable test:package";
+  enterTest = lib.mkForce "devenv tasks run test:fmt test:clippy test:nix test:default test:unit test:portable test:package";
 }

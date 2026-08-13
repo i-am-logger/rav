@@ -50,7 +50,8 @@ struct Args {
     /// it can draw images - WezTerm, Ghostty, kitty - and block characters
     /// everywhere else, including a terminal that will not say how big it is in
     /// pixels. `glyphs` forces the block characters, `kitty` forces the pixels,
-    /// and `window` is not built yet. Press `h` for what rav settled on and why.
+    /// and `window` opens one of rav's own where the build has the `gui`
+    /// feature. Press `h` for what rav settled on and why.
     #[arg(
         long,
         value_name = "auto|glyphs|kitty|window",
@@ -269,6 +270,10 @@ async fn rav_main() -> Result<()> {
         chosen.surface.label(),
         chosen.because
     );
+    // Read before it is handed over, because a window is driven from here
+    // rather than from inside `App::run`.
+    #[cfg(feature = "gui")]
+    let on_a_window = chosen.surface == rav::surface::Surface::Window;
     app.set_surface(chosen);
 
     // Prefer a CoreAudio process tap. It captures every process' output ahead of
@@ -298,6 +303,24 @@ async fn rav_main() -> Result<()> {
                 info!("Process tap unavailable ({e}); using the capture device instead");
             }
         }
+    }
+
+    // A window takes the thread, because winit does, and it is the main thread
+    // it wants - which is where this already is. Blocking the runtime is
+    // survivable for exactly one reason: nothing rav needs is on it. The
+    // capture callbacks are cpal's own threads and the test signal has a thread
+    // of its own, so the audio goes on arriving on the channel throughout.
+    //
+    // No `tokio::select!` on Ctrl-C either. A window is closed by closing it,
+    // and the signal handler below would be reaching into a loop it does not
+    // drive.
+    #[cfg(feature = "gui")]
+    if on_a_window {
+        let shown = rav::surface::window::show(app, audio_receiver);
+        if let Some(capture) = &mut audio_capture {
+            capture.stop();
+        }
+        return shown;
     }
 
     // Setup signal handling for graceful shutdown
