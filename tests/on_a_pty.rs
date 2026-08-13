@@ -59,6 +59,17 @@ const CAN_DRAW_IMAGES: &[u8] = b"\x1b_Gi=31;OK\x1b\\\x1b[?62c";
 /// Enough frames to tell a running loop from one that drew once and stalled.
 const ENOUGH: usize = 8;
 
+/// What to do to the run at the end of a stretch of drawing.
+#[derive(Clone, Copy)]
+enum Then {
+    /// Drag the window to that size.
+    Resize(libc::winsize),
+    /// Send that key, as somebody at the keyboard would.
+    Press(u8),
+    /// Nothing - the stretch is there to be drawn through.
+    Nothing,
+}
+
 /// How long any one wait will hold before it is a hang. Generous, because it is
 /// never reached when things work - a shared runner drawing at a tenth of the
 /// speed still arrives in a fraction of it - and because a hung test in CI is a
@@ -156,17 +167,23 @@ impl OnAPty {
 
     /// Wait for [`ENOUGH`] pictures, quit, and hand back all the terminal saw.
     fn quit_once_it_is_drawing(self) -> String {
-        self.watched(&[None])
+        self.watched(&[Then::Nothing])
     }
 
     /// The same, resizing the window once it is drawing and waiting again.
     fn quit_after_resizing_to(self, size: libc::winsize) -> String {
-        self.watched(&[Some(size), None])
+        self.watched(&[Then::Resize(size), Then::Nothing])
+    }
+
+    /// The same, pressing a key once it is drawing and waiting again - so what
+    /// the key did has a stretch of frames to appear in before the quit.
+    fn quit_after_pressing(self, key: u8) -> String {
+        self.watched(&[Then::Press(key), Then::Nothing])
     }
 
     /// Each entry is a stretch of drawing to wait through, and what to do to
     /// the window at the end of it.
-    fn watched(mut self, stages: &[Option<libc::winsize>]) -> String {
+    fn watched(mut self, stages: &[Then]) -> String {
         let (tally, counted) = channel();
         let reading = {
             let fd = unsafe { libc::dup(self.master) };
@@ -221,20 +238,31 @@ impl OnAPty {
         for stage in stages {
             wanted += ENOUGH;
             wait_for(&counted, wanted);
-            if let Some(mut size) = *stage {
-                // Setting the size on the master is what a window drag is: the
-                // kernel tells the far side, and rav asks again.
-                assert_eq!(
-                    unsafe {
-                        libc::ioctl(
-                            self.master,
-                            libc::TIOCSWINSZ as _,
-                            std::ptr::from_mut(&mut size),
-                        )
-                    },
-                    0,
-                    "TIOCSWINSZ",
-                );
+            match *stage {
+                Then::Resize(mut size) => {
+                    // Setting the size on the master is what a window drag is:
+                    // the kernel tells the far side, and rav asks again.
+                    assert_eq!(
+                        unsafe {
+                            libc::ioctl(
+                                self.master,
+                                libc::TIOCSWINSZ as _,
+                                std::ptr::from_mut(&mut size),
+                            )
+                        },
+                        0,
+                        "TIOCSWINSZ",
+                    );
+                }
+                // Written straight to the descriptor rather than through a
+                // `File`, which would take ownership of it and close the pty on
+                // drop - the quit below still needs it.
+                Then::Press(key) => {
+                    let sent =
+                        unsafe { libc::write(self.master, std::ptr::from_ref(&key).cast(), 1) };
+                    assert_eq!(sent, 1, "sending {:?}", char::from(key));
+                }
+                Then::Nothing => {}
             }
         }
 
@@ -467,5 +495,81 @@ fn only_a_whole_query_counts_as_one() {
         "a query still arriving is still a query - it came from rav and there \
          is nothing else it could be, so waiting for the terminator would cost \
          a round trip to learn what is already known",
+    );
+}
+
+/// The text a reader would see, with the escape sequences taken out.
+///
+/// The overlay is written cell by cell, so every character is followed by the
+/// cursor move that placed the next one - which means "segment" is not a
+/// substring of what goes on the wire until the sequences are gone. CSI runs
+/// from `ESC [` to the first letter; the graphics commands run from `ESC _` to
+/// the string terminator and carry a file path that must not be searched as if
+/// it were the panel.
+fn what_a_reader_sees(seen: &str) -> String {
+    let mut text = String::new();
+    let mut rest = seen;
+    while let Some(at) = rest.find('\x1b') {
+        text.push_str(&rest[..at]);
+        let after = &rest[at + 1..];
+        if let Some(body) = after.strip_prefix('[') {
+            let end = body
+                .find(|c: char| c.is_ascii_alphabetic())
+                .map_or(body.len(), |i| i + 1);
+            rest = &body[end..];
+        } else if after.starts_with('_') {
+            rest = after.find("\x1b\\").map_or("", |i| &after[i + 2..]);
+        } else {
+            rest = after.get(1..).unwrap_or("");
+        }
+    }
+    text.push_str(rest);
+    text
+}
+
+/// The built-in artwork, handed in as a file rather than embedded - so this is
+/// the `--skin` path and not the `include_str!` one, and no temporary file has
+/// to be written or cleaned up. Tests run from the repository root.
+const A_SKIN: &str = "assets/skins/segment.svg";
+
+#[test]
+fn a_drawn_skin_reaches_the_pixel_surface_and_the_panel_says_it_is_drawn() {
+    let run = OnAPty::running(&["--surface", "kitty", "--test-audio", "--skin", A_SKIN]);
+    let seen = run.quit_after_pressing(b'h');
+    let panel = what_a_reader_sees(&seen);
+
+    // Present at all: a panel that never opened would fail here rather than
+    // pass the two below by having nothing in it to find.
+    assert!(
+        panel.contains("segment"),
+        "the panel never named the bar style, so `h` did not open it",
+    );
+    assert!(
+        !panel.contains("needs pixels"),
+        "the panel says a drawing needs pixels while drawing pixels",
+    );
+    assert!(
+        !panel.contains("needs a flat view"),
+        "the panel says a drawing needs a flat view while the view is flat",
+    );
+}
+
+#[test]
+fn the_panel_says_a_drawn_skin_is_not_drawn_at_an_angle() {
+    // The other half, and the one worth running the binary for: a mask cannot
+    // follow a leaning bar, so an angle puts the plain ladder back. Reported
+    // rather than left to look like the drawing being ignored - which is what
+    // it looked like before #135.
+    let run = OnAPty::running(&["--surface", "kitty", "--test-audio", "--skin", A_SKIN]);
+    let seen = run.watched(&[Then::Press(b'v'), Then::Press(b'h'), Then::Nothing]);
+    let panel = what_a_reader_sees(&seen);
+
+    assert!(
+        panel.contains("segment"),
+        "the panel never named the bar style, so `h` did not open it",
+    );
+    assert!(
+        panel.contains("needs a flat view"),
+        "`v` took the field off flat and the panel still claims the drawing is on screen",
     );
 }
