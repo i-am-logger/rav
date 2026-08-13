@@ -143,19 +143,27 @@ pub fn choose(asked: Choice, multiplexed: bool, answers: impl FnOnce() -> bool) 
         // failure is a garbled screen rather than a missing picture - so auto
         // never picks pixels there, however the terminal answers.
         Choice::Auto if multiplexed => glyphs("tmux or screen is in the way"),
-        // Pixels are asked for, never assumed. A terminal that says it can draw
-        // images is told so and left on block characters, because "it looked
-        // fine on the one terminal that was tried" is not something a default
-        // can rest on - and a default that turns out wrong is a broken display
-        // for everybody rather than for whoever opted in.
+        // A terminal that says it can draw images gets them. Asking for what the
+        // terminal already told you it can do is a setting that exists to be
+        // found, and most people never find it - the whole point of the pixel
+        // surface is the peak cap that rides over the backdrop instead of
+        // erasing the cell it crosses, and the ladder that is even at any font
+        // size, and neither of those is worth having only to whoever read the
+        // README to the bottom.
         //
-        // The line to change when that is no longer true is the one below.
+        // The fall back is still there and is automatic: a terminal that will
+        // not report its size in pixels draws block characters anyway, because
+        // working a cell size out from the font is the rounding this exists to
+        // remove. See `App::paint`.
         //
         // Not a match guard, because calling `answers` consumes it and a guard
         // only gets a borrow.
         Choice::Auto => {
             if answers() {
-                glyphs("your terminal can draw images - try --surface kitty")
+                Chosen {
+                    surface: Surface::Kitty,
+                    because: "your terminal can draw images",
+                }
             } else {
                 glyphs("your terminal cannot draw images")
             }
@@ -334,28 +342,29 @@ mod tests {
     }
 
     #[test]
-    fn nobody_gets_pixels_without_asking_for_them() {
-        // Both ways round, auto draws block characters. A terminal that can do
-        // better is told how, rather than being switched over on its behalf:
-        // the pixel surface has been seen working on one terminal, and a
-        // default that turns out wrong breaks the display for everyone instead
-        // of for whoever chose it.
+    fn a_terminal_that_can_draw_images_is_given_them() {
+        // The setting stopped being a setting. A peak cap riding over the
+        // backdrop instead of erasing the cell it crosses is not worth having
+        // only to whoever read the README to the bottom, and asking for what the
+        // terminal already said it can do is a flag that exists to be found.
         let capable = choose(Choice::Auto, false, || true);
-        assert_eq!(capable.surface, Surface::Glyphs);
-        assert!(
-            capable.because.contains("--surface kitty"),
-            "a capable terminal was not told how to use it: {}",
-            capable.because,
-        );
-        assert_eq!(
-            choose(Choice::Auto, false, || false).surface,
-            Surface::Glyphs
-        );
+        assert_eq!(capable.surface, Surface::Kitty);
+        assert_eq!(capable.because, "your terminal can draw images");
 
-        // Asking is still honoured, or there would be no way in at all.
+        // And one that says it cannot is believed.
+        let plain = choose(Choice::Auto, false, || false);
+        assert_eq!(plain.surface, Surface::Glyphs);
+        assert_eq!(plain.because, "your terminal cannot draw images");
+
+        // Asking is still honoured either way - a terminal that draws images
+        // without answering the query is reachable no other way.
         assert_eq!(
             choose(Choice::Kitty, false, || false).surface,
             Surface::Kitty
+        );
+        assert_eq!(
+            choose(Choice::Glyphs, false, || true).surface,
+            Surface::Glyphs
         );
     }
 

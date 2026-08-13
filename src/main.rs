@@ -40,11 +40,11 @@ struct Args {
     #[arg(long, value_name = "NAME|PATH")]
     theme: Option<String>,
 
-    /// Which surface to draw on. `kitty` draws the bars as pixels in WezTerm,
-    /// Ghostty or kitty, and drops back to block characters on a terminal
-    /// that will not say how big it is in pixels; `auto` still chooses them
-    /// however capable your terminal is, and `window` is not built yet. Press
-    /// `h` for what rav settled on and why.
+    /// Which surface to draw on. `auto` draws pixels wherever the terminal says
+    /// it can draw images - WezTerm, Ghostty, kitty - and block characters
+    /// everywhere else, including a terminal that will not say how big it is in
+    /// pixels. `glyphs` forces the block characters, `kitty` forces the pixels,
+    /// and `window` is not built yet. Press `h` for what rav settled on and why.
     #[arg(
         long,
         value_name = "auto|glyphs|kitty|window",

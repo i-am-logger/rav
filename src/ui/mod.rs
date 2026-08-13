@@ -634,6 +634,18 @@ impl App {
         self.status = Some((text, Instant::now()));
     }
 
+    /// Whether a viewing angle would change anything.
+    ///
+    /// The pixel surface, showing the analyser. A cell holds one character
+    /// upright and always will, and the oscilloscope is a line of them on every
+    /// surface - `stop_painting` hands the screen back for it. Asked of the
+    /// surface rather than of whether a picture happens to be up this instant,
+    /// so the answer is the same before the first frame as after it.
+    fn can_be_angled(&self) -> bool {
+        self.surface.surface == crate::surface::Surface::Kitty
+            && self.visualisation == Visualisation::Analyzer
+    }
+
     /// The message to draw, if one is still recent.
     fn active_status(&self) -> Option<&str> {
         self.status
@@ -735,16 +747,17 @@ impl App {
                 self.bar_style = self.bar_style.next();
                 self.note(format!("bars {}", self.bar_style.label()));
             }
-            // Pixels only. A cell holds one character upright, so a glyph grid
-            // draws `Flat` whatever this says - and the note tells the truth
-            // about that, rather than reporting an angle nothing took.
+            // Refused rather than cycled where it would do nothing. A setting
+            // that moves while the picture does not is worse than a key that
+            // says why it will not move it, and this is the one setting in rav
+            // that a whole surface cannot honour.
             Action::CycleView => {
-                self.view = self.view.next();
-                self.note(if self.painting {
-                    format!("view {}", self.view.label())
+                if self.can_be_angled() {
+                    self.view = self.view.next();
+                    self.note(format!("view {}", self.view.label()));
                 } else {
-                    format!("view {} - pixels only", self.view.label())
-                });
+                    self.note("viewing angle needs pixels".into());
+                }
             }
             Action::CycleTheme => {
                 let next = self.next_theme();
@@ -849,8 +862,12 @@ impl App {
             },
             HelpRow {
                 key: "v",
-                description: "viewing angle (pixels only)",
-                value: Some(self.view.label().to_string()),
+                description: "viewing angle",
+                value: Some(if self.can_be_angled() {
+                    self.view.label().to_string()
+                } else {
+                    "needs pixels".to_string()
+                }),
             },
             HelpRow {
                 key: "g",
@@ -2301,6 +2318,10 @@ mod tests {
         assert_eq!(map_key(KeyCode::Char('V')), Action::CycleView);
 
         let mut a = app();
+        a.surface = Chosen {
+            surface: crate::surface::Surface::Kitty,
+            because: "for the test",
+        };
         assert_eq!(a.view, View::Flat, "rav does not open at an angle");
         for expected in ["raked", "turned", "corridor", "flat"] {
             a.apply(Action::CycleView);
@@ -2315,29 +2336,48 @@ mod tests {
     }
 
     #[test]
-    fn the_note_says_when_an_angle_will_not_be_drawn() {
-        // `v` is the one setting that does nothing on a cell grid, and a note
-        // reporting an angle the picture did not take is the defect #92 fixed
-        // for bar style and #93 then made obsolete. Here it is real: a cell
-        // holds one character upright and always will.
+    fn v_refuses_where_an_angle_would_do_nothing() {
+        // A setting that moves while the picture does not is worse than a key
+        // saying why it will not move it. A cell holds one character upright and
+        // always will, and the oscilloscope is a line of them on every surface -
+        // so neither can be angled, and the panel says so where the value would
+        // otherwise sit.
+        let angle_row = |a: &App| {
+            a.help_rows()
+                .into_iter()
+                .find(|row| row.key == "v")
+                .and_then(|row| row.value)
+                .expect("no viewing angle row")
+        };
+
+        // A glyph terminal, which is what `app()` settles on with no probe.
         let mut a = app();
-        a.painting = false;
         a.apply(Action::CycleView);
+        assert_eq!(a.view, View::Flat, "the angle moved where nothing draws it");
+        assert_eq!(angle_row(&a), "needs pixels");
         assert!(
             a.active_status()
-                .is_some_and(|note| note.contains("pixels")),
-            "the note promised an angle the glyph renderer cannot draw: {:?}",
+                .is_some_and(|note| note.contains("needs pixels")),
+            "it changed nothing and said nothing: {:?}",
             a.active_status(),
         );
 
-        a.painting = true;
+        // Pixels, but showing the oscilloscope, which hands the screen back to
+        // the glyph renderer for as long as it is up.
+        a.surface = Chosen {
+            surface: crate::surface::Surface::Kitty,
+            because: "for the test",
+        };
+        a.apply(Action::CycleVisualisation);
         a.apply(Action::CycleView);
-        assert!(
-            a.active_status()
-                .is_some_and(|note| !note.contains("pixels only")),
-            "the note apologised while the pixels were drawing it: {:?}",
-            a.active_status(),
-        );
+        assert_eq!(a.view, View::Flat, "the oscilloscope took an angle");
+        assert_eq!(angle_row(&a), "needs pixels");
+
+        // Back to the bars, where it means something.
+        a.apply(Action::CycleVisualisation);
+        a.apply(Action::CycleView);
+        assert_eq!(a.view, View::Raked);
+        assert_eq!(angle_row(&a), "raked");
     }
 
     #[test]

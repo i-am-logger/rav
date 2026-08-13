@@ -45,9 +45,11 @@ rav --clean           # log almost nothing
 rav --surface kitty   # auto, glyphs, kitty or window
 ```
 
-`--surface kitty` draws the bars as pixels in WezTerm, Ghostty and kitty; a peak
-cap then rides over the backdrop instead of erasing the cell it crosses, and the
-bar ladder is even at any font size. `auto` draws block characters. Press `h` for
+A terminal that can draw images gets **pixels**: a peak cap rides over the
+backdrop instead of erasing the cell it crosses, the bar ladder is even at any
+font size, and `v` bolts the field at an angle. WezTerm, Ghostty and kitty can;
+everything else draws block characters, as does a terminal that will not report
+its size in pixels. `--surface glyphs` forces the block characters. Press `h` for
 which surface rav is on and why.
 
 Everything else is a keypress, and `h` shows the lot with their current values:
@@ -100,8 +102,7 @@ The ballistics, and the ramp the `rav` and `winamp` themes use, come from
 
 ## What's next
 
-Pixels on `auto`, after the opt-in path has had a few releases in the open. A
-window of its own. Small displays — a strip of LEDs, or a matrix — which the
+A window of its own. Small displays — a strip of LEDs, or a matrix — which the
 same themes already cover, since what rav measures is kept apart from what it
 looks like.
 
