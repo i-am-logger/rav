@@ -205,6 +205,10 @@ impl Draw for Scene<'_> {
     /// neighbour's backdrop when the two wear different styles.
     fn draw(&self, canvas: &mut Canvas) {
         canvas.clear();
+        // Before anything is drawn, because it is how the picture is looked at
+        // rather than a property of any one bar. `Flat` leaves the canvas on the
+        // path it has always taken.
+        canvas.place_through(self.view.placing(&self.screen));
 
         let drawable = self.visible_bands();
         let screen = &self.screen;
@@ -352,6 +356,7 @@ mod tests {
     fn scene<'a>(bands: &'a [Band], styles: &'a [Style<'a>]) -> Scene<'a> {
         Scene {
             bands,
+            view: rav_appearance::View::Flat,
             layout: layout(10.0, 0.0),
             screen: screen(10.0, 60.0),
             styles,
