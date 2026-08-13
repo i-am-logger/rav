@@ -415,7 +415,24 @@
       exec = "cargo test --workspace --all-features";
       after = [ "test:clippy" ];
     };
+    "test:portable" = {
+      # The two crates the whole split exists for claim to run anywhere - a
+      # microcontroller driving an LED strip, a browser canvas. `#![no_std]`
+      # already stops them reaching for a filesystem or a clock; what it does
+      # not stop is a *machine* assumption, and that is what this catches.
+      #
+      # Measured rather than assumed: a NEON intrinsic added to `rav-core`
+      # compiles on this Mac and fails here, which is the shape of the mistake
+      # - portable by every other check, and unbuildable on the target the
+      # split exists to serve.
+      #
+      # rav itself is deliberately not in the list. It is full of terminals and
+      # clocks and fails this target with dozens of errors, which is the crate
+      # boundary doing its job rather than a gap in this one.
+      exec = "cargo build -p rav-core -p rav-appearance --target wasm32-unknown-unknown";
+      after = [ "test:clippy" ];
+    };
   };
 
-  enterTest = lib.mkForce "devenv tasks run test:fmt test:clippy test:nix test:unit";
+  enterTest = lib.mkForce "devenv tasks run test:fmt test:clippy test:nix test:unit test:portable";
 }
