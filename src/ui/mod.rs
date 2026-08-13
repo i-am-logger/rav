@@ -500,6 +500,11 @@ impl App {
     ///
     /// A surface that drives its own loop needs to ask, where `App::run`
     /// reads the field directly.
+    ///
+    /// Only the window asks, so this is behind the feature that has one - the
+    /// crate denies unused code, and a method with no caller is a build
+    /// failure rather than a warning nobody reads.
+    #[cfg(feature = "gui")]
     pub(crate) fn wants_to_quit(&self) -> bool {
         self.should_quit
     }
