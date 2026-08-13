@@ -146,6 +146,18 @@ struct Showing {
     /// `App::run` - which has the same one - does not.
     min_frame: std::time::Duration,
     next_frame: Instant,
+    /// Frames, spectra and wakes over the last second - the terminal loop
+    /// reports the first and last of those, and this adds the middle one
+    /// because winit wakes far more often than it is asked to and the count
+    /// of FFTs is the thing that costs.
+    ///
+    /// Also the only evidence from outside that this surface draws rather than
+    /// merely runs: a window that opened and paints nothing looks exactly like
+    /// one that works, from here.
+    drawn: u32,
+    measured: u32,
+    woke: u32,
+    counted_from: Instant,
     failed: Option<anyhow::Error>,
 }
 
@@ -221,10 +233,36 @@ impl ApplicationHandler for Showing {
         // from the receiving side, which is a thread and a second event type -
         // worth it when something here measures across frames, and not before.
         let now = Instant::now();
+        self.woke += 1;
+        if self.counted_from.elapsed() >= std::time::Duration::from_secs(1) {
+            tracing::debug!(
+                "{} frames and {} spectra from {} wakes",
+                self.drawn,
+                self.measured,
+                self.woke
+            );
+            self.drawn = 0;
+            self.measured = 0;
+            self.woke = 0;
+            self.counted_from = now;
+        }
+        let mut arrived = false;
         while let Ok(data) = self.audio.try_recv() {
             self.app.push_samples(&data.samples);
+            arrived = true;
         }
-        self.app.advance();
+        // When there is something new to measure, or when a frame is due
+        // anyway. Not on every wake: winit returns here far more often than it
+        // was asked to - measured at 180 to 376 times a second against a 60Hz
+        // deadline - and `advance` is a 1024-point FFT. Analysing the same
+        // unchanged window three times over is work nobody sees.
+        //
+        // The frame-due half is what keeps the bars falling when the audio
+        // stops entirely, which is the case `App::run` keeps a watchdog for.
+        if arrived || now >= self.next_frame {
+            self.app.advance();
+            self.measured += 1;
+        }
         if now >= self.next_frame {
             // A moving deadline, carrying the remainder - the form that asks
             // "has min_frame passed since the last frame" quantises to the wake
@@ -236,6 +274,7 @@ impl ApplicationHandler for Showing {
             if self.next_frame < now {
                 self.next_frame = now + self.min_frame;
             }
+            self.drawn += 1;
             if let Some(window) = &self.window {
                 window.request_redraw();
             }
@@ -326,6 +365,10 @@ pub fn show(app: App, audio: Receiver<AudioData>) -> Result<()> {
         titled: String::new(),
         min_frame,
         next_frame: Instant::now(),
+        drawn: 0,
+        measured: 0,
+        woke: 0,
+        counted_from: Instant::now(),
         failed: None,
     };
     events.run_app(&mut showing).context("running the window")?;
