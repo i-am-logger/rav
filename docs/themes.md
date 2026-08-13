@@ -16,8 +16,8 @@ your platform calls the config directory. That is **not** `~/.config` everywhere
 | Linux | `~/.config/rav/themes` |
 | macOS | `~/Library/Application Support/rav/themes` |
 
-A path always works and never has to be guessed at, which is what `--theme
-./sunset.toml` is for.
+Neither has to be guessed at: `--theme ./sunset.toml` takes a path and always
+works, wherever the file is.
 
 Press `t` in rav to cycle the built-ins; a theme loaded with `--theme` joins the
 rotation.
