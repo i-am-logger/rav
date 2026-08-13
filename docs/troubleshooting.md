@@ -83,6 +83,6 @@ reports rather than forecasts: **drawing on** while the pixels are going,
 
 **Pixels are the bars.** The oscilloscope is block characters on every surface,
 so `Space` takes the picture down and the panel goes back to saying *would*.
-Switching back brings it up again - and `v`, the viewing angle, reads `needs
-pixels` for as long as either of those is true, rather than moving a setting
-nothing is drawing.
+Switching back brings it up again - and `v`, the viewing angle, reads
+`needs pixels` for as long as either of those is true, rather than moving a
+setting nothing is drawing.

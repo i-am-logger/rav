@@ -66,8 +66,8 @@ them one at a time. A task that is not named there does not run.
 
 CI does **not** build the flake, so run `nix build .#default` yourself before a
 push that touches packaging. Flakes only see **git-tracked** files, so a new asset
-that has not been `git add`ed fails there and nowhere else — and `nix run
-github:i-am-logger/rav` is the install path in the README.
+that has not been `git add`ed fails there and nowhere else. `nix run github:i-am-logger/rav`
+is the install path in the README, so that is the one that breaks.
 
 ## Recording the demo
 
