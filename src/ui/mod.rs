@@ -24,7 +24,7 @@ use anyhow::Result;
 use rav_appearance::View;
 // The event types are named by the render loop whichever backend it is driving,
 // so only the parts that touch a real terminal are gated.
-use crossterm::event::{Event, KeyCode, KeyEventKind};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 #[cfg(not(test))]
 use crossterm::{
     ExecutableCommand, event,
@@ -127,6 +127,24 @@ pub enum Action {
     BarSize(i8),
 }
 
+/// What a keypress means, modifiers and all.
+///
+/// `Ctrl-C` has to be handled here because raw mode turns off `ISIG`: the
+/// terminal driver stops turning it into a signal and hands it over as an
+/// ordinary keystroke, so nothing acts on it unless rav does. A full-screen
+/// display that cannot be stopped with the reflex everyone has is one people
+/// end up killing from another window - and on the pixel surface that leaves
+/// the images up over their shell, because none of the teardown runs.
+pub fn map_press(key: KeyEvent) -> Action {
+    if key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('C'))
+    {
+        return Action::Quit;
+    }
+    map_key(key.code)
+}
+
+/// What a key means on its own, which is all of them but one.
 pub fn map_key(code: KeyCode) -> Action {
     match code {
         KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => Action::Quit,
@@ -1028,7 +1046,7 @@ impl App {
                     if let Event::Key(key) = event
                         && key.kind == KeyEventKind::Press
                     {
-                        self.apply(map_key(key.code));
+                        self.apply(map_press(key));
                     }
                 }
                 () = tap_ready => {}
@@ -1045,7 +1063,7 @@ impl App {
                 if let Event::Key(key) = event
                     && key.kind == KeyEventKind::Press
                 {
-                    self.apply(map_key(key.code));
+                    self.apply(map_press(key));
                 }
             }
 
@@ -1557,6 +1575,39 @@ mod tests {
         assert_eq!(map_key(KeyCode::Char('g')), Action::ToggleGrid);
         assert_eq!(map_key(KeyCode::Char('w')), Action::CycleBandwidth);
         assert_eq!(map_key(KeyCode::Char('z')), Action::None);
+    }
+
+    #[test]
+    fn ctrl_c_quits_because_nothing_else_will() {
+        // Raw mode turns off `ISIG`, so the terminal driver stops turning this
+        // into a signal and hands it over as a keystroke. Unhandled, it does
+        // nothing at all - and a full-screen display that will not stop for the
+        // reflex everyone has is one people kill from another window, which on
+        // the pixel surface leaves images over their shell because none of the
+        // teardown runs.
+        let press = |code, modifiers| map_press(KeyEvent::new(code, modifiers));
+        assert_eq!(
+            press(KeyCode::Char('c'), KeyModifiers::CONTROL),
+            Action::Quit
+        );
+        // Some terminals report the shifted form for `Ctrl-Shift-C`.
+        assert_eq!(
+            press(KeyCode::Char('C'), KeyModifiers::CONTROL),
+            Action::Quit
+        );
+
+        // And `c` on its own is still not a key rav uses, rather than a quit
+        // waiting to be pressed by accident.
+        assert_eq!(press(KeyCode::Char('c'), KeyModifiers::NONE), Action::None);
+
+        // Everything else still means what it means, held down or not: the
+        // modifier is only consulted for the one key the terminal will not
+        // deliver as a signal.
+        assert_eq!(press(KeyCode::Char('q'), KeyModifiers::NONE), Action::Quit);
+        assert_eq!(
+            press(KeyCode::Char('b'), KeyModifiers::CONTROL),
+            Action::CycleBarStyle
+        );
     }
 
     #[test]
