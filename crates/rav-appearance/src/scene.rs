@@ -20,6 +20,7 @@ use crate::ink::Colour;
 use crate::ramp::Ramp;
 use crate::skin::Skin;
 use rav_core::geometry::{BarLayout, Screen};
+use rav_core::transform::Transform;
 use rav_core::units::{Length, Level};
 
 /// Which of a scene's styles a band wears.
@@ -71,6 +72,100 @@ impl Band {
     }
 }
 
+/// Where the viewer is standing.
+///
+/// A whole-field property, not a per-bar one: the analyser is a panel, and this
+/// is the angle it is bolted at. Named rather than handed over as a matrix so
+/// that a surface cannot get the centring wrong - a perspective shrinks toward
+/// the origin, and the middle of the picture is the only sensible place for it
+/// to shrink toward, which only the scene knows.
+///
+/// A surface that cannot honour one draws [`Flat`](Self::Flat) and is right to:
+/// a cell grid has no room for a bar that leans, and half a lean is worse than
+/// none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum View {
+    /// Straight on, which is what every surface has always drawn.
+    #[default]
+    Flat,
+    /// Tipped back, so the top of the field falls away - a dashboard raked
+    /// back from the driver.
+    Raked,
+    /// Turned to one side - a panel on a speaker grille, seen from off-axis.
+    Turned,
+}
+
+impl View {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Flat => "flat",
+            Self::Raked => "raked",
+            Self::Turned => "turned",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Flat => Self::Raked,
+            Self::Raked => Self::Turned,
+            Self::Turned => Self::Flat,
+        }
+    }
+
+    /// The transform this comes to on a screen of a given size.
+    ///
+    /// Turn about the middle, then look at it from in front of the middle:
+    /// `move to the origin, rotate, recede, move back`. The move back survives
+    /// the perspective divide because it multiplies the `w` the projection just
+    /// set, which is what puts the picture in the middle of the screen rather
+    /// than in the middle of a screen that has itself been shrunk.
+    ///
+    /// The eye stands well back - three times the size of the field - so the
+    /// nearest corner never reaches it. A rake steep enough to swing a corner
+    /// behind the viewer would draw nothing at all, which reads as a fault
+    /// rather than as an angle.
+    ///
+    /// **And then it is scaled to fit.** An angle changes the shape of the
+    /// field, never how much of the screen it takes: a perspective magnifies
+    /// whatever it brings nearer, so a raked field spills off three edges and
+    /// the bars run out of the bottom of the picture. That is a rule rather
+    /// than a number chosen by looking - the fit is computed from the corners
+    /// the rotation actually produced, so the angles can be whatever reads best
+    /// and none of them can push the picture off the screen.
+    pub fn placing(self, screen: &Screen) -> Transform {
+        let (across, down) = (screen.width().get(), screen.height().get());
+        let (middle_x, middle_y) = (across / 2.0, down / 2.0);
+        let (turn, eye) = match self {
+            Self::Flat => return Transform::IDENTITY,
+            Self::Raked => (Transform::leaning(0.35), down * 3.0),
+            Self::Turned => (Transform::turning(0.44), across * 3.0),
+        };
+        let centred = |about: Transform| {
+            Transform::moving(-middle_x, -middle_y, 0.0)
+                .then(about)
+                .then(Transform::moving(middle_x, middle_y, 0.0))
+        };
+        let angled = Transform::moving(-middle_x, -middle_y, 0.0)
+            .then(turn)
+            .then(Transform::receding(eye))
+            .then(Transform::moving(middle_x, middle_y, 0.0));
+
+        let Some(field) = angled.quad(screen.bounds()) else {
+            return angled;
+        };
+        let (mut wide, mut tall) = (0.0f32, 0.0f32);
+        for corner in field.corners {
+            wide = wide.max((corner.x.get() - middle_x).abs() * 2.0);
+            tall = tall.max((corner.y.get() - middle_y).abs() * 2.0);
+        }
+        let fits = (across / wide).min(down / tall);
+        if !fits.is_finite() || fits >= 1.0 {
+            return angled;
+        }
+        angled.then(centred(Transform::scaling(fits, fits, 1.0)))
+    }
+}
+
 /// Everything a surface needs to draw one frame.
 ///
 /// Borrowed throughout, and built fresh each frame rather than kept: a scene is
@@ -81,6 +176,9 @@ pub struct Scene<'a> {
     pub bands: &'a [Band],
     pub layout: BarLayout,
     pub screen: Screen,
+    /// The angle the whole field is bolted at. `Flat` is what every surface
+    /// has always drawn, and what one that cannot lean draws regardless.
+    pub view: View,
     /// The looks a band may wear, indexed by its [`StyleId`].
     ///
     /// Usually one. Two for a stereo pair, one per band for a rainbow. A scene
@@ -156,7 +254,90 @@ mod tests {
             bands,
             layout: BarLayout::new(Length(8.0), Length(2.0)),
             screen: Screen::new(Length(across), Length(100.0)),
+            view: View::Flat,
             styles,
+        }
+    }
+
+    #[test]
+    fn flat_is_the_view_that_asks_for_nothing() {
+        // Every surface has always drawn this, and one that cannot lean draws it
+        // regardless - so it has to come out as the transform that means "leave
+        // it alone", exactly, or the pixel surface stops taking the path it has
+        // taken since before transforms existed.
+        let screen = Screen::new(Length(240.0), Length(120.0));
+        assert!(View::default() == View::Flat);
+        assert!(View::Flat.placing(&screen).is_identity());
+        assert!(!View::Raked.placing(&screen).is_identity());
+        assert!(!View::Turned.placing(&screen).is_identity());
+    }
+
+    #[test]
+    fn the_middle_of_the_picture_stays_where_it_is() {
+        // A perspective shrinks toward the origin, and the origin is the top-left
+        // corner. Without turning about the middle and coming back, every angle
+        // would also slide the whole field up and to the left - which reads as a
+        // bug rather than as a viewing angle, and is why this is named rather
+        // than handed to a surface as a matrix to centre for itself.
+        let screen = Screen::new(Length(240.0), Length(120.0));
+        let middle = rav_core::transform::Point::flat(Length(120.0), Length(60.0));
+        for view in [View::Raked, View::Turned] {
+            let stays = view.placing(&screen).apply(middle).unwrap();
+            assert!(
+                (stays.x.get() - 120.0).abs() < 0.01 && (stays.y.get() - 60.0).abs() < 0.01,
+                "{} moved the middle to {stays:?}",
+                view.label(),
+            );
+        }
+    }
+
+    #[test]
+    fn every_angle_keeps_the_whole_field_in_front_of_the_viewer() {
+        // A corner swung behind the eye draws nothing, which reads as a fault
+        // rather than as an angle - so the eye stands well back and every corner
+        // of every offered view has somewhere to land.
+        let screen = Screen::new(Length(240.0), Length(120.0));
+        let field = screen.bounds();
+        for view in [View::Flat, View::Raked, View::Turned] {
+            assert!(
+                view.placing(&screen).quad(field).is_some(),
+                "{} put a corner where it cannot be drawn",
+                view.label(),
+            );
+        }
+    }
+
+    #[test]
+    fn an_angle_changes_the_shape_of_the_field_not_how_much_screen_it_takes() {
+        // A perspective magnifies whatever it brings nearer, so a rake with
+        // nothing holding it fans the near edge out past three sides and the
+        // bars run off the bottom of the picture - which was measured by
+        // rendering one and looking at it. The fit is computed from the corners
+        // the rotation produced rather than chosen by eye, so the angles can be
+        // whatever reads best and none of them can spill.
+        let screen = Screen::new(Length(480.0), Length(240.0));
+        let field = screen.bounds();
+        for view in [View::Flat, View::Raked, View::Turned] {
+            let quad = view.placing(&screen).quad(field).expect("undrawable");
+            for corner in quad.corners {
+                let (x, y) = (corner.x.get(), corner.y.get());
+                assert!(
+                    (-0.01..=480.01).contains(&x) && (-0.01..=240.01).contains(&y),
+                    "{} put a corner at ({x}, {y}), off a 480x240 screen",
+                    view.label(),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_angles_cycle_back_to_flat() {
+        // Three presses and the picture is where it started, like every other
+        // cycling setting in rav.
+        let mut view = View::Flat;
+        for expected in [View::Raked, View::Turned, View::Flat] {
+            view = view.next();
+            assert_eq!(view, expected);
         }
     }
 

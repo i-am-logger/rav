@@ -21,6 +21,7 @@ use crate::{
 };
 use analyzer::{Analyzer, BarLayout, BarStyle, Peaks, grid_colors, row_colors};
 use anyhow::Result;
+use rav_appearance::View;
 // The event types are named by the render loop whichever backend it is driving,
 // so only the parts that touch a real terminal are gated.
 use crossterm::event::{Event, KeyCode, KeyEventKind};
@@ -117,6 +118,7 @@ pub enum Action {
     CycleFrequencyLimit,
     ToggleHelp,
     CycleBarStyle,
+    CycleView,
     CycleTheme,
     /// Trim in whole dB steps; kept an integer so `Action` stays `Eq`.
     Gain(i8),
@@ -135,6 +137,7 @@ pub fn map_key(code: KeyCode) -> Action {
         KeyCode::Char('g') | KeyCode::Char('G') => Action::ToggleGrid,
         KeyCode::Char('w') | KeyCode::Char('W') => Action::CycleBandwidth,
         KeyCode::Char('b') | KeyCode::Char('B') => Action::CycleBarStyle,
+        KeyCode::Char('v') | KeyCode::Char('V') => Action::CycleView,
         KeyCode::Char('t') | KeyCode::Char('T') => Action::CycleTheme,
         KeyCode::Char('f') | KeyCode::Char('F') => Action::CycleBarFall,
         KeyCode::Char('r') | KeyCode::Char('R') => Action::CycleFrequencyLimit,
@@ -227,6 +230,8 @@ pub struct App {
     peaks: Peaks,
     show_grid: bool,
     bar_style: BarStyle,
+    /// The angle the field is bolted at. Pixels only - see `Action::CycleView`.
+    view: View,
     show_help: bool,
     /// Briefly shown after a settings key, so a change is visible without a
     /// permanent status bar cluttering the display.
@@ -317,6 +322,7 @@ impl App {
             // reads is a preset that cannot describe how rav opens, and two
             // answers to that question agree only until one of them moves.
             bar_style: BarStyle::from_skin(preset.skin).unwrap_or_default(),
+            view: View::default(),
             show_help: false,
             status: None,
             source: None,
@@ -494,6 +500,7 @@ impl App {
             // renderer draws at the same size - the two are meant to be the
             // same picture, and a ladder on its own pitch would not be.
             ladder: Some((self.bar_style.skin(), cell.down(Cells(1)))),
+            view: self.view,
         };
         // `coarse` and `fine` are the same cap on a cell grid - one position per
         // row is all a cell offers - so the difference has to be made here or
@@ -728,6 +735,17 @@ impl App {
                 self.bar_style = self.bar_style.next();
                 self.note(format!("bars {}", self.bar_style.label()));
             }
+            // Pixels only. A cell holds one character upright, so a glyph grid
+            // draws `Flat` whatever this says - and the note tells the truth
+            // about that, rather than reporting an angle nothing took.
+            Action::CycleView => {
+                self.view = self.view.next();
+                self.note(if self.painting {
+                    format!("view {}", self.view.label())
+                } else {
+                    format!("view {} - pixels only", self.view.label())
+                });
+            }
             Action::CycleTheme => {
                 let next = self.next_theme();
                 self.set_theme(next);
@@ -828,6 +846,11 @@ impl App {
                 key: "b",
                 description: "bar style",
                 value: Some(self.bar_style.label().to_string()),
+            },
+            HelpRow {
+                key: "v",
+                description: "viewing angle (pixels only)",
+                value: Some(self.view.label().to_string()),
             },
             HelpRow {
                 key: "g",
@@ -2267,6 +2290,53 @@ mod tests {
         assert!(
             grid.iter().all(|c| !c.is_exact()),
             "an unanswered palette must not turn names into RGB"
+        );
+    }
+
+    #[test]
+    fn v_cycles_the_viewing_angle_and_says_where_it_lands() {
+        // A key wired to a field nothing reads is a key that does nothing, so
+        // this follows it all the way to the row a user reads it off.
+        assert_eq!(map_key(KeyCode::Char('v')), Action::CycleView);
+        assert_eq!(map_key(KeyCode::Char('V')), Action::CycleView);
+
+        let mut a = app();
+        assert_eq!(a.view, View::Flat, "rav does not open at an angle");
+        for expected in ["raked", "turned", "flat"] {
+            a.apply(Action::CycleView);
+            assert_eq!(a.view.label(), expected);
+            let row = a
+                .help_rows()
+                .into_iter()
+                .find(|row| row.key == "v")
+                .expect("no viewing angle row");
+            assert_eq!(row.value.as_deref(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn the_note_says_when_an_angle_will_not_be_drawn() {
+        // `v` is the one setting that does nothing on a cell grid, and a note
+        // reporting an angle the picture did not take is the defect #92 fixed
+        // for bar style and #93 then made obsolete. Here it is real: a cell
+        // holds one character upright and always will.
+        let mut a = app();
+        a.painting = false;
+        a.apply(Action::CycleView);
+        assert!(
+            a.active_status()
+                .is_some_and(|note| note.contains("pixels")),
+            "the note promised an angle the glyph renderer cannot draw: {:?}",
+            a.active_status(),
+        );
+
+        a.painting = true;
+        a.apply(Action::CycleView);
+        assert!(
+            a.active_status()
+                .is_some_and(|note| !note.contains("pixels only")),
+            "the note apologised while the pixels were drawing it: {:?}",
+            a.active_status(),
         );
     }
 

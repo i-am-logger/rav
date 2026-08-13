@@ -11,7 +11,7 @@
 
 use crate::render::{Band, Canvas, CapStyle, Draw, Ramp, Scene, Style};
 use crate::visual::{Palette, Theme};
-use rav_appearance::Skin;
+use rav_appearance::{Skin, View};
 use rav_core::geometry::{BarLayout, Screen};
 use rav_core::units::{Length, Level};
 
@@ -35,6 +35,11 @@ pub struct Look<'a> {
     /// pixels has no rungs of its own, so without this every bar style draws the
     /// same solid bar and `b` is six labels over one picture.
     pub ladder: Option<(Skin, Length)>,
+    /// The angle the field is bolted at, which `v` cycles.
+    ///
+    /// A cell grid draws `Flat` whatever this says - there is no room in a cell
+    /// for a bar that leans - so it reaches only the pixel surface.
+    pub view: View,
 }
 
 /// Everything a frame needs, held for as long as it takes to draw.
@@ -44,6 +49,7 @@ pub struct Frame {
     grid: Option<Ramp>,
     cap: Option<CapStyle>,
     ladder: Option<(Skin, Length)>,
+    view: View,
     layout: BarLayout,
     screen: Screen,
 }
@@ -74,6 +80,7 @@ impl Frame {
                 thickness,
             }),
             ladder: look.ladder,
+            view: look.view,
             layout,
             screen,
         }
@@ -96,6 +103,7 @@ impl Frame {
             bands: &self.bands,
             layout: self.layout,
             screen: self.screen,
+            view: self.view,
             styles: &styles,
         }
         .draw(&mut canvas);
@@ -132,6 +140,7 @@ mod tests {
     fn plain() -> Look<'static> {
         Look {
             theme: Box::leak(Box::new(Theme::default())),
+            view: View::Flat,
             palette: Box::leak(Box::new(Palette::default())),
             backdrop: true,
             caps: None,
@@ -148,6 +157,7 @@ mod tests {
         let palette = Palette::default();
         let look = Look {
             theme: &theme,
+            view: View::Flat,
             palette: &palette,
             backdrop,
             caps,
@@ -156,6 +166,76 @@ mod tests {
         Frame::new(levels, peaks, &look, layout(), screen())
             .pixels()
             .expect("a screen with area")
+    }
+
+    /// The same frame at a chosen viewing angle.
+    fn angled(view: View) -> Vec<u8> {
+        let theme = Theme::default();
+        let palette = Palette::default();
+        let look = Look {
+            theme: &theme,
+            view,
+            palette: &palette,
+            backdrop: true,
+            caps: Some(Length(2.0)),
+            ladder: None,
+        };
+        Frame::new(
+            &[0.8, 0.5, 0.3],
+            &[0.9, 0.6, 0.4],
+            &look,
+            layout(),
+            screen(),
+        )
+        .pixels()
+        .expect("a screen with area")
+    }
+
+    #[test]
+    fn an_angle_changes_the_picture_and_flat_leaves_it_alone() {
+        // The whole of what `v` is for. Flat has to come out byte-identical to
+        // the frame rav has always drawn, because it takes the same path through
+        // the canvas that it always did - and the two angles have to differ from
+        // it and from each other, or the key is three labels over one picture.
+        let flat = angled(View::Flat);
+        assert_eq!(flat, frame(&[0.8, 0.5, 0.3], &[0.9, 0.6, 0.4], true));
+
+        let raked = angled(View::Raked);
+        let turned = angled(View::Turned);
+        assert_ne!(flat, raked, "raking it drew the same picture");
+        assert_ne!(flat, turned, "turning it drew the same picture");
+        assert_ne!(raked, turned, "the two angles are the same picture");
+
+        // And each still draws something: an angle that emptied the frame would
+        // pass every assertion above.
+        for (name, pixels) in [("raked", &raked), ("turned", &turned)] {
+            let ink: u64 = pixels.chunks(4).map(|pixel| u64::from(pixel[3])).sum();
+            assert!(ink > 0, "{name} drew nothing at all");
+        }
+    }
+
+    #[test]
+    fn an_angled_frame_keeps_its_ink_inside_the_screen() {
+        // A perspective that put bars past the edge would be clipped in silence
+        // by the rasteriser, so the check is that the picture is still mostly
+        // there rather than that nothing overflowed - a raked field loses a
+        // little at the top, where the far edge falls away, and that is the
+        // angle rather than a fault.
+        let flat: u64 = angled(View::Flat)
+            .chunks(4)
+            .map(|pixel| u64::from(pixel[3]))
+            .sum();
+        for view in [View::Raked, View::Turned] {
+            let ink: u64 = angled(view)
+                .chunks(4)
+                .map(|pixel| u64::from(pixel[3]))
+                .sum();
+            assert!(
+                ink * 2 > flat,
+                "{} kept only {ink} of {flat} - most of the picture went over the edge",
+                view.label(),
+            );
+        }
     }
 
     #[test]
@@ -366,6 +446,7 @@ mod tests {
         let palette = Palette::default();
         let look = Look {
             theme: &theme,
+            view: View::Flat,
             palette: &palette,
             backdrop: false,
             caps: None,
@@ -448,6 +529,7 @@ mod tests {
         let palette = Palette::default();
         let look = Look {
             theme: &theme,
+            view: View::Flat,
             palette: &palette,
             backdrop: false,
             caps: None,
@@ -488,6 +570,7 @@ mod tests {
         // Built once: nothing in the loop changes the look, only the level.
         let look = Look {
             theme: &theme,
+            view: View::Flat,
             palette: &palette,
             backdrop: false,
             caps: None,
@@ -574,6 +657,7 @@ mod against_the_glyphs {
             .collect();
         let look = Look {
             theme: &theme,
+            view: View::Flat,
             palette: &palette,
             backdrop: false,
             caps: None,
