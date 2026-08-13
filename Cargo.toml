@@ -77,8 +77,11 @@ crossterm = "0.28"
 # cpal is the only backend used; it selects ALSA on Linux and CoreAudio on macOS.
 cpal = "0.15"
 
-# Signal processing and FFT
-rustfft = "6.2"
+# Signal processing and FFT.
+#
+# `rustfft` is not named here. realfft is built on it and re-exports what rav
+# touches - `realfft::num_complex::Complex` - so declaring it too was a version
+# constraint kept for nothing, and one that could argue with realfft's own.
 realfft = "3.3"
 
 # Rasterising, for the surfaces that draw pixels rather than glyphs.
