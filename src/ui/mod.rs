@@ -498,18 +498,6 @@ impl App {
             .or_else(|| self.active_status().map(str::to_string))
     }
 
-    /// Measure what has arrived and move the bars to now.
-    ///
-    /// The two belong together, and belong on the signal's schedule rather than
-    /// the display's: the ballistics integrate `dt`, so stepping them on
-    /// whatever cadence a surface happens to repaint at throws away the
-    /// accuracy that buys. A surface that skipped this on a coalesced frame
-    /// would make the interval between spectra a property of its own frame
-    /// rate.
-    ///
-    /// Hands back the gain, which the oscilloscope wants, and the instant it
-    /// measured at, which is what a frame ceiling is judged against - taking
-    /// the clock twice would put the two a hair apart for no reason.
     /// Whether a key has asked rav to stop.
     ///
     /// A surface that drives its own loop needs to ask, where `App::run`
@@ -523,6 +511,29 @@ impl App {
         self.should_quit
     }
 
+    /// The shortest gap between drawn frames.
+    ///
+    /// A ceiling, not a cadence, and it belongs to `App` rather than to a
+    /// surface: the configured refresh rate is what both of them are capped by,
+    /// and a second copy of this arithmetic in the window would be a window
+    /// that ignored the setting.
+    pub(crate) fn min_frame(&self) -> Duration {
+        let fps = self.config.display.refresh_rate.clamp(1, 240) as f64;
+        Duration::from_secs_f64(1.0 / fps)
+    }
+
+    /// Measure what has arrived and move the bars to now.
+    ///
+    /// The two belong together, and belong on the signal's schedule rather than
+    /// the display's: the ballistics integrate `dt`, so stepping them on
+    /// whatever cadence a surface happens to repaint at throws away the
+    /// accuracy that buys. A surface that skipped this on a coalesced frame
+    /// would make the interval between spectra a property of its own frame
+    /// rate.
+    ///
+    /// Hands back the gain, which the oscilloscope wants, and the instant it
+    /// measured at, which is what a frame ceiling is judged against - taking
+    /// the clock twice would put the two a hair apart for no reason.
     pub(crate) fn advance(&mut self) -> (f32, Instant) {
         let gain = self.measure();
         let measured_at = Instant::now();
@@ -1134,8 +1145,7 @@ impl App {
         // four to clear a 16.7ms gap, which turns a 60fps ceiling into 48. The
         // deadline carries the remainder instead, so the average comes out at
         // the rate that was asked for.
-        let fps = self.config.display.refresh_rate.clamp(1, 240) as f64;
-        let min_frame = Duration::from_secs_f64(1.0 / fps);
+        let min_frame = self.min_frame();
         let mut next_frame = Instant::now();
 
         // Only for a device that stops delivering *entirely*. A running device

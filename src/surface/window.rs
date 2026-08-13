@@ -23,6 +23,7 @@
 
 use std::num::NonZeroU32;
 use std::rc::Rc;
+use std::time::Instant;
 
 use anyhow::{Context as _, Result};
 use crossterm::event::KeyCode;
@@ -141,6 +142,10 @@ struct Showing {
     /// What the title already says, so a frame that changed nothing does not
     /// ask the window server to set it again.
     titled: String,
+    /// The frame ceiling, kept here because winit drives this loop and
+    /// `App::run` - which has the same one - does not.
+    min_frame: std::time::Duration,
+    next_frame: Instant,
     failed: Option<anyhow::Error>,
 }
 
@@ -193,14 +198,32 @@ impl ApplicationHandler for Showing {
     }
 
     fn about_to_wait(&mut self, events: &ActiveEventLoop) {
-        // Poll rather than Wait: the audio arrives on a channel winit knows
-        // nothing about, so there is no event to be woken by. The frame
-        // ceiling inside `App` is what stops this drawing faster than it needs
-        // to - the same one the terminal path runs under.
-        events.set_control_flow(ControlFlow::Poll);
-        if let Some(window) = &self.window {
-            window.request_redraw();
+        // The audio arrives on a channel winit knows nothing about, so there is
+        // no event to be woken by and the loop has to come back on its own. It
+        // comes back *at a time*, not immediately: `Poll` with a redraw every
+        // pass spins the event loop as fast as the machine will go and pegs a
+        // core, which is what the rest of rav is built not to do.
+        //
+        // The ceiling is `App`'s, not one of this surface's own. `App::run` has
+        // the same deadline for the same reason; what it does not have is any
+        // way to lend it, since it does not drive this loop.
+        let now = Instant::now();
+        if now >= self.next_frame {
+            // A moving deadline, carrying the remainder - the form that asks
+            // "has min_frame passed since the last frame" quantises to the wake
+            // interval and loses whatever does not divide it.
+            self.next_frame += self.min_frame;
+            // And no debt. A stall would otherwise leave the deadline in the
+            // past owing frames it would take back to back, and the next frame
+            // shows the current state either way.
+            if self.next_frame < now {
+                self.next_frame = now + self.min_frame;
+            }
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
         }
+        events.set_control_flow(ControlFlow::WaitUntil(self.next_frame));
     }
 }
 
@@ -279,6 +302,7 @@ impl Showing {
 /// channel fed from somewhere else, which is what makes that survivable.
 pub fn show(app: App, audio: Receiver<AudioData>) -> Result<()> {
     let events = EventLoop::new().context("starting an event loop")?;
+    let min_frame = app.min_frame();
     let mut showing = Showing {
         app,
         audio,
@@ -286,6 +310,8 @@ pub fn show(app: App, audio: Receiver<AudioData>) -> Result<()> {
         surface: None,
         packed: Vec::new(),
         titled: String::new(),
+        min_frame,
+        next_frame: Instant::now(),
         failed: None,
     };
     events.run_app(&mut showing).context("running the window")?;
