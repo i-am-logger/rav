@@ -465,19 +465,29 @@
       # tidiness point. A path above a package root cannot be packaged at all,
       # which this reports rather than tolerates.
       exec = ''
-        set -eu
+        set -euo pipefail
         status=0
         embedded() {
-          # `|| true`: a package with no external assets is the normal case, and
-          # grep exits 1 on no match, which set -e would take as a failure.
-          grep -rEho 'include_(str|bytes)!\("\.\./[^"]*"\)' "$1" 2>/dev/null \
-            | sed -E 's/.*\("//; s/"\)$//; s|^(\.\./)+||' | sort -u || true
+          # grep exits 1 when a crate embeds nothing, which is the normal case,
+          # and 2 or more when the scan itself failed. `|| true` would collapse
+          # the two and report "nothing embedded" for a search that never ran -
+          # a check that passes by not looking is worse than no check.
+          set +e
+          found=$(grep -rEho 'include_(str|bytes)!\("\.\./[^"]*"\)' "$1")
+          code=$?
+          set -e
+          if [ $code -gt 1 ]; then
+            echo "scanning $1 failed: grep exited $code" >&2
+            return 1
+          fi
+          printf '%s' "$found" | sed -E 's/.*\("//; s/"\)$//; s|^(\.\./)+||' | sort -u
         }
         # `asset`, never `path`: zsh ties $path to $PATH, so a loop variable of
         # that name empties the search path for everything after it.
         check() {
           list=$(cargo package --quiet --list -p "$1" --allow-dirty)
-          for asset in $(embedded "$2"); do
+          assets=$(embedded "$2")
+          for asset in $assets; do
             printf '%s\n' "$list" | grep -qxF "$asset" && continue
             echo "$1 embeds $asset, which is not in its package" >&2
             status=1
