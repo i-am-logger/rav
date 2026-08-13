@@ -77,8 +77,11 @@ crossterm = "0.28"
 # cpal is the only backend used; it selects ALSA on Linux and CoreAudio on macOS.
 cpal = "0.15"
 
-# Signal processing and FFT
-rustfft = "6.2"
+# Signal processing and FFT.
+#
+# `rustfft` is not named here. realfft is built on it and re-exports what rav
+# touches - `realfft::num_complex::Complex` - so declaring it too was a version
+# constraint kept for nothing, and one that could argue with realfft's own.
 realfft = "3.3"
 
 # Rasterising, for the surfaces that draw pixels rather than glyphs.
@@ -99,8 +102,16 @@ anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# Async runtime and channels
-tokio = { version = "1.0", features = ["full"] }
+# Async runtime and channels.
+#
+# The features rav uses, rather than `full`. `full` claims rav needs all of
+# tokio - it does not touch `net`, `process` or the io helpers - and the claim
+# cost every install one crate it never ran: socket2, through the networking
+# tokio was told to bring.
+#
+# `signal` is what keeps mio, and it is the one that has to be here: Ctrl-C is
+# handled through `tokio::signal::ctrl_c`.
+tokio = { version = "1.0", default-features = false, features = ["rt-multi-thread", "macros", "time", "sync", "signal", "fs"] }
 flume = "0.11"
 
 # Utilities
@@ -123,9 +134,12 @@ winit = { version = "0.30", optional = true }
 softbuffer = { version = "0.4", optional = true }
 
 # `--all-features` is what devenv runs clippy and the tests under, so this is
-# compiled on both platforms in CI whether or not anybody turns it on. The
-# Linux system libraries it needs are in `flake.nix` and `devenv.nix` for the
-# same reason.
+# compiled on both platforms in CI whether or not anybody turns it on.
+#
+# It needs no system libraries to *build*: winit and softbuffer dlopen X11 and
+# Wayland rather than linking them, which is why `flake.nix` names none. The
+# dev shell carries them so a window opened from there has something to open
+# on, and that is the only place they belong.
 [features]
 gui = ["dep:winit", "dep:softbuffer"]
 
