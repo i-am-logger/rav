@@ -22,6 +22,14 @@
 //! 80x24 at 2400x1440 is what `TIOCGWINSZ` reported in WezTerm on the machine
 //! this was written on: 30x60 per cell, and 60 is not a multiple of eight,
 //! which is the ladder spacing #63 is about.
+//!
+//! # It waits on frames, never on a clock
+//!
+//! Nothing here sleeps. The reader counts pictures as they arrive and says so
+//! on a channel; every wait is a blocking receive with a deadline. So the run
+//! takes as long as rav takes and no longer, a slow machine is slow rather than
+//! flaky, and "the pixel path is running" is carried by the wait itself rather
+//! than by a count compared against a guess about frame rates.
 
 #![cfg(unix)]
 
@@ -29,18 +37,24 @@ use std::io::{Read, Write};
 use std::os::unix::io::FromRawFd;
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
+use std::time::Duration;
 
 const COLUMNS: u16 = 80;
 const ROWS: u16 = 24;
 const ACROSS: u16 = 2400;
 const DOWN: u16 = 1440;
 
-/// Long enough for the loop to settle into a rhythm, short enough for a test.
-const WATCH: Duration = Duration::from_millis(1500);
+/// The escape that carries a picture: transmit, and display it here.
+const PICTURE: &str = "\x1b_Ga=T";
 
-/// After `q`. A process still up past this is a hang, and a hung test in CI is
-/// a job timeout with no output rather than a failure with a reason.
+/// Enough frames to tell a running loop from one that drew once and stalled.
+const ENOUGH: usize = 8;
+
+/// How long any one wait will hold before it is a hang. Generous, because it is
+/// never reached when things work - a shared runner drawing at a tenth of the
+/// speed still arrives in a fraction of it - and because a hung test in CI is a
+/// job timeout with no output rather than a failure with a reason.
 const PATIENCE: Duration = Duration::from_secs(10);
 
 struct OnAPty {
@@ -126,8 +140,20 @@ impl OnAPty {
         Self { child, master }
     }
 
-    /// Watch for a while, quit, and hand back everything the terminal saw.
-    fn quit_after(mut self, watching: Duration) -> String {
+    /// Wait for [`ENOUGH`] pictures, quit, and hand back all the terminal saw.
+    fn quit_once_it_is_drawing(self) -> String {
+        self.watched(&[None])
+    }
+
+    /// The same, resizing the window once it is drawing and waiting again.
+    fn quit_after_resizing_to(self, size: libc::winsize) -> String {
+        self.watched(&[Some(size), None])
+    }
+
+    /// Each entry is a stretch of drawing to wait through, and what to do to
+    /// the window at the end of it.
+    fn watched(mut self, stages: &[Option<libc::winsize>]) -> String {
+        let (tally, counted) = channel();
         let reading = {
             let fd = unsafe { libc::dup(self.master) };
             assert!(fd >= 0, "dup of the pty");
@@ -138,7 +164,18 @@ impl OnAPty {
                 loop {
                     match pty.read(&mut buf) {
                         Ok(0) => break,
-                        Ok(read) => seen.extend_from_slice(&buf[..read]),
+                        Ok(read) => {
+                            seen.extend_from_slice(&buf[..read]);
+                            // Counted here rather than timed out there, so the
+                            // waiting side never guesses at a frame rate. A
+                            // recount of the whole capture each time, because a
+                            // picture's escape can straddle two reads and this
+                            // is tens of kilobytes.
+                            let so_far = String::from_utf8_lossy(&seen).matches(PICTURE).count();
+                            // The far side stops listening once it has quit,
+                            // which is ordinary rather than a failure.
+                            tally.send(so_far).ok();
+                        }
                         // `EIO` rather than end-of-file is how a pty finishes
                         // when the far side closes, so that one is the end of
                         // the run. Any other error truncates the capture, and
@@ -152,30 +189,66 @@ impl OnAPty {
             })
         };
 
-        std::thread::sleep(watching);
+        let mut wanted = 0;
+        for stage in stages {
+            wanted += ENOUGH;
+            wait_for(&counted, wanted);
+            if let Some(mut size) = *stage {
+                // Setting the size on the master is what a window drag is: the
+                // kernel tells the far side, and rav asks again.
+                assert_eq!(
+                    unsafe {
+                        libc::ioctl(
+                            self.master,
+                            libc::TIOCSWINSZ as _,
+                            std::ptr::from_mut(&mut size),
+                        )
+                    },
+                    0,
+                    "TIOCSWINSZ",
+                );
+            }
+        }
+
         let mut keys = unsafe { std::fs::File::from_raw_fd(self.master) };
         keys.write_all(b"q").expect("send q");
         keys.flush().ok();
 
-        let deadline = Instant::now() + PATIENCE;
+        // Drain until the reader's end of the channel goes with it, which is
+        // the pty closing, which is rav gone. A blocking wait on the process
+        // ending, with a deadline, and nothing polled.
         loop {
-            match self.child.try_wait().expect("wait") {
-                Some(status) => {
-                    assert!(status.success(), "rav left with {status}");
-                    break;
-                }
-                None if Instant::now() >= deadline => {
+            match counted.recv_timeout(PATIENCE) {
+                Ok(_) => continue,
+                Err(RecvTimeoutError::Disconnected) => break,
+                Err(RecvTimeoutError::Timeout) => {
                     self.child.kill().ok();
-                    panic!("rav was still running {PATIENCE:?} after `q`");
+                    panic!("rav was still holding the terminal {PATIENCE:?} after `q`");
                 }
-                None => std::thread::sleep(Duration::from_millis(50)),
             }
         }
+        let status = self.child.wait().expect("wait");
+        assert!(status.success(), "rav left with {status}");
         String::from_utf8_lossy(&reading.join().expect("reader")).into_owned()
     }
 
     fn pid(&self) -> u32 {
         self.child.id()
+    }
+}
+
+/// Hold until that many pictures have gone out, or say how far it got.
+///
+/// This is the assertion that the pixel path is running, rather than anything
+/// counted afterwards: a terminal that will not report a size in pixels draws
+/// none of these, and a loop that drew one and stalled never reaches the total.
+fn wait_for(counted: &Receiver<usize>, pictures: usize) {
+    let mut so_far = 0;
+    while so_far < pictures {
+        match counted.recv_timeout(PATIENCE) {
+            Ok(count) => so_far = count,
+            Err(_) => panic!("{so_far} of {pictures} pictures arrived, then {PATIENCE:?} of none"),
+        }
     }
 }
 
@@ -204,25 +277,14 @@ fn the_pixel_surface_draws_and_gives_the_terminal_back() {
     // card and no recording permission - which is every CI runner.
     let run = OnAPty::running(&["--surface", "kitty", "--test-audio"]);
     let pid = run.pid();
-    let seen = run.quit_after(WATCH);
-
-    let frames = seen.matches("\x1b_Ga=T").count();
-    // Six rather than sixty: the bar is there to tell "drawing" from "drew one
-    // and stopped", not to measure the frame rate, and a shared CI runner is
-    // not the machine this was written on. The unoptimised build measured 84 in
-    // this window here, so the margin is fourteen-fold before it is a flake.
-    assert!(
-        frames > 5,
-        "the pixel path drew {frames} frames in {WATCH:?} - a terminal that \
-         will not report a size in pixels draws none, and one frame is a loop \
-         that ran once and stalled",
-    );
+    let seen = run.quit_once_it_is_drawing();
+    let frames = seen.matches(PICTURE).count();
 
     // A kitty image lands wherever the cursor is, and the terminal parks it
     // past the bottom-right of what it just drew - so a frame that did not home
     // first lands below the last one and the picture walks off the screen.
     assert_eq!(
-        seen.matches("\x1b[H\x1b_Ga=T").count(),
+        seen.matches(&format!("\x1b[H{PICTURE}")).count(),
         frames,
         "a frame was placed without homing the cursor first",
     );
@@ -239,7 +301,7 @@ fn the_pixel_surface_draws_and_gives_the_terminal_back() {
     // Every frame homes the cursor, so an unhidden one blinks on the bars.
     let hidden = seen.find("\x1b[?25l").expect("the cursor was left showing");
     assert!(
-        hidden < seen.find("\x1b_Ga=T").expect("no frame at all"),
+        hidden < seen.find(PICTURE).expect("no frame at all"),
         "the cursor was hidden after the first picture was already up",
     );
 
@@ -259,4 +321,48 @@ fn the_pixel_surface_draws_and_gives_the_terminal_back() {
     // are resident memory - megabytes each - outliving the process that made
     // them.
     assert_eq!(frames_left_by(pid), 0, "staged frames were not reclaimed");
+}
+
+#[test]
+fn a_window_drag_redraws_at_the_size_the_terminal_now_is() {
+    // A cell size worked out once and kept is how #63 began. rav asks the
+    // terminal on every frame instead, so a resize needs no special case - but
+    // "needs no special case" is a claim about what goes out on the wire, and
+    // the wire is out here. The plan calls re-placing on a resize a
+    // non-negotiable; this is the only thing that checks it end to end.
+    let narrower = libc::winsize {
+        ws_row: 40,
+        ws_col: 100,
+        ws_xpixel: 1400,
+        ws_ypixel: 1000,
+    };
+    let run = OnAPty::running(&["--surface", "kitty", "--test-audio"]);
+    let seen = run.quit_after_resizing_to(narrower);
+
+    // Reaching the second stretch of pictures at all is most of this: the wait
+    // would have run out if the resize had stopped the drawing.
+    let was = format!("s={ACROSS},v={DOWN},");
+    let now = format!("s={},v={},", narrower.ws_xpixel, narrower.ws_ypixel);
+    assert!(
+        seen.matches(&was).count() >= ENOUGH,
+        "nothing drawn at first"
+    );
+    assert!(
+        seen.matches(&now).count() >= ENOUGH,
+        "the window changed size and rav kept drawing at the old one",
+    );
+
+    // In that order, and with the byte count following the geometry: a frame
+    // that promised the old size at the new one would be read as far as the
+    // terminal believed and torn.
+    assert!(
+        seen.rfind(&was) < seen.find(&now),
+        "a frame at the old size went out after the new size was known",
+    );
+    let bytes = u32::from(narrower.ws_xpixel) * u32::from(narrower.ws_ypixel) * 4;
+    assert_eq!(
+        seen.matches(&now).count(),
+        seen.matches(&format!("S={bytes},")).count(),
+        "a frame at the new size promised the wrong number of bytes",
+    );
 }
