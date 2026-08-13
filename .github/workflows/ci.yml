@@ -176,14 +176,6 @@ jobs:
       - run: nix build .#default --print-build-logs
       - run: ./result/bin/rav --version
 
-  # Separate from the nix build because this binary is attached to the release
-  # and has to run on machines without nix: built here it links the runner's
-  # glibc, where a nix-built one resolves an interpreter under /nix/store.
-  #
-  # No `needs: [checks]`. Cheap-before-expensive is enforced inside the checks
-  # job, where the ordering is free; gating this one on it would serialise a
-  # ~90s release build behind a ~5min check suite on every green run to save
-  # runner minutes only on red ones. Release latency is worth more than that.
   msrv:
     name: MSRV
     runs-on: ubuntu-latest
@@ -210,8 +202,21 @@ jobs:
       # `check` rather than `build`: this asks whether the source compiles on
       # the oldest toolchain rav claims, and a linked binary answers nothing
       # more than that for twice the time.
-      - run: cargo check --workspace --all-features --all-targets
+      #
+      # `--locked` is what makes the answer mean anything. Without it cargo may
+      # quietly resolve older compatible versions to satisfy this toolchain and
+      # pass - proving that *some* dependency set builds on 1.88, which is not
+      # the question. The one that ships is the one in Cargo.lock.
+      - run: cargo check --locked --workspace --all-features --all-targets
 
+  # Separate from the nix build because this binary is attached to the release
+  # and has to run on machines without nix: built here it links the runner's
+  # glibc, where a nix-built one resolves an interpreter under /nix/store.
+  #
+  # No `needs: [checks]`. Cheap-before-expensive is enforced inside the checks
+  # job, where the ordering is free; gating this one on it would serialise a
+  # ~90s release build behind a ~5min check suite on every green run to save
+  # runner minutes only on red ones. Release latency is worth more than that.
   build:
     name: Build
     runs-on: ubuntu-latest
