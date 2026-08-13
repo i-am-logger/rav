@@ -134,9 +134,12 @@ winit = { version = "0.30", optional = true }
 softbuffer = { version = "0.4", optional = true }
 
 # `--all-features` is what devenv runs clippy and the tests under, so this is
-# compiled on both platforms in CI whether or not anybody turns it on. The
-# Linux system libraries it needs are in `flake.nix` and `devenv.nix` for the
-# same reason.
+# compiled on both platforms in CI whether or not anybody turns it on.
+#
+# It needs no system libraries to *build*: winit and softbuffer dlopen X11 and
+# Wayland rather than linking them, which is why `flake.nix` names none. The
+# dev shell carries them so a window opened from there has something to open
+# on, and that is the only place they belong.
 [features]
 gui = ["dep:winit", "dep:softbuffer"]
 
