@@ -38,7 +38,7 @@ use std::os::unix::io::FromRawFd;
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const COLUMNS: u16 = 80;
 const ROWS: u16 = 24;
@@ -47,6 +47,14 @@ const DOWN: u16 = 1440;
 
 /// The escape that carries a picture: transmit, and display it here.
 const PICTURE: &str = "\x1b_Ga=T";
+
+/// What a terminal that draws images answers the graphics query with: the
+/// image was accepted, then the device attributes reply that follows it.
+///
+/// `rav` chains the two so a terminal with no graphics support answers the
+/// second question and is a definite no immediately, rather than costing the
+/// whole timeout in silence.
+const CAN_DRAW_IMAGES: &[u8] = b"\x1b_Gi=31;OK\x1b\\\x1b[?62c";
 
 /// Enough frames to tell a running loop from one that drew once and stalled.
 const ENOUGH: usize = 8;
@@ -118,6 +126,12 @@ impl OnAPty {
         let child = unsafe {
             Command::new(env!("CARGO_BIN_EXE_rav"))
                 .args(args)
+                // A pty is not a multiplexer, and `auto` refuses one - so an
+                // inherited `TMUX`, or a `TERM` beginning "screen", would make
+                // rav decline images for a reason that has nothing to do with
+                // what is being tested.
+                .env_remove("TMUX")
+                .env("TERM", "xterm-256color")
                 .stdin(inherited())
                 .stdout(inherited())
                 .stderr(inherited())
@@ -161,17 +175,31 @@ impl OnAPty {
                 let mut pty = unsafe { std::fs::File::from_raw_fd(fd) };
                 let mut seen = Vec::new();
                 let mut buf = [0u8; 1 << 16];
+                let mut answered_the_query = false;
                 loop {
                     match pty.read(&mut buf) {
                         Ok(0) => break,
                         Ok(read) => {
                             seen.extend_from_slice(&buf[..read]);
+                            let text = String::from_utf8_lossy(&seen);
+
+                            // Say yes, the way a terminal that draws images
+                            // does. `auto` asks before it decides, and a pty
+                            // that never answers is a terminal that cannot -
+                            // so without this the default path could only ever
+                            // be tested as the one it falls back to.
+                            if !answered_the_query && asked_about_images(&text) {
+                                answered_the_query = true;
+                                pty.write_all(CAN_DRAW_IMAGES).expect("answer the query");
+                                pty.flush().ok();
+                            }
+
                             // Counted here rather than timed out there, so the
                             // waiting side never guesses at a frame rate. A
                             // recount of the whole capture each time, because a
                             // picture's escape can straddle two reads and this
                             // is tens of kilobytes.
-                            let so_far = String::from_utf8_lossy(&seen).matches(PICTURE).count();
+                            let so_far = text.matches(PICTURE).count();
                             // The far side stops listening once it has quit,
                             // which is ordinary rather than a failure.
                             tally.send(so_far).ok();
@@ -243,13 +271,43 @@ impl OnAPty {
 /// counted afterwards: a terminal that will not report a size in pixels draws
 /// none of these, and a loop that drew one and stalled never reaches the total.
 fn wait_for(counted: &Receiver<usize>, pictures: usize) {
+    // One deadline for the whole wait, not one per message. A rav drawing block
+    // characters is *busy* - it sends a screenful of cells several times a
+    // second and no pictures at all - so a per-message timeout is never reached
+    // and the wait never ends. Which is not a hypothetical: it is what happened
+    // the first time this file was pointed at a terminal that answers "no".
+    let deadline = Instant::now() + PATIENCE;
     let mut so_far = 0;
     while so_far < pictures {
-        match counted.recv_timeout(PATIENCE) {
+        let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+            panic!("{so_far} of {pictures} pictures arrived in {PATIENCE:?}");
+        };
+        match counted.recv_timeout(left) {
             Ok(count) => so_far = count,
-            Err(_) => panic!("{so_far} of {pictures} pictures arrived, then {PATIENCE:?} of none"),
+            Err(RecvTimeoutError::Timeout) => {
+                panic!("{so_far} of {pictures} pictures arrived in {PATIENCE:?}")
+            }
+            // Told apart from a timeout because they mean different things: the
+            // reader ends when the pty closes, which is rav gone - so this is a
+            // process that left rather than one that is drawing the wrong thing.
+            Err(RecvTimeoutError::Disconnected) => {
+                panic!("rav left after {so_far} of {pictures} pictures")
+            }
         }
     }
+}
+
+/// Whether that is rav asking the terminal if it can draw images.
+///
+/// Read as a whole command rather than by searching the stream for `a=q`: this
+/// runs over every byte a terminal receives, bars and status line included, and
+/// two characters can turn up anywhere. A command runs from `ESC _ G` to the
+/// string terminator, and the question is whether *that* carries the key.
+fn asked_about_images(seen: &str) -> bool {
+    seen.split("\x1b_G")
+        .skip(1)
+        .filter_map(|command| command.split("\x1b\\").next())
+        .any(|command| command.split(',').any(|pair| pair == "a=q"))
 }
 
 /// The staged frames this run left behind, which should be none of them.
@@ -364,5 +422,50 @@ fn a_window_drag_redraws_at_the_size_the_terminal_now_is() {
         seen.matches(&now).count(),
         seen.matches(&format!("S={bytes},")).count(),
         "a frame at the new size promised the wrong number of bytes",
+    );
+}
+
+#[test]
+fn a_terminal_that_says_it_can_draw_images_is_given_them() {
+    // The default path, with no `--surface` at all - which is what everyone
+    // gets, and what the other tests here deliberately bypass by asking for
+    // `kitty`. It covers the one step they cannot: rav asking the terminal
+    // whether it can draw, believing the answer, and acting on it.
+    let run = OnAPty::running(&["--test-audio"]);
+    let seen = run.quit_once_it_is_drawing();
+
+    // Reaching `quit_once_it_is_drawing` at all is the assertion - the wait
+    // runs out if no pictures arrive, and a terminal answering "no" sends none.
+    assert!(
+        seen.contains("a=q"),
+        "rav never asked whether the terminal could draw images",
+    );
+    let bytes = u32::from(ACROSS) * u32::from(DOWN) * 4;
+    assert_eq!(
+        seen.matches(&format!("S={bytes},")).count(),
+        seen.matches(PICTURE).count(),
+        "a frame promised a size the picture is not",
+    );
+    assert!(seen.contains("\x1b_Ga=d,d=A"), "the images were left up");
+}
+
+#[test]
+fn only_a_whole_query_counts_as_one() {
+    // The harness reads every byte the terminal receives, and `a=q` is two
+    // characters that can turn up in a status line or a theme name. Answering
+    // one of those would tell rav a terminal draws images when nothing asked.
+    assert!(asked_about_images(
+        "\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\"
+    ));
+    assert!(!asked_about_images("nothing here, though it says a=q"));
+    assert!(
+        !asked_about_images("\x1b_Ga=T,q=2,i=1,f=32,s=2400,v=1440\x1b\\"),
+        "a frame going out is not a question",
+    );
+    assert!(
+        asked_about_images("\x1b_Gi=31,s=1,v=1,a=q,t=d"),
+        "a query still arriving is still a query - it came from rav and there \
+         is nothing else it could be, so waiting for the terminator would cost \
+         a round trip to learn what is already known",
     );
 }
