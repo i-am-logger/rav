@@ -19,16 +19,20 @@
           inherit (pkgs) lib stdenv;
           craneLib = crane.mkLib pkgs;
 
-          # src/visual/theme.rs pulls crates/rav-appearance/themes/*.toml in with
-          # have to survive filtering. crane's filter keeps every .toml today,
-          # which covers them incidentally rather than deliberately; the second
-          # clause states the requirement so a narrower filter upstream cannot
-          # quietly break the build.
+          # Two kinds of file are pulled in with `include_str!` and so have to
+          # survive filtering, and crane's filter keeps neither on purpose: the
+          # themes under crates/rav-appearance/themes/, which it happens to keep
+          # because they are `.toml`, and the skin artwork under assets/skins/,
+          # which it would drop outright. Both clauses state the requirement, so
+          # a narrower filter upstream cannot quietly break the build - and a
+          # missing skin is a build failure here and nowhere else, since `cargo
+          # build` reads the working tree and a flake only sees what git tracks.
           src = lib.cleanSourceWith {
             src = ./.;
             filter = path: type:
               (craneLib.filterCargoSources path type)
-              || (lib.hasInfix "/themes/" path);
+              || (lib.hasInfix "/themes/" path)
+              || (lib.hasInfix "/assets/skins/" path);
             name = "source";
           };
 

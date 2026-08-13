@@ -271,6 +271,8 @@ pub struct App {
     /// Whether the first non-silent tap buffer has been seen.
     #[cfg(target_os = "macos")]
     tap_reported: bool,
+    /// The pixel buffer, kept between frames - see `painted`.
+    canvas: Option<crate::render::Canvas>,
     /// When the analyser started.
     ///
     /// Two readers, and neither is optional on one platform: the silent-tap
@@ -354,6 +356,7 @@ impl App {
             tap_scratch: Vec::new(),
             #[cfg(target_os = "macos")]
             tap_reported: false,
+            canvas: None,
             started: Instant::now(),
             should_quit: false,
             last_frame: Instant::now(),
@@ -530,6 +533,7 @@ impl App {
             // is where the reason is written down. Sending the raw uptime
             // would work all day and then quietly stop moving.
             elapsed: rav_appearance::scene::sway_phase(self.started.elapsed().as_secs_f64()),
+            artwork: self.bar_style.artwork(),
         };
         // `coarse` and `fine` are the same cap on a cell grid - one position per
         // row is all a cell offers - so the difference has to be made here or
@@ -542,7 +546,27 @@ impl App {
                 .iter()
                 .map(|&peak| self.peaks.placed(peak, size.rows)),
         );
-        let drawn = Frame::new(self.ballistics.bars(), &caps, &look, layout, screen).pixels();
+        // Kept between frames rather than made fresh each time. At 2400x1440 a
+        // canvas is a 13.8 MB pixmap, and it also holds what a drawn skin costs
+        // to prepare - 8.6 ms of stamping that would otherwise be paid sixty
+        // times a second. Rebuilt when the terminal changes size, which is the
+        // only time any of it stops being true.
+        let canvas = match self.canvas.take() {
+            Some(had)
+                if had.width() == screen.width().rounded_up()
+                    && had.height() == screen.height().rounded_up() =>
+            {
+                Some(had)
+            }
+            _ => crate::render::Canvas::for_screen(&screen),
+        };
+        let drawn = canvas.map(|mut canvas| {
+            Frame::new(self.ballistics.bars(), &caps, &look, layout, screen)
+                .painted_onto(&mut canvas);
+            let pixels = canvas.to_rgba();
+            self.canvas = Some(canvas);
+            pixels
+        });
         self.cap_levels = caps;
         let Some(pixels) = drawn else {
             return Ok(false);
@@ -1568,9 +1592,11 @@ mod tests {
         assert!(readme.contains(&themes), "themes: expected {themes:?}");
 
         // Bar styles in the order `b` actually walks them, from the default.
+        // Counted from the cycle rather than written down, so a new style has
+        // to be documented rather than quietly appearing in the panel alone.
         let mut style = BarStyle::default();
         let mut styles = Vec::new();
-        for _ in 0..6 {
+        for _ in 0..BarStyle::COUNT {
             styles.push(style.label());
             style = style.next();
         }

@@ -15,6 +15,7 @@ pub use rav_appearance::{ink, ramp, scene};
 pub use rav_core::{capability, geometry};
 
 pub mod raster;
+pub mod sprite;
 
 pub use capability::{Capabilities, Requirements, Shortfall};
 pub use geometry::{Anchor, BarLayout, Column, Rectangle, Screen};
