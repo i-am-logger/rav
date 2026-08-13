@@ -484,6 +484,20 @@ impl App {
     /// cursor now is, then write the overlay's own cells. An image lands
     /// wherever the cursor happens to be, and the overlay goes on afterwards
     /// because a written cell blanks the picture beneath it.
+    /// What rav has to say right now, or nothing.
+    ///
+    /// The warning outranks a transient note: a settings message that hides
+    /// "there is no audio" is worse than no message at all.
+    ///
+    /// Both surfaces want it and neither can reach the other's way of showing
+    /// it - a terminal writes cells, a window has no text of its own yet and
+    /// puts it in the title bar, which the desktop draws.
+    pub(crate) fn status_line(&self) -> Option<String> {
+        self.tap_warning()
+            .map(str::to_string)
+            .or_else(|| self.active_status().map(str::to_string))
+    }
+
     /// Measure what has arrived and move the bars to now.
     ///
     /// The two belong together, and belong on the signal's schedule rather than
@@ -1270,13 +1284,8 @@ impl App {
             frames += 1;
             let scope_gain = gain;
 
-            // Both borrow all of `self`, so they are taken before the destructure.
-            // The warning outranks a transient note: a settings message that
-            // hides "there is no audio" is worse than no message at all.
-            let status = self
-                .tap_warning()
-                .map(str::to_string)
-                .or_else(|| self.active_status().map(str::to_string));
+            // Taken before the destructure below, which borrows all of `self`.
+            let status = self.status_line();
             let help_rows = if self.show_help {
                 Some(self.help_rows())
             } else {

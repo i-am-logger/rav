@@ -99,6 +99,22 @@ fn pressed(key: &Key) -> Option<KeyCode> {
     })
 }
 
+/// What the title bar says: rav, and whatever rav has to say.
+///
+/// The status line has to go *somewhere*, and a window has no text of its own
+/// until the overlay has a font. The desktop already draws a title, so a
+/// setting that changed is visible - pressing `t` and seeing nothing happen to
+/// the words is how a key looks broken.
+///
+/// Only the status. The help panel is fourteen rows and does not fit in a
+/// title bar, which is why the font is still owed.
+fn titled(status: Option<&str>) -> String {
+    match status {
+        Some(saying) => format!("rav - {saying}"),
+        None => "rav".to_string(),
+    }
+}
+
 /// The size `App` asks for, built from a window rather than from a terminal.
 ///
 /// `WindowSize` is crossterm's, and carries pixels and cells together. A window
@@ -122,6 +138,9 @@ struct Showing {
     /// Kept between frames for the same reason the canvas is: a screenful of
     /// `u32` per frame is an allocation the frame budget has no room for.
     packed: Vec<u32>,
+    /// What the title already says, so a frame that changed nothing does not
+    /// ask the window server to set it again.
+    titled: String,
     failed: Option<anyhow::Error>,
 }
 
@@ -177,7 +196,7 @@ impl ApplicationHandler for Showing {
 impl Showing {
     fn open(&mut self, events: &ActiveEventLoop) -> Result<()> {
         let attributes = Window::default_attributes()
-            .with_title("rav")
+            .with_title(titled(None))
             .with_inner_size(winit::dpi::LogicalSize::new(OPENS_AT.0, OPENS_AT.1));
         let window = Rc::new(
             events
@@ -211,6 +230,14 @@ impl Showing {
             self.app.push_samples(&data.samples);
         }
         self.app.advance();
+
+        // Only when it changes. Setting a title is a round trip to the window
+        // server, and this runs on every frame.
+        let saying = titled(self.app.status_line().as_deref());
+        if saying != self.titled {
+            window.set_title(&saying);
+            self.titled = saying;
+        }
 
         let Some(pixels) = self.app.frame_pixels(&sized(size.width, size.height)) else {
             return Ok(());
@@ -247,6 +274,7 @@ pub fn show(app: App, audio: Receiver<AudioData>) -> Result<()> {
         window: None,
         surface: None,
         packed: Vec::new(),
+        titled: String::new(),
         failed: None,
     };
     events.run_app(&mut showing).context("running the window")?;
@@ -354,6 +382,14 @@ mod tests {
         // And one rav does not bind still translates - `map_key` is what says
         // it does nothing, which keeps that decision in one place too.
         assert_eq!(typed("z"), Some(crate::ui::Action::None));
+    }
+
+    #[test]
+    fn the_title_carries_what_rav_has_to_say() {
+        // With nothing to say it is just the name - not "rav - " with an empty
+        // tail, which reads as a window that lost something.
+        assert_eq!(titled(None), "rav");
+        assert_eq!(titled(Some("theme winamp")), "rav - theme winamp");
     }
 
     #[test]
