@@ -58,9 +58,13 @@ its size in pixels. `--surface glyphs` forces the block characters. Press `h` fo
 which surface rav is on and why.
 
 `--surface window` draws the same picture in a window of rav's own, in a build
-that has one: `cargo install rav --features gui`, or `cargo run --features gui`.
-It is off by default because a terminal visualiser should not make everyone who
-installs it build a windowing stack.
+that has one. It is off by default because a terminal visualiser should not make
+everyone who installs it build a windowing stack.
+
+```
+cargo install rav --features gui && rav --surface window
+cargo run --features gui -- --surface window   # from a clone
+```
 
 Everything else is a keypress, and `h` shows the lot with their current values:
 
