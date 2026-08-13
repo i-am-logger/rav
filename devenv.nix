@@ -475,9 +475,21 @@
           set +e
           found=$(grep -rEho 'include_(str|bytes)!\("\.\./[^"]*"\)' "$1")
           code=$?
+          # Every call the pattern above cannot read is a failure rather than a
+          # skip: a path long enough for rustfmt to wrap the line, or a raw
+          # string, would otherwise drop out of the check without saying so.
+          # Requiring the open paren keeps doc comments out of the count - they
+          # name the macro without calling it.
+          called=$(grep -rEoh 'include_(str|bytes)!\(' "$1" | wc -l | tr -d ' ')
+          literal=$(grep -rEoh 'include_(str|bytes)!\("' "$1" | wc -l | tr -d ' ')
+          concat=$(grep -rEoh 'include_(str|bytes)!\(concat!' "$1" | wc -l | tr -d ' ')
           set -e
           if [ $code -gt 1 ]; then
             echo "scanning $1 failed: grep exited $code" >&2
+            return 1
+          fi
+          if [ "$called" -ne "$((literal + concat))" ]; then
+            echo "$1: an include_str!/include_bytes! call this check cannot read" >&2
             return 1
           fi
           printf '%s' "$found" | sed -E 's/.*\("//; s/"\)$//; s|^(\.\./)+||' | sort -u
