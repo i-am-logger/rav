@@ -34,6 +34,10 @@
     gdb
     valgrind
     perf-tools
+
+    # record-demo reads the focused window and sends the tour's keys through
+    # this. macOS does both through osascript, which ships with the system.
+    xdotool
   ];
 
   # Development scripts
@@ -189,11 +193,16 @@
     # press of each is what returns to the first, and leaving it out is how the
     # tour quietly stops ending where it began.
     #
+    # Four themes and five angles. `tests/the_demo_tour.rs` counts both against
+    # the enums, because a view added without a press here is invisible until
+    # someone looks closely at a finished GIF - which is how the fifth angle
+    # went missing.
+    #
     # The angles are the reason the terminal matters. `v` does nothing on block
     # characters and the panel says `needs pixels`, so a recording made in a
     # terminal that cannot draw images shows four seconds of a key not working.
     # Record in WezTerm, Ghostty or kitty.
-    TOUR="''${RAV_DEMO_TOUR:-3:t 3:t 3:t 3:t 2:v 2:v 2:v 2:v 1:space 4:space 1:h 4:h 2:-}"
+    TOUR="''${RAV_DEMO_TOUR:-3:t 3:t 3:t 3:t 2:v 2:v 2:v 2:v 2:v 1:space 4:space 1:h 4:h 2:-}"
     # Total duration is the sum of the tour's holds, so the two never drift.
     # SETTLE covers the second avfoundation spends opening the capture device -
     # without it the first key lands before filming starts and that segment is
@@ -263,13 +272,23 @@
       # uyvy422 and chroma-subsamples the bars into a smear.
       GRAB=(-f avfoundation -capture_cursor 0 -pixel_format bgr0 -framerate "$FPS" -i "$SCREEN:none")
     else
-      if [ -z "$GEOMETRY" ] && command -v xdotool >/dev/null 2>&1; then
+      # Checked before the geometry, because the keys need it too. Reading the
+      # window is the part RAV_DEMO_GEOMETRY can stand in for; sending the tour
+      # is not - so without this, setting that variable on a machine with no
+      # xdotool records the full duration of a screen nobody ever pressed a key
+      # on, and nothing anywhere says so.
+      if ! command -v xdotool >/dev/null 2>&1; then
+        echo "❌ xdotool sends the tour's keys and is not on PATH."
+        echo "   It is in the devenv shell; outside it, install xdotool."
+        exit 1
+      fi
+      if [ -z "$GEOMETRY" ]; then
         GEOMETRY=$(xdotool getactivewindow getwindowgeometry --shell \
           | awk -F= '/^X=/{x=$2} /^Y=/{y=$2} /^WIDTH=/{w=$2} /^HEIGHT=/{h=$2} END{print w "x" h "+" x "+" y}')
       fi
       if [ -z "$GEOMETRY" ]; then
-        echo "❌ Set RAV_DEMO_GEOMETRY=941x249+X+Y (or install xdotool to read the"
-        echo "   focused window automatically)."
+        echo "❌ Could not read the focused window's geometry."
+        echo "   Set RAV_DEMO_GEOMETRY=941x249+X+Y."
         exit 1
       fi
     fi
@@ -288,6 +307,12 @@
     # Send one keypress to whatever window is focused - which is rav's, since the
     # countdown just asked for it. Both of these need the same permission the
     # geometry read above already used.
+    #
+    # Silent on failure, deliberately: the recording is running by now and
+    # anything printed here lands on the screen being filmed. What could go
+    # wrong is checked above instead, where saying so is still free - macOS by
+    # the geometry read, which needs the same Accessibility grant these do, and
+    # Linux by the xdotool check.
     send_key() {
       case "$(uname -s)" in
       Darwin)
@@ -298,7 +323,7 @@
         fi
         ;;
       *)
-        command -v xdotool >/dev/null 2>&1 && xdotool key --clearmodifiers "$1" || true
+        xdotool key --clearmodifiers "$1" >/dev/null 2>&1 || true
         ;;
       esac
     }
