@@ -458,16 +458,34 @@
       #
       # Paths are read out of the source rather than listed here, so an asset
       # embedded later is covered without anyone remembering to add it.
+      #
+      # Each package is checked against its own tarball. rav shipping a file
+      # says nothing about whether rav-appearance ships it, and rav-appearance
+      # is published first - so the wrong tarball is the burn case, not a
+      # tidiness point. A path above a package root cannot be packaged at all,
+      # which this reports rather than tolerates.
       exec = ''
         set -eu
-        list=$(cargo package --quiet --list -p rav --allow-dirty)
         status=0
-        for path in $(grep -rEho 'include_(str|bytes)!\("\.\./[^"]*"\)' src crates \
-          | sed -E 's/.*\("//; s/"\)$//; s|^(\.\./)+||' | sort -u); do
-          printf '%s\n' "$list" | grep -qxF "$path" && continue
-          echo "embedded but not packaged: $path" >&2
-          status=1
-        done
+        embedded() {
+          # `|| true`: a package with no external assets is the normal case, and
+          # grep exits 1 on no match, which set -e would take as a failure.
+          grep -rEho 'include_(str|bytes)!\("\.\./[^"]*"\)' "$1" 2>/dev/null \
+            | sed -E 's/.*\("//; s/"\)$//; s|^(\.\./)+||' | sort -u || true
+        }
+        # `asset`, never `path`: zsh ties $path to $PATH, so a loop variable of
+        # that name empties the search path for everything after it.
+        check() {
+          list=$(cargo package --quiet --list -p "$1" --allow-dirty)
+          for asset in $(embedded "$2"); do
+            printf '%s\n' "$list" | grep -qxF "$asset" && continue
+            echo "$1 embeds $asset, which is not in its package" >&2
+            status=1
+          done
+        }
+        check rav src
+        check rav-core crates/rav-core/src
+        check rav-appearance crates/rav-appearance/src
         exit $status
       '';
       # Last, for the same ./target lock reason as test:portable.
