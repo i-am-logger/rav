@@ -25,6 +25,7 @@ use std::num::NonZeroU32;
 use std::rc::Rc;
 
 use anyhow::{Context as _, Result};
+use crossterm::event::KeyCode;
 use flume::Receiver;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, WindowEvent};
@@ -75,6 +76,29 @@ pub fn onto_black(rgba: &[u8], into: &mut Vec<u32>) {
     }));
 }
 
+/// What a window key is, said in the terminal's vocabulary.
+///
+/// Translated rather than mapped straight to an [`Action`](crate::ui::Action),
+/// so [`map_key`](crate::ui::map_key) stays the one place that decides what a
+/// key does. A second table here would be a window whose `f` cycled something
+/// else six months from now, and nothing would notice until someone used both.
+///
+/// `None` for a key rav has no use for - a modifier on its own, a function key
+/// past the one - which is left to fall through rather than reported.
+fn pressed(key: &Key) -> Option<KeyCode> {
+    Some(match key {
+        // `to_text` rather than the character variant alone: it is what gives
+        // `+` and `-` on a keyboard that needs a modifier to reach them.
+        Key::Named(NamedKey::Escape) => KeyCode::Esc,
+        Key::Named(NamedKey::Tab) => KeyCode::Tab,
+        Key::Named(NamedKey::Space) => KeyCode::Char(' '),
+        Key::Named(NamedKey::ArrowUp) => KeyCode::Up,
+        Key::Named(NamedKey::ArrowDown) => KeyCode::Down,
+        Key::Named(NamedKey::F1) => KeyCode::F(1),
+        other => KeyCode::Char(other.to_text()?.chars().next()?),
+    })
+}
+
 /// The size `App` asks for, built from a window rather than from a terminal.
 ///
 /// `WindowSize` is crossterm's, and carries pixels and cells together. A window
@@ -121,14 +145,11 @@ impl ApplicationHandler for Showing {
         match event {
             WindowEvent::CloseRequested => events.exit(),
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
-                // Quit only, for now. The rest of the keys go through
-                // `map_press`, which speaks crossterm - and translating winit's
-                // events into that is its own piece of work rather than
-                // something to guess at here.
-                if matches!(event.logical_key, Key::Named(NamedKey::Escape))
-                    || event.logical_key.to_text() == Some("q")
-                {
-                    events.exit();
+                if let Some(code) = pressed(&event.logical_key) {
+                    self.app.apply(crate::ui::map_key(code));
+                    if self.app.wants_to_quit() {
+                        events.exit();
+                    }
                 }
             }
             WindowEvent::RedrawRequested => {
@@ -292,6 +313,47 @@ mod tests {
         for alpha in [0x00, 0x7f, 0xff] {
             assert_eq!(one([0xff, 0xff, 0xff, alpha]) >> 24, 0, "alpha {alpha:#x}");
         }
+    }
+
+    fn typed(text: &str) -> Option<crate::ui::Action> {
+        pressed(&Key::Character(text.into())).map(crate::ui::map_key)
+    }
+
+    #[test]
+    fn a_window_key_does_what_the_same_key_does_in_a_terminal() {
+        use crate::ui::Action;
+
+        // Not a second key table: these go through `map_key`, so what is
+        // asserted is the translation, and what each key *means* stays decided
+        // in one place. A window whose `f` cycled something else would be a
+        // defect nobody found until they used both.
+        assert_eq!(typed("q"), Some(Action::Quit));
+        assert_eq!(typed("t"), Some(Action::CycleTheme));
+        assert_eq!(typed("v"), Some(Action::CycleView));
+        assert_eq!(typed("b"), Some(Action::CycleBarStyle));
+        assert_eq!(typed("+"), Some(Action::BarSize(1)));
+        assert_eq!(typed("-"), Some(Action::BarSize(-1)));
+
+        // The named ones, which have no character to fall back on.
+        let named = |key| pressed(&Key::Named(key)).map(crate::ui::map_key);
+        assert_eq!(named(NamedKey::Escape), Some(Action::Quit));
+        assert_eq!(named(NamedKey::Space), Some(Action::CycleVisualisation));
+        assert_eq!(named(NamedKey::Tab), Some(Action::CycleVisualisation));
+        assert_eq!(named(NamedKey::ArrowUp), Some(Action::Gain(1)));
+        assert_eq!(named(NamedKey::ArrowDown), Some(Action::Gain(-1)));
+        assert_eq!(named(NamedKey::F1), Some(Action::ToggleHelp));
+    }
+
+    #[test]
+    fn a_key_rav_has_no_use_for_falls_through() {
+        // `None` rather than `Action::None`, so a modifier held on its own does
+        // not count as a press that did nothing - the window would redraw for
+        // every shift key on the way to a capital.
+        assert_eq!(pressed(&Key::Named(NamedKey::Shift)), None);
+        assert_eq!(pressed(&Key::Named(NamedKey::Control)), None);
+        // And one rav does not bind still translates - `map_key` is what says
+        // it does nothing, which keeps that decision in one place too.
+        assert_eq!(typed("z"), Some(crate::ui::Action::None));
     }
 
     #[test]

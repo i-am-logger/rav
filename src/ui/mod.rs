@@ -496,6 +496,14 @@ impl App {
     /// Hands back the gain, which the oscilloscope wants, and the instant it
     /// measured at, which is what a frame ceiling is judged against - taking
     /// the clock twice would put the two a hair apart for no reason.
+    /// Whether a key has asked rav to stop.
+    ///
+    /// A surface that drives its own loop needs to ask, where `App::run`
+    /// reads the field directly.
+    pub(crate) fn wants_to_quit(&self) -> bool {
+        self.should_quit
+    }
+
     pub(crate) fn advance(&mut self) -> (f32, Instant) {
         let gain = self.measure();
         let measured_at = Instant::now();
@@ -830,7 +838,7 @@ impl App {
         }
     }
 
-    fn apply(&mut self, action: Action) {
+    pub(crate) fn apply(&mut self, action: Action) {
         match action {
             Action::Quit => self.should_quit = true,
             Action::CycleVisualisation => {
