@@ -1,3 +1,51 @@
+//! Where the sound comes in.
+//!
+//! Three sources, and only two of them are a microphone. This module is the
+//! cpal capture stream, which is what Linux uses and what macOS falls back to.
+//! `tap` is the CoreAudio process tap macOS prefers, which needs no virtual
+//! device and reads ahead of the system volume - named here rather than linked,
+//! because it exists only on macOS and this page is built on Linux. And
+//! [`synthetic`] is the signal `--test-audio` plays when there is nothing to
+//! listen to.
+//!
+//! # The rule this module is governed by
+//!
+//! **A capture callback runs on a realtime thread, and must not allocate, lock
+//! or block.** Not a style preference: `malloc` can wait on a lock the whole
+//! process shares, and a callback that is late does not get to catch up - the
+//! samples for that period are simply gone, and what the listener hears is a
+//! dropout. Nothing in a callback here may do any of the three.
+//!
+//! What that comes to in practice, since none of it is visible from the shape
+//! of the code:
+//!
+//! - **The buffers are made once**, at startup, and handed round. A block takes
+//!   itself home when it is dropped - see [`AudioData`] - so the consumer needs
+//!   to know nothing about it and the callback never asks for memory.
+//! - **The accumulation buffer is owned by the callback** and sized for four
+//!   blocks. It never grows; a device handing over more than that drops the
+//!   period rather than reallocating, which costs one gap in the display and
+//!   *shows* a device rav cannot follow.
+//! - **The queue is bounded and discards its oldest block.** An unbounded one
+//!   becomes a delay line that grows for as long as rav runs, which is what it
+//!   used to do; discarding the newest instead makes a full queue permanent.
+//! - **Nothing waits.** Every send is a `try_send`, and the tap's callback takes
+//!   a `try_lock` it is allowed to lose.
+//!
+//! The one thing left on that thread is `flume` itself, which takes a brief
+//! internal lock. Closing that would mean a lock-free ring, and a dependency.
+//!
+//! [`synthetic`] is exempt and says so: it paces itself on a thread of its own,
+//! answers to nobody, and allocating there costs nothing.
+//!
+//! # Only one of them runs
+//!
+//! On macOS the tap replaces this stream entirely - `main` stops the cpal
+//! capture once the tap starts, which frees a device and a callback rather than
+//! memory, since the queue was bounded anyway. `--test-audio` opens no device at
+//! all, which is the whole of its use: a machine with no loopback, no recording
+//! permission or no sound card still shows a working display.
+
 pub mod synthetic;
 #[cfg(target_os = "macos")]
 pub mod tap;
