@@ -73,11 +73,13 @@ async fn main() -> std::process::ExitCode {
     match rav_main().await {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(problem) => {
-            // To stdout, deliberately. Everything rav can fail at happens after
-            // stderr has been pointed at the log file, so reporting the usual
-            // way means a mistyped `--theme` looks like rav dying in silence:
-            // exit 1, a blank terminal, and the reason in a file the user has
-            // no reason to look in.
+            // To stdout, deliberately. Nearly everything rav can fail at
+            // happens after stderr has been pointed at the log file, so
+            // reporting the usual way means a mistyped `--theme` looks like rav
+            // dying in silence: exit 1, a blank terminal, and the reason in a
+            // file the user has no reason to look in. The skin check runs
+            // before that redirection and would print either way; it goes here
+            // too, so one flag is not reported somewhere else than the next.
             println!("rav: {problem:#}");
             std::process::ExitCode::FAILURE
         }
@@ -86,6 +88,28 @@ async fn main() -> std::process::ExitCode {
 
 async fn rav_main() -> Result<()> {
     let args = Args::parse();
+
+    // Before the log file, the sound device and the screen, because all three
+    // are side effects and a file that cannot be used is a mistake in the
+    // command that was typed. Read here, worn further down where `App` exists.
+    //
+    // Leaked deliberately. A drawn skin is identified by the address of its
+    // text - see `render::sprite` - and this is read once for the life of the
+    // process, so one leak buys an identity check that cannot go wrong. A
+    // `String` handed in instead would be freed and its address reused.
+    let skin: Option<&'static str> = match args.skin.as_deref() {
+        Some(path) => {
+            let svg = std::fs::read_to_string(path)
+                .with_context(|| format!("Cannot read the skin at {}", path.display()))?;
+            // A skin that will not parse draws nothing, and drawing nothing is
+            // indistinguishable from the plain ladder - so without this a typo
+            // in someone's own file looks like rav ignoring the flag.
+            rav::render::sprite::parses(&svg)
+                .with_context(|| format!("Cannot parse the skin at {}", path.display()))?;
+            Some(Box::leak(svg.into_boxed_str()))
+        }
+        None => None,
+    };
 
     // Initialize logging with clean mode support
     let log_level = if args.debug {
@@ -220,19 +244,8 @@ async fn rav_main() -> Result<()> {
         info!("Using theme: {theme}");
     }
 
-    // Read here rather than in `App` for the same reason a theme is: a path
-    // that cannot be read is a mistake worth stopping for, and reporting it
-    // once the alternate screen is up means reporting it where nobody can
-    // read it.
-    //
-    // Leaked deliberately. A drawn skin is identified by the address of its
-    // text - see `render::sprite` - and this is read once for the life of the
-    // process, so one leak buys an identity check that cannot go wrong. A
-    // `String` handed in instead would be freed and its address reused.
-    if let Some(path) = args.skin.as_deref() {
-        let svg = std::fs::read_to_string(path)
-            .with_context(|| format!("Cannot read the skin at {}", path.display()))?;
-        app.wear_skin(Box::leak(svg.into_boxed_str()));
+    if let (Some(svg), Some(path)) = (skin, args.skin.as_deref()) {
+        app.wear_skin(svg);
         info!("Using skin: {}", path.display());
     }
 

@@ -44,6 +44,20 @@ pub struct Sprite {
     down: u32,
 }
 
+/// Parse that SVG and keep nothing but the verdict, and why if it is no.
+///
+/// Startup asks before taking the screen. Once the frame loop has it, artwork
+/// that will not parse is only a reason to draw the plain ladder - which reads
+/// as rav ignoring the flag rather than as the file being wrong, and is why the
+/// question is worth asking early where the answer can still be printed.
+///
+/// The error is carried rather than thrown away because it is the useful half:
+/// `usvg` reports where the file stops making sense, and "this is not an SVG"
+/// leaves someone to find that themselves in a file they just drew.
+pub fn parses(svg: &str) -> Result<(), usvg::Error> {
+    usvg::Tree::from_str(svg, &usvg::Options::default()).map(drop)
+}
+
 impl Sprite {
     /// Parse an SVG and rasterise it to fill a rung of this size.
     ///
