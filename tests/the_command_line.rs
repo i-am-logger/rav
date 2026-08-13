@@ -26,8 +26,15 @@ fn a_file_holding(svg: &str, named: &str) -> std::path::PathBuf {
     path
 }
 
-/// `--test-audio` opens no device, so this reaches the skin check on a machine
-/// with no sound card - which is every CI runner. The audio setup runs first.
+/// No pty and no sound device: the skin is checked before the log file, the
+/// device and the screen, so a run that has none of them still gets this far.
+/// If that ordering ever slips, these fail with whatever rav died of instead,
+/// which is how the ordering stays asserted rather than assumed.
+///
+/// `--list-devices` returns early, and it returns *after* the skin check - so
+/// a good skin reaches an exit rather than a terminal it cannot have, and this
+/// cannot hang waiting on a TUI that will never start. A skin check that moved
+/// below it would let the failing cases through, and they would say so.
 ///
 /// Returns what rav said on **stdout**, which is where it reports a failure on
 /// purpose: stderr is pointed at the log file early, so the usual channel would
@@ -35,7 +42,8 @@ fn a_file_holding(svg: &str, named: &str) -> std::path::PathBuf {
 /// so at the point it decides.
 fn rav_wearing(skin: &std::path::Path) -> (bool, String) {
     let out = Command::new(env!("CARGO_BIN_EXE_rav"))
-        .args(["--test-audio", "--skin"])
+        .arg("--list-devices")
+        .arg("--skin")
         .arg(skin)
         .output()
         .expect("run rav");
