@@ -763,7 +763,7 @@ impl App {
     }
 
     /// Show a message for a couple of seconds.
-    fn note(&mut self, text: String) {
+    pub(crate) fn note(&mut self, text: String) {
         self.status = Some((text, Instant::now()));
     }
 

@@ -165,7 +165,18 @@ impl ApplicationHandler for Showing {
             WindowEvent::CloseRequested => events.exit(),
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                 if let Some(code) = pressed(&event.logical_key) {
-                    self.app.apply(crate::ui::map_key(code));
+                    let action = crate::ui::map_key(code);
+                    self.app.apply(action);
+                    // The panel is fourteen rows of text and a window has no
+                    // font for them yet, so `h` toggles something nothing
+                    // draws. Said out loud through the same note a setting
+                    // uses, which reaches the title bar - a key that silently
+                    // does nothing is the defect this whole surface keeps
+                    // being careful about.
+                    if action == crate::ui::Action::ToggleHelp {
+                        self.app
+                            .note("help is a terminal thing for now".to_string());
+                    }
                     if self.app.wants_to_quit() {
                         events.exit();
                     }
@@ -382,6 +393,20 @@ mod tests {
         // And one rav does not bind still translates - `map_key` is what says
         // it does nothing, which keeps that decision in one place too.
         assert_eq!(typed("z"), Some(crate::ui::Action::None));
+    }
+
+    #[test]
+    fn h_is_a_key_that_says_why_nothing_happened() {
+        // The one key a window cannot honour yet. It is `ToggleHelp` that has
+        // to be recognised here, so this asserts through `map_key` rather than
+        // against the character - rebinding help would otherwise leave the
+        // note attached to whatever `h` became.
+        assert_eq!(typed("h"), Some(crate::ui::Action::ToggleHelp));
+        assert_eq!(
+            pressed(&Key::Named(NamedKey::F1)).map(crate::ui::map_key),
+            Some(crate::ui::Action::ToggleHelp),
+            "F1 is the same key and gets the same answer",
+        );
     }
 
     #[test]
