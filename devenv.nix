@@ -189,11 +189,16 @@
     # press of each is what returns to the first, and leaving it out is how the
     # tour quietly stops ending where it began.
     #
+    # Four themes and five angles. `tests/the_demo_tour.rs` counts both against
+    # the enums, because a view added without a press here is invisible until
+    # someone looks closely at a finished GIF - which is how the fifth angle
+    # went missing.
+    #
     # The angles are the reason the terminal matters. `v` does nothing on block
     # characters and the panel says `needs pixels`, so a recording made in a
     # terminal that cannot draw images shows four seconds of a key not working.
     # Record in WezTerm, Ghostty or kitty.
-    TOUR="''${RAV_DEMO_TOUR:-3:t 3:t 3:t 3:t 2:v 2:v 2:v 2:v 1:space 4:space 1:h 4:h 2:-}"
+    TOUR="''${RAV_DEMO_TOUR:-3:t 3:t 3:t 3:t 2:v 2:v 2:v 2:v 2:v 1:space 4:space 1:h 4:h 2:-}"
     # Total duration is the sum of the tour's holds, so the two never drift.
     # SETTLE covers the second avfoundation spends opening the capture device -
     # without it the first key lands before filming starts and that segment is
