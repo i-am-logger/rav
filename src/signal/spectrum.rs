@@ -79,7 +79,30 @@ impl Spectrum {
     /// 1024 samples in, 512 bins out, as the original does.
     pub const DEFAULT_SIZE: usize = 1024;
 
+    /// A spectrum over blocks of `fft_size` samples.
+    ///
+    /// The size has to be a power of two. `rustfft` behind this one is mixed
+    /// radix and would take any even number, but the embedded answer -
+    /// `microfft`, which allocates nothing and holds a precomputed sine table -
+    /// is radix-2 and cannot. Saying so here makes it an API constraint rather
+    /// than something found on hardware, which is the whole reason the two
+    /// portable crates exist.
+    ///
+    /// It also gives this `Result` something to return: before, every size was
+    /// accepted, `0` included, and a spectrum with no bins was an `Ok`.
     pub fn new(fft_size: usize) -> Result<Self> {
+        // Both, and in this order. `1` is a power of two, so the check below
+        // lets it through - and `bins` is `fft_size / 2`, which makes it the
+        // same empty spectrum `0` was. The two smallest cases are the ones a
+        // power-of-two test reads as fine.
+        anyhow::ensure!(
+            fft_size >= 2,
+            "an FFT size has to leave at least one bin, and {fft_size} leaves none",
+        );
+        anyhow::ensure!(
+            fft_size.is_power_of_two(),
+            "an FFT size has to be a power of two, and {fft_size} is not",
+        );
         let fft = RealFftPlanner::<f32>::new().plan_fft_forward(fft_size);
         let bins = fft_size / 2;
         Ok(Self {
@@ -213,5 +236,41 @@ mod tests {
     fn short_input_is_zero_padded_rather_than_panicking() {
         let mut s = Spectrum::new(1024).unwrap();
         assert_eq!(s.analyse(&[0.1, 0.2, 0.3]).len(), 512);
+    }
+    #[test]
+    fn an_fft_size_is_a_power_of_two_with_a_bin_in_it() {
+        for size in [256, 512, 1024, 2048] {
+            assert!(
+                Spectrum::new(size).is_ok(),
+                "{size} is a power of two and was refused"
+            );
+        }
+
+        // 1000 is the one that matters: `rustfft` plans it perfectly well, so
+        // nothing here would have complained, and the radix-2 crate an
+        // embedded target needs cannot do it at all. 0 was an `Ok` with no
+        // bins in it.
+        // Two bins is the smallest that is not degenerate, and the smallest
+        // this accepts - `bins` is `fft_size / 2`.
+        assert_eq!(Spectrum::new(2).map(|s| s.bins()).ok(), Some(1));
+
+        // `1` is in here because it is a power of two: a check written only
+        // against that reads it as fine, and it builds the same empty spectrum
+        // `0` did.
+        //
+        // `let Err(..) else`, not `expect_err`, which wants the `Ok` side to be
+        // `Debug` and a `Spectrum` holds a planner that is not.
+        for size in [0, 1, 3, 1000, 1023] {
+            let Err(refused) = Spectrum::new(size) else {
+                // Not "is not a power of two": 1 is one, and is refused for
+                // having no bins. A message that names the wrong reason sends
+                // the next reader to the wrong check.
+                panic!("{size} is not a usable FFT size and was accepted");
+            };
+            assert!(
+                refused.to_string().contains(&size.to_string()),
+                "the error does not say which size: {refused}"
+            );
+        }
     }
 }
