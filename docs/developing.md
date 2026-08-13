@@ -122,6 +122,7 @@ prevent.
 | `crates/rav-core/` | **`no_std`, no allocator.** The mechanics: `Level`, `Step`, `Fill`, `Length`, geometry, and what a display can show. Knows *how many* and *which one*, never what any of them look like |
 | `crates/rav-appearance/` | **`no_std`.** What a step looks like: inks, colours, ramps, the scene, and themes. Names no rasteriser, so one theme dresses a glyph grid, a window and an LED strip alike |
 | `crates/rav-appearance/themes/` | the bundled themes, TOML, turned into consts by that crate's `build.rs` — see [themes.md](themes.md) |
+| `assets/skins/` | the built-in skin artwork, embedded with `include_str!` — see [skins.md](skins.md) |
 | `src/audio/` | cpal capture, and the macOS CoreAudio process tap — see [audio.md](audio.md) |
 | `src/signal/` | FFT front end, bin-to-bar mapping, bar and cap ballistics |
 | `src/visual/` | reading a theme a *user* wrote, and asking the terminal for its palette — the halves that need a filesystem and a terminal |
