@@ -176,7 +176,7 @@ async fn rav_main() -> Result<()> {
     // With the pid, because the log is appended to and two ravs running at once
     // interleave with nothing to tell them apart - which is not hypothetical:
     // a stray run from hours earlier was read as the current one, and its
-    // frame counts taken for this run's.
+    // frame counts were reported as this run's.
     info!(
         "🚀 RAV Audio Visualizer starting up... (pid {})",
         std::process::id()

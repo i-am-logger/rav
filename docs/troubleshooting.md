@@ -51,8 +51,9 @@ near zero means the source is silent rather than absent.
 
 Read it from the bottom. The file is appended to, so it holds every run since
 you last deleted it, and two ravs going at once interleave their lines.
-`🚀 RAV Audio Visualizer starting up` marks where a run begins and carries that
-run's **pid**, which is what tells two of them apart:
+`🚀 RAV Audio Visualizer starting up...` marks where a run begins, and the
+**pid** after it is what tells two of them apart — so that is the prefix to
+search for, and the number on the end is the answer:
 
 ```
 🚀 RAV Audio Visualizer starting up... (pid 41337)
