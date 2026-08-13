@@ -286,6 +286,14 @@ impl Column {
             Anchor::Middle => (screen.height() - risen) / 2.0 - thickness,
         }
         .held_between(Length::NONE, furthest);
+        // Clamping the top is not enough to keep the cap on the screen, because
+        // `(height - thickness) + thickness` is not always `height` in `f32`.
+        // A property test found it: a cap of 7.7606773 on a display 73.27264
+        // tall landed three millionths of a pixel below the floor. Nothing
+        // anyone could see, and still a rectangle that is not where this method
+        // promises every rectangle it returns will be - so the thickness gives
+        // way rather than the promise.
+        let thickness = thickness.smallest(screen.height() - top);
         Rectangle::new(self.left, top, self.width, thickness)
     }
 
@@ -406,6 +414,31 @@ mod tests {
         assert_eq!(
             column.cap(Level::FULL, Length(3.0), &screen).top(),
             Length::NONE
+        );
+    }
+
+    #[test]
+    fn a_cap_stays_inside_the_screen_at_sizes_that_do_not_divide() {
+        // The numbers a property test found, kept because nothing anyone would
+        // choose by hand goes near this: clamping the top is not enough, since
+        // `(height - thickness) + thickness` is not always `height` in `f32`.
+        // This one overshot by three millionths of a pixel - invisible, and
+        // still a rectangle outside the screen it was asked to be inside.
+        let screen = screen(256.0, 73.27264);
+        let cap = BarLayout::new(Length(8.0), Length(1.0))
+            .column(0)
+            .anchored(Anchor::Ceiling)
+            .cap(Level::new(0.958_762_6), Length(7.760_677_3), &screen);
+        assert!(
+            cap.bottom() <= screen.height(),
+            "{:?} hangs below a screen {:?} tall",
+            cap.bottom(),
+            screen.height(),
+        );
+        assert!(
+            cap.top() >= Length::NONE,
+            "{:?} is above the top",
+            cap.top()
         );
     }
 

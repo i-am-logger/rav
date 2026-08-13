@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 34d008e98ce8bd251c0ae49d5ef2269c90700bea89c3293a5a5849825c1ad5d3 # shrinks to anchor = Ceiling, peak = Level(0.9587626), thickness = 7.7606773, height = 73.27264
