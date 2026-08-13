@@ -38,7 +38,7 @@ use std::os::unix::io::FromRawFd;
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const COLUMNS: u16 = 80;
 const ROWS: u16 = 24;
@@ -47,6 +47,14 @@ const DOWN: u16 = 1440;
 
 /// The escape that carries a picture: transmit, and display it here.
 const PICTURE: &str = "\x1b_Ga=T";
+
+/// What a terminal that draws images answers the graphics query with: the
+/// image was accepted, then the device attributes reply that follows it.
+///
+/// `rav` chains the two so a terminal with no graphics support answers the
+/// second question and is a definite no immediately, rather than costing the
+/// whole timeout in silence.
+const CAN_DRAW_IMAGES: &[u8] = b"\x1b_Gi=31;OK\x1b\\\x1b[?62c";
 
 /// Enough frames to tell a running loop from one that drew once and stalled.
 const ENOUGH: usize = 8;
@@ -118,6 +126,12 @@ impl OnAPty {
         let child = unsafe {
             Command::new(env!("CARGO_BIN_EXE_rav"))
                 .args(args)
+                // A pty is not a multiplexer, and `auto` refuses one - so an
+                // inherited `TMUX`, or a `TERM` beginning "screen", would make
+                // rav decline images for a reason that has nothing to do with
+                // what is being tested.
+                .env_remove("TMUX")
+                .env("TERM", "xterm-256color")
                 .stdin(inherited())
                 .stdout(inherited())
                 .stderr(inherited())
@@ -161,17 +175,31 @@ impl OnAPty {
                 let mut pty = unsafe { std::fs::File::from_raw_fd(fd) };
                 let mut seen = Vec::new();
                 let mut buf = [0u8; 1 << 16];
+                let mut answered_the_query = false;
                 loop {
                     match pty.read(&mut buf) {
                         Ok(0) => break,
                         Ok(read) => {
                             seen.extend_from_slice(&buf[..read]);
+                            let text = String::from_utf8_lossy(&seen);
+
+                            // Say yes, the way a terminal that draws images
+                            // does. `auto` asks before it decides, and a pty
+                            // that never answers is a terminal that cannot -
+                            // so without this the default path could only ever
+                            // be tested as the one it falls back to.
+                            if !answered_the_query && text.contains("a=q") {
+                                answered_the_query = true;
+                                pty.write_all(CAN_DRAW_IMAGES).expect("answer the query");
+                                pty.flush().ok();
+                            }
+
                             // Counted here rather than timed out there, so the
                             // waiting side never guesses at a frame rate. A
                             // recount of the whole capture each time, because a
                             // picture's escape can straddle two reads and this
                             // is tens of kilobytes.
-                            let so_far = String::from_utf8_lossy(&seen).matches(PICTURE).count();
+                            let so_far = text.matches(PICTURE).count();
                             // The far side stops listening once it has quit,
                             // which is ordinary rather than a failure.
                             tally.send(so_far).ok();
@@ -243,12 +271,23 @@ impl OnAPty {
 /// counted afterwards: a terminal that will not report a size in pixels draws
 /// none of these, and a loop that drew one and stalled never reaches the total.
 fn wait_for(counted: &Receiver<usize>, pictures: usize) {
+    // One deadline for the whole wait, not one per message. A rav drawing block
+    // characters is *busy* - it sends a screenful of cells several times a
+    // second and no pictures at all - so a per-message timeout is never reached
+    // and the wait never ends. Which is not a hypothetical: it is what happened
+    // the first time this file was pointed at a terminal that answers "no".
+    let deadline = Instant::now() + PATIENCE;
     let mut so_far = 0;
     while so_far < pictures {
-        match counted.recv_timeout(PATIENCE) {
+        let left = deadline.saturating_duration_since(Instant::now());
+        match counted.recv_timeout(left) {
             Ok(count) => so_far = count,
-            Err(_) => panic!("{so_far} of {pictures} pictures arrived, then {PATIENCE:?} of none"),
+            Err(_) => panic!("{so_far} of {pictures} pictures arrived in {PATIENCE:?}"),
         }
+        assert!(
+            Instant::now() < deadline || so_far >= pictures,
+            "{so_far} of {pictures} pictures arrived in {PATIENCE:?}",
+        );
     }
 }
 
@@ -365,4 +404,28 @@ fn a_window_drag_redraws_at_the_size_the_terminal_now_is() {
         seen.matches(&format!("S={bytes},")).count(),
         "a frame at the new size promised the wrong number of bytes",
     );
+}
+
+#[test]
+fn a_terminal_that_says_it_can_draw_images_is_given_them() {
+    // The default path, with no `--surface` at all - which is what everyone
+    // gets, and what the other tests here deliberately bypass by asking for
+    // `kitty`. It covers the one step they cannot: rav asking the terminal
+    // whether it can draw, believing the answer, and acting on it.
+    let run = OnAPty::running(&["--test-audio"]);
+    let seen = run.quit_once_it_is_drawing();
+
+    // Reaching `quit_once_it_is_drawing` at all is the assertion - the wait
+    // runs out if no pictures arrive, and a terminal answering "no" sends none.
+    assert!(
+        seen.contains("a=q"),
+        "rav never asked whether the terminal could draw images",
+    );
+    let bytes = u32::from(ACROSS) * u32::from(DOWN) * 4;
+    assert_eq!(
+        seen.matches(&format!("S={bytes},")).count(),
+        seen.matches(PICTURE).count(),
+        "a frame promised a size the picture is not",
+    );
+    assert!(seen.contains("\x1b_Ga=d,d=A"), "the images were left up");
 }
