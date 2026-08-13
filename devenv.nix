@@ -156,8 +156,9 @@
   # the same size as the committed one and drops straight into the README.
   #
   # The recording is a guided tour rather than a static shot - it drives rav from
-  # the outside while filming, so the GIF shows the three themes and then the
-  # oscilloscope instead of one view for the whole clip. RAV_DEMO_TOUR is a list
+  # the outside while filming, so the GIF shows the four themes, the four viewing
+  # angles and then the oscilloscope, instead of one view for the whole clip.
+  # RAV_DEMO_TOUR is a list
   # of `seconds:key` steps: hold for that many seconds, then send that key.
   # `-` sends nothing, which is how the last segment gets its screen time.
   scripts.record-demo.exec = ''
