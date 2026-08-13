@@ -276,9 +276,6 @@ async fn rav_main() -> Result<()> {
         capture.stop();
     }
 
-    // Small delay to allow cleanup
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
     info!("🚦 RAV shutting down gracefully");
 
     result

@@ -8,7 +8,6 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
 use flume::{Receiver, Sender};
-use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
 pub type AudioSample = f32;
@@ -71,9 +70,53 @@ fn is_loopback_capture(device_name: &str) -> bool {
 /// The stream's rate and channel count belong to [`AudioCapture`], not to each
 /// block: they are fixed for the life of the stream, and a consumer that reads
 /// them per block can drift from the one that actually configured it.
-#[derive(Clone)]
 pub struct AudioData {
     pub samples: AudioBuffer,
+    /// Where the buffer goes once this block is finished with.
+    ///
+    /// A capture callback runs on a realtime thread and must not allocate:
+    /// `malloc` can block on a lock the whole process shares, and a block of
+    /// samples arriving every ten milliseconds is not where you want to find
+    /// that out. So the buffers are made once, at startup, and handed round -
+    /// the consumer drops the block, the buffer goes home, and the callback
+    /// picks it up again.
+    ///
+    /// `None` for a source with no realtime thread behind it, which is the
+    /// synthetic generator: it paces itself and has nothing to lose by
+    /// allocating.
+    home: Option<Sender<AudioBuffer>>,
+}
+
+impl AudioData {
+    /// A block that owns its buffer outright, for a source that can afford to
+    /// allocate one.
+    pub fn loose(samples: AudioBuffer) -> Self {
+        Self {
+            samples,
+            home: None,
+        }
+    }
+
+    /// A block borrowed from a pool, which goes back when it is dropped.
+    fn borrowed(samples: AudioBuffer, home: Sender<AudioBuffer>) -> Self {
+        Self {
+            samples,
+            home: Some(home),
+        }
+    }
+}
+
+impl Drop for AudioData {
+    fn drop(&mut self) {
+        let Some(home) = self.home.take() else {
+            return;
+        };
+        let mut spent = std::mem::take(&mut self.samples);
+        spent.clear();
+        // A full or closed pool means the buffer is simply freed, which is how
+        // an ordinary shutdown ends.
+        let _ = home.try_send(spent);
+    }
 }
 
 pub struct AudioCapture {
@@ -324,9 +367,13 @@ impl AudioCapture {
             error!("Audio stream error: {}", err);
         };
 
-        // Use std::sync::Mutex instead of tokio::sync::Mutex to avoid async in callback
-        let sync_buffer =
-            std::sync::Arc::new(std::sync::Mutex::new(Vec::with_capacity(buffer_size)));
+        // Every buffer the callback will ever send, made here where allocating
+        // is free. Two more than the queue holds, so a block in flight and a
+        // block being read still leave one to fill.
+        let (home, spare) = flume::bounded::<AudioBuffer>(QUEUE_BLOCKS + 2);
+        for _ in 0..QUEUE_BLOCKS + 2 {
+            let _ = home.try_send(Vec::with_capacity(buffer_size));
+        }
 
         // Built through a factory because the callback is consumed by
         // build_input_stream, and the retry below needs a second one.
@@ -336,7 +383,13 @@ impl AudioCapture {
             // rather than refuse the newest. flume is MPMC, so a second handle
             // costs nothing and the consumer keeps the one `start` returns.
             let spill = rx.clone();
-            let sync_buffer_clone = Arc::clone(&sync_buffer);
+            let home = home.clone();
+            let spare = spare.clone();
+            // Owned by the callback, which is the only thing that ever touches
+            // it - so there is nothing for a lock to guard, and no lock on the
+            // realtime thread. Room for four blocks, and it never grows: see
+            // below for what happens when a device hands over more than that.
+            let mut pending: AudioBuffer = Vec::with_capacity(buffer_size * 4);
             // A capture stream that is running but delivering silence is
             // indistinguishable from a quiet room, and on Linux the device is
             // whatever the ALSA `default` PCM happens to be routed to - so say
@@ -352,11 +405,17 @@ impl AudioCapture {
                     }
                 }
 
-                // Use synchronous operations in the audio callback
-                let Ok(mut buf) = sync_buffer_clone.lock() else {
+                // A period longer than four blocks would grow this, and growing
+                // it means `malloc` on the realtime thread. Dropping the period
+                // instead costs one gap in the display; a device that does it
+                // every time is a device rav cannot follow, and quietly falling
+                // behind for the rest of the run would hide that rather than
+                // show it.
+                if pending.len() + data.len() > pending.capacity() {
+                    pending.clear();
                     return;
-                };
-                buf.extend_from_slice(data);
+                }
+                pending.extend_from_slice(data);
 
                 // A `while`, not an `if`. The period the device hands over is
                 // not rav's block size and need not be smaller than it: through
@@ -366,10 +425,21 @@ impl AudioCapture {
                 // than real time, drifts further behind with every callback, and
                 // the buffer grows for as long as rav runs. macOS never saw it,
                 // because the process tap replaces this stream entirely.
-                while buf.len() >= buffer_size {
-                    let block = AudioData {
-                        samples: buf.drain(..buffer_size).collect(),
+                while pending.len() >= buffer_size {
+                    let Ok(mut buffer) = spare.try_recv().or_else(|_| {
+                        // Every buffer is out with the consumer, which means it
+                        // is behind. Dropping the oldest queued block sends its
+                        // buffer home - the same choice a full queue makes, for
+                        // the same reason.
+                        drop(spill.try_recv());
+                        spare.try_recv()
+                    }) else {
+                        return;
                     };
+                    buffer.clear();
+                    buffer.extend_from_slice(&pending[..buffer_size]);
+                    pending.drain(..buffer_size);
+                    let block = AudioData::borrowed(buffer, home.clone());
 
                     // Drop the *oldest* queued block to make room, as the macOS
                     // tap does. Discarding the newest instead turns a full queue
@@ -435,8 +505,6 @@ impl AudioCapture {
             if let Err(e) = stream.pause() {
                 warn!("Failed to pause audio stream: {}", e);
             }
-            // Give the stream a moment to stop cleanly
-            std::thread::sleep(std::time::Duration::from_millis(10));
             drop(stream);
             info!("Audio stream stopped");
         }
@@ -504,5 +572,56 @@ mod tests {
         ] {
             assert!(!is_loopback_capture(name), "{name} should not match");
         }
+    }
+}
+
+#[cfg(test)]
+mod pooling {
+    use super::*;
+
+    #[test]
+    fn a_finished_block_sends_its_buffer_home_to_be_filled_again() {
+        // The whole of what keeps `malloc` off the realtime thread. A capture
+        // callback that allocates can block on a lock the rest of the process
+        // shares, and a block of samples arriving every ten milliseconds is not
+        // where anyone wants to find that out.
+        let (home, spare) = flume::bounded::<AudioBuffer>(2);
+        let buffer = Vec::with_capacity(1024);
+        let address = buffer.as_ptr();
+
+        let block = AudioData::borrowed(buffer, home.clone());
+        assert!(spare.try_recv().is_err(), "it went home before it was used");
+        drop(block);
+
+        let back = spare.try_recv().expect("the buffer never came home");
+        assert!(
+            back.is_empty(),
+            "it came home with the last block still in it"
+        );
+        assert_eq!(
+            back.capacity(),
+            1024,
+            "it came home without the room it was given, so the next fill allocates",
+        );
+        assert_eq!(back.as_ptr(), address, "that is a different buffer");
+    }
+
+    #[test]
+    fn a_block_from_a_source_with_no_pool_simply_ends() {
+        // The synthetic generator paces itself on a thread of its own and has
+        // nothing to lose by allocating, so it does not carry a pool around.
+        let block = AudioData::loose(vec![0.5; 8]);
+        assert_eq!(block.samples.len(), 8);
+        drop(block);
+    }
+
+    #[test]
+    fn a_pool_nobody_is_listening_to_frees_the_buffer_rather_than_blocking() {
+        // How an ordinary shutdown ends: the stream outlives the consumer for a
+        // moment, and a block finishing then must not wait for room that is
+        // never coming.
+        let (home, spare) = flume::bounded::<AudioBuffer>(1);
+        drop(spare);
+        drop(AudioData::borrowed(Vec::with_capacity(4), home));
     }
 }

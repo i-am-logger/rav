@@ -146,7 +146,7 @@ pub fn start(sample_rate: u32) -> Receiver<AudioData> {
             // the display fell behind, so the signal would no longer be the
             // steady real-time source it is meant to stand in for - and when the
             // display caught up it would be fed stale audio.
-            match tx.try_send(AudioData { samples: block }) {
+            match tx.try_send(AudioData::loose(block)) {
                 Ok(()) => {}
                 Err(flume::TrySendError::Full(block)) => {
                     let _ = spill.try_recv();
