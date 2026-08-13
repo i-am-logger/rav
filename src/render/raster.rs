@@ -91,7 +91,17 @@ impl Canvas {
     /// Rasterised once per size by the caller, because a rung is a fixed size
     /// for as long as the window is and parsing an SVG sixty times a second
     /// would cost more than every bar rav draws put together.
-    pub fn wants_artwork(&mut self, svg: &'static str, across: u32, down: u32) {
+    pub fn wants_artwork(&mut self, svg: Option<&'static str>, across: u32, down: u32) {
+        let Some(svg) = svg else {
+            // Said out loud rather than left implicit. A canvas keeps its
+            // stamped ladder between frames, so a style that has stopped
+            // wanting one would otherwise go on being shaped by the mask the
+            // last style left behind - and `b` would be labels over one
+            // picture again, which is the defect the ladders exist to fix.
+            self.artwork = None;
+            self.ladder = None;
+            return;
+        };
         // Already have it, at the size it is wanted: which is every frame but
         // the first and the one after a resize. Parsing and rasterising the SVG
         // is 0.44 ms, and the ladder it stamps is 8.6 - both of which the frame
@@ -240,7 +250,9 @@ impl Canvas {
         ramp: &Ramp,
         screen: &Screen,
     ) -> bool {
-        if !self.placing.is_identity() || bars.is_empty() {
+        // No drawing, no drawn ladder - even if one is still stamped from the
+        // style before this one.
+        if self.artwork.is_none() || !self.placing.is_identity() || bars.is_empty() {
             return false;
         }
         let (across, down) = (self.pixmap.width(), self.pixmap.height());

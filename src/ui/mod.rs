@@ -539,7 +539,14 @@ impl App {
             // is where the reason is written down. Sending the raw uptime
             // would work all day and then quietly stop moving.
             elapsed: rav_appearance::scene::sway_phase(self.started.elapsed().as_secs_f64()),
-            artwork: self.skin.or_else(|| self.bar_style.artwork()),
+            // Only the style that draws one gets one, and a skin from the
+            // command line stands in for that style's built-in artwork rather
+            // than for every style's. Offered unconditionally otherwise, `b`
+            // would go back to being six labels over one picture.
+            artwork: self
+                .bar_style
+                .artwork()
+                .map(|built_in| self.skin.unwrap_or(built_in)),
         };
         // `coarse` and `fine` are the same cap on a cell grid - one position per
         // row is all a cell offers - so the difference has to be made here or

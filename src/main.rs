@@ -41,8 +41,8 @@ struct Args {
     theme: Option<String>,
 
     /// An SVG to draw a bar's rungs from, in place of the built-in `segment`.
-    /// Only its shape is used - the theme still decides the colour. Implies
-    /// that style at startup, and needs a terminal drawing pixels
+    /// Only its shape is used, so the theme still decides the colour. Selects
+    /// that bar style at startup, and needs a terminal that draws pixels.
     #[arg(long, value_name = "PATH")]
     skin: Option<std::path::PathBuf>,
 
