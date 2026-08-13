@@ -163,7 +163,7 @@ pub fn choose(asked: Choice, multiplexed: bool, answers: impl FnOnce() -> bool) 
         // size, and neither of those is worth having only to whoever read the
         // README to the bottom.
         //
-        // The fall back is still there and is automatic: a terminal that will
+        // The fallback is still there and is automatic: a terminal that will
         // not report its size in pixels draws block characters anyway, because
         // working a cell size out from the font is the rounding this exists to
         // remove. See `App::paint`.
