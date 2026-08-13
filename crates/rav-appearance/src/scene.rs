@@ -21,7 +21,7 @@ use crate::ink::Colour;
 use crate::ramp::Ramp;
 use crate::skin::Skin;
 use rav_core::geometry::{BarLayout, Screen};
-use rav_core::math::sin;
+use rav_core::math::{floor, sin};
 use rav_core::transform::Transform;
 use rav_core::units::{Elapsed, Length, Level};
 
@@ -34,6 +34,26 @@ pub const SWAY_SECONDS: f32 = 12.0;
 
 /// A whole turn, which `core` has as `TAU` and a `no_std` build still needs.
 const TAU: f32 = core::f32::consts::TAU;
+
+/// How far into the sway a run of this length is.
+///
+/// Takes seconds as `f64` and hands back a fraction of one cycle, because the
+/// wrapping has to happen *before* the number becomes an `f32` and there is no
+/// way to do that afterwards. [`Elapsed`] holds `f32` seconds, which has 24 bits
+/// of mantissa: past about 280,000 seconds - three days or so - one frame at
+/// sixty a second no longer changes the value at all, and at a week the
+/// resolution is 62 milliseconds. A display left running in a rack would stop
+/// swaying and start stepping, and then stop moving between frames entirely,
+/// which is the one view whose whole point is that it moves smoothly.
+///
+/// Measured: at a week of uptime, `604800.0f32 + 1.0/60.0 == 604800.0f32`. The
+/// time is gone before any arithmetic touches it.
+pub fn sway_phase(uptime_seconds: f64) -> Elapsed {
+    // `%` rather than `rem_euclid`, which is `std`: this crate has neither, and
+    // an uptime is never negative anyway. `Elapsed` clamps what it is handed.
+    let within = uptime_seconds % f64::from(SWAY_SECONDS);
+    Elapsed::seconds(within as f32)
+}
 
 /// Which of a scene's styles a band wears.
 ///
@@ -220,7 +240,14 @@ impl View {
             // reads as a jolt, and this is the one view whose whole point is
             // that it moves smoothly.
             Self::Swaying => {
-                let turn = TAU * elapsed.as_seconds() / SWAY_SECONDS;
+                // Wrapped into one cycle before it reaches `sin`. rav is left
+                // running: a display in a rack has an uptime measured in days,
+                // and by then `TAU * elapsed / 12` is a number whose argument
+                // reduction has thrown away the low bits - the sway would
+                // coarsen and eventually stall, on the one view whose whole
+                // point is that it moves smoothly.
+                let cycles = elapsed.as_seconds() / SWAY_SECONDS;
+                let turn = TAU * (cycles - floor(cycles));
                 (Transform::turning(0.44 * sin(turn)), across * 3.0)
             }
         };
@@ -433,6 +460,41 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_sway_still_moves_between_frames_after_a_week_of_uptime() {
+        // What `sway_phase` is for, and it is not what it first looked like.
+        // The danger is not that a large angle reaches `sin` badly - `sinf`
+        // reduces its own argument. It is that `Elapsed` holds `f32` *seconds*,
+        // so past about three days one frame at sixty a second stops changing
+        // the number at all: `604800.0f32 + 1.0/60.0 == 604800.0f32`. The time
+        // is gone before any arithmetic touches it, and the picture stops.
+        //
+        // So the wrapping has to happen in `f64`, before the value is narrowed,
+        // and this asks the only question that matters: a frame later, is it a
+        // different angle? Measured on the `sin` entry of the matrix, because
+        // the `cos` one is flat where the sway crosses the middle and would
+        // hide exactly this.
+        let screen = Screen::new(Length(480.0), Length(240.0));
+        let frame = 1.0 / 60.0;
+        let leaning =
+            |uptime: f64| View::Swaying.placing_at(&screen, sway_phase(uptime)).rows()[0][2];
+
+        for uptime in [0.0, 3600.0, 86_400.0, 604_800.0] {
+            assert_ne!(
+                leaning(uptime),
+                leaning(uptime + frame),
+                "after {uptime} seconds up, a frame later was the same angle",
+            );
+        }
+
+        // And a whole number of cycles later is where it started, which is what
+        // makes the wrap a wrap rather than a reset.
+        assert!(
+            (leaning(604_800.0) - leaning(604_800.0 % f64::from(SWAY_SECONDS))).abs() < 1e-6,
+            "a week of cycles drifted out of phase",
+        );
     }
 
     #[test]

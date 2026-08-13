@@ -236,13 +236,21 @@ mod tests {
             "a whole sway did not come back round",
         );
 
-        // And it crosses the middle rather than swinging to one side: half a
-        // period is the mirror of the start, which is only true of a turn that
-        // passes through square-on.
+        // Back through the middle at half a period. On its own that proves
+        // nothing about which side it went - `abs(sin)` satisfies it too, and a
+        // field that only ever leans one way would pass.
         assert_eq!(
             angled_at(View::Swaying, Elapsed::seconds(0.0)),
             angled_at(View::Swaying, Elapsed::seconds(SWAY_SECONDS / 2.0)),
-            "the sway does not pass back through the middle",
+            "the sway did not come back through the middle",
+        );
+        // So: the quarter and three-quarter points are the two extremes, and
+        // they have to be different pictures. That is what makes it a sway
+        // rather than a lean repeated.
+        assert_ne!(
+            angled_at(View::Swaying, quarter),
+            angled_at(View::Swaying, Elapsed::seconds(SWAY_SECONDS * 3.0 / 4.0)),
+            "both ends of the sway are the same side",
         );
     }
 

@@ -271,8 +271,12 @@ pub struct App {
     /// Whether the first non-silent tap buffer has been seen.
     #[cfg(target_os = "macos")]
     tap_reported: bool,
-    /// When the analyser started, for the silent-tap warning below.
-    #[cfg(target_os = "macos")]
+    /// When the analyser started.
+    ///
+    /// Two readers, and neither is optional on one platform: the silent-tap
+    /// warning below is macOS-only, and a swaying view is not - it needs to
+    /// know how far through its cycle it is, on every surface that can draw
+    /// one.
     started: Instant,
     should_quit: bool,
     last_frame: Instant,
@@ -350,7 +354,6 @@ impl App {
             tap_scratch: Vec::new(),
             #[cfg(target_os = "macos")]
             tap_reported: false,
-            #[cfg(target_os = "macos")]
             started: Instant::now(),
             should_quit: false,
             last_frame: Instant::now(),
@@ -483,7 +486,7 @@ impl App {
         use crate::surface::frame::{Frame, Look};
         use crate::surface::overlay;
         use rav_core::geometry::Screen;
-        use rav_core::units::{CellSize, Cells, Elapsed, Length};
+        use rav_core::units::{CellSize, Cells, Length};
 
         // Only the analyser is drawn as pixels. The oscilloscope is still block
         // characters, so `space` has to hand the screen back rather than leave
@@ -519,10 +522,14 @@ impl App {
             // same picture, and a ladder on its own pitch would not be.
             ladder: Some((self.bar_style.skin(), cell.down(Cells(1)))),
             view: self.view,
-            // Measured from the clock rather than counted in frames: a sway
-            // paced by frames would cross faster on a terminal that repaints
-            // quickly, which is the mistake the ballistics already avoid.
-            elapsed: Elapsed::from_secs_f32(self.started.elapsed().as_secs_f32()),
+            // From the clock rather than counted in frames: a sway paced by
+            // frames would cross faster on a terminal that repaints quickly,
+            // which is the mistake the ballistics already avoid.
+            //
+            // Wrapped into one cycle in `f64` first - see `sway_phase`, which
+            // is where the reason is written down. Sending the raw uptime
+            // would work all day and then quietly stop moving.
+            elapsed: rav_appearance::scene::sway_phase(self.started.elapsed().as_secs_f64()),
         };
         // `coarse` and `fine` are the same cap on a cell grid - one position per
         // row is all a cell offers - so the difference has to be made here or
