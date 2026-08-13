@@ -45,10 +45,12 @@ pub mod math;
 pub mod ballistics;
 pub mod capability;
 pub mod geometry;
+pub mod transform;
 pub mod units;
 
 pub use capability::{Capabilities, Requirements, Shortfall};
 pub use geometry::{Anchor, BarLayout, Column, Rectangle, Screen};
+pub use transform::{Point, Quad, Transform};
 pub use units::{
     Bounded, CellSize, Cells, Curve, Elapsed, Fill, Frames, Hz, Length, Level, SampleRate, Step,
 };

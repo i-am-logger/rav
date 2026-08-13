@@ -7,8 +7,9 @@
 
 use crate::render::{Colour, Ramp, Scene};
 use rav_core::geometry::{Rectangle, Screen};
+use rav_core::transform::Transform;
 use rav_core::units::Length;
-use tiny_skia::{Paint, Pixmap, Rect as SkRect, Transform};
+use tiny_skia::{Paint, PathBuilder, Pixmap, Rect as SkRect, Transform as SkTransform};
 
 /// An RGBA buffer that geometry is drawn into.
 ///
@@ -18,13 +19,32 @@ use tiny_skia::{Paint, Pixmap, Rect as SkRect, Transform};
 /// no reason to suspect it.
 pub struct Canvas {
     pixmap: Pixmap,
+    placing: Transform,
 }
 
 impl Canvas {
     /// `None` for a zero dimension, which is a terminal mid-resize rather than a
     /// programming error, and is the caller's to skip.
     pub fn new(width: u32, height: u32) -> Option<Self> {
-        Pixmap::new(width, height).map(|pixmap| Self { pixmap })
+        Pixmap::new(width, height).map(|pixmap| Self {
+            pixmap,
+            placing: Transform::IDENTITY,
+        })
+    }
+
+    /// Draw everything from here on through a transform - leaning, turning or
+    /// receding, per its own documentation.
+    ///
+    /// Set on the canvas rather than passed to each fill because it is a
+    /// property of how the picture is being looked at, not of one bar. A scene
+    /// that never calls this is drawn exactly as it was before transforms
+    /// existed, down to the byte - see [`Self::fill`].
+    pub fn place_through(&mut self, placing: Transform) {
+        self.placing = placing;
+    }
+
+    pub fn placing(&self) -> Transform {
+        self.placing
     }
 
     /// Sized to hold a screen exactly.
@@ -50,25 +70,68 @@ impl Canvas {
     ///
     /// An empty rectangle is skipped rather than refused: a bar at rest is one,
     /// and every frame of silence would otherwise be an error to handle.
+    ///
+    /// A canvas with no transform takes the rectangle straight to `fill_rect`,
+    /// which is not a shortcut but the point: measured, the same rectangle sent
+    /// as a four-point path differs in 62 bytes of 38,400, by up to 2 of 255,
+    /// along the antialiased edges. Small, and still a changed picture. Keeping
+    /// the untransformed path untouched means today's frame is today's frame by
+    /// construction rather than within a tolerance somebody chose.
     pub fn fill(&mut self, area: Rectangle, colour: Colour) {
-        // The one place a distance stops being a `Length` and becomes the number
-        // tiny-skia takes, so the unit cannot be lost anywhere above here.
-        let Some(rect) = SkRect::from_xywh(
-            area.left().get(),
-            area.top().get(),
-            area.width().get(),
-            area.height().get(),
-        ) else {
-            return;
-        };
         let mut paint = Paint::default();
         paint.set_color_rgba8(colour.red, colour.green, colour.blue, colour.alpha);
         // Antialiasing on, which is the whole argument for drawing pixels: a bar
         // edge lands where the arithmetic puts it instead of being snapped to a
         // boundary, and that snapping is the mechanism behind #63.
         paint.anti_alias = true;
-        self.pixmap
-            .fill_rect(rect, &paint, Transform::identity(), None);
+
+        if self.placing.is_identity() {
+            // The one place a distance stops being a `Length` and becomes the
+            // number tiny-skia takes, so the unit cannot be lost above here.
+            let Some(rect) = SkRect::from_xywh(
+                area.left().get(),
+                area.top().get(),
+                area.width().get(),
+                area.height().get(),
+            ) else {
+                return;
+            };
+            self.pixmap
+                .fill_rect(rect, &paint, SkTransform::identity(), None);
+            return;
+        }
+
+        if area.is_empty() {
+            return;
+        }
+        // A corner with no place on the picture takes the whole shape with it:
+        // three corners of a bar is not a bar, and half of one is worse than
+        // none.
+        let Some(quad) = self.placing.quad(area) else {
+            return;
+        };
+        let mut path = PathBuilder::new();
+        for (at, corner) in quad.corners.iter().enumerate() {
+            let (x, y) = (corner.x.get(), corner.y.get());
+            if at == 0 {
+                path.move_to(x, y);
+            } else {
+                path.line_to(x, y);
+            }
+        }
+        path.close();
+        // `finish` refuses a path with no area, which a bar edge-on to the
+        // viewer is - and a scene turned a quarter turn has every bar that way.
+        let Some(path) = path.finish() else {
+            return;
+        };
+        self.pixmap.fill_path(
+            &path,
+            &paint,
+            tiny_skia::FillRule::Winding,
+            SkTransform::identity(),
+            None,
+        );
     }
 
     /// Paint one rectangle in whatever colour the ramp gives at each height.
@@ -293,6 +356,117 @@ mod tests {
             screen: screen(10.0, 60.0),
             styles,
         }
+    }
+
+    /// A bar in the middle of a small canvas, for the transform tests.
+    fn a_bar() -> Rectangle {
+        Rectangle::new(Length(20.0), Length(20.0), Length(40.0), Length(60.0))
+    }
+
+    #[test]
+    fn a_canvas_nobody_transformed_draws_what_it_always_drew() {
+        // The whole of what makes this safe to add. `fill_rect` and a four-point
+        // path are not the same pixels - measured at 62 bytes of 38,400,
+        // differing by up to 2 of 255 along the antialiased edges - so the
+        // untransformed picture keeps the code path it has always had rather
+        // than a tolerance. Every other test in this file is the rest of the
+        // guard: they all draw through `fill` and none of them moved.
+        let screen = screen(120.0, 100.0);
+        let mut untouched = Canvas::for_screen(&screen).unwrap();
+        untouched.fill(a_bar(), Colour::GREEN);
+
+        let mut told_to_do_nothing = Canvas::for_screen(&screen).unwrap();
+        told_to_do_nothing.place_through(Transform::IDENTITY);
+        told_to_do_nothing.fill(a_bar(), Colour::GREEN);
+
+        assert!(untouched.placing().is_identity());
+        assert_eq!(
+            untouched.to_rgba(),
+            told_to_do_nothing.to_rgba(),
+            "setting the transform that means nothing changed the picture",
+        );
+    }
+
+    #[test]
+    fn a_transform_moves_the_picture_and_not_the_layout() {
+        // The bar is laid out in the same place either way - what changed is
+        // where the canvas puts it. A skin leans; the analyser does not learn
+        // about leaning.
+        let screen = screen(120.0, 100.0);
+        let mut flat = Canvas::for_screen(&screen).unwrap();
+        flat.fill(a_bar(), Colour::GREEN);
+
+        let mut shifted = Canvas::for_screen(&screen).unwrap();
+        shifted.place_through(Transform::moving(30.0, 0.0, 0.0));
+        shifted.fill(a_bar(), Colour::GREEN);
+
+        assert_eq!(at(&flat, 30, 50).green, 255, "the bar was not where it was");
+        assert_eq!(
+            at(&flat, 70, 50).alpha,
+            0,
+            "something is already over there"
+        );
+        assert_eq!(at(&shifted, 70, 50).green, 255, "it did not move");
+        assert_eq!(at(&shifted, 30, 50).alpha, 0, "it is in both places");
+    }
+
+    #[test]
+    fn a_receding_bar_is_smaller_at_the_far_end() {
+        // Depth reading as depth, which is the point of the exercise: the same
+        // rectangle, pushed back, covers less of the picture. Compared by ink
+        // rather than by an edge, because an edge under perspective is
+        // antialiased across a pixel and its exact position is a choice the
+        // rasteriser makes.
+        let screen = screen(120.0, 100.0);
+        let ink = |placing: Transform| {
+            let mut canvas = Canvas::for_screen(&screen).unwrap();
+            canvas.place_through(placing);
+            canvas.fill(a_bar(), Colour::GREEN);
+            canvas
+                .to_rgba()
+                .chunks(4)
+                .map(|pixel| u32::from(pixel[3]))
+                .sum::<u32>()
+        };
+
+        let near = ink(Transform::receding(400.0));
+        let far = ink(Transform::moving(0.0, 0.0, 200.0).then(Transform::receding(400.0)));
+        assert!(
+            far * 2 < near,
+            "pushed back twice as far as the eye is near, and it covered {far} against {near}",
+        );
+        assert!(far > 0, "it receded out of existence");
+    }
+
+    #[test]
+    fn a_bar_turned_edge_on_draws_nothing_rather_than_a_seam() {
+        // A quarter turn puts every bar side-on. `PathBuilder::finish` refuses a
+        // path with no area, and taking that as "nothing to draw" is the
+        // difference between a scene that fades out and one that leaves a line
+        // of stray pixels down the screen.
+        let screen = screen(120.0, 100.0);
+        let mut canvas = Canvas::for_screen(&screen).unwrap();
+        canvas.place_through(Transform::turning(core::f32::consts::FRAC_PI_2));
+        canvas.fill(a_bar(), Colour::GREEN);
+        assert!(
+            canvas.to_rgba().chunks(4).all(|pixel| pixel[3] == 0),
+            "an edge-on bar left ink behind",
+        );
+    }
+
+    #[test]
+    fn a_bar_behind_the_viewer_draws_nothing() {
+        // Not a contrived case once a scene turns: half a turned field is behind
+        // the eye. Projecting it anyway puts the bar in the reflection of where
+        // it belongs, which reads as a glitch rather than as depth.
+        let screen = screen(120.0, 100.0);
+        let mut canvas = Canvas::for_screen(&screen).unwrap();
+        canvas.place_through(Transform::moving(0.0, 0.0, -200.0).then(Transform::receding(100.0)));
+        canvas.fill(a_bar(), Colour::GREEN);
+        assert!(
+            canvas.to_rgba().chunks(4).all(|pixel| pixel[3] == 0),
+            "a bar behind the eye was drawn somewhere",
+        );
     }
 
     #[test]

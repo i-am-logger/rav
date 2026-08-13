@@ -48,6 +48,16 @@ pub fn powf(value: f32, exponent: f32) -> f32 {
     libm::powf(value, exponent)
 }
 
+/// Sine, in radians. Only [`crate::transform`] needs it, for the rotations.
+pub fn sin(radians: f32) -> f32 {
+    libm::sinf(radians)
+}
+
+/// Cosine, in radians. The other half of a rotation.
+pub fn cos(radians: f32) -> f32 {
+    libm::cosf(radians)
+}
+
 /// How far something travels when its speed is multiplied by `growth` every
 /// frame, in units of the speed it started at.
 ///
