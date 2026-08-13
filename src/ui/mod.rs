@@ -483,7 +483,7 @@ impl App {
         use crate::surface::frame::{Frame, Look};
         use crate::surface::overlay;
         use rav_core::geometry::Screen;
-        use rav_core::units::{CellSize, Cells, Length};
+        use rav_core::units::{CellSize, Cells, Elapsed, Length};
 
         // Only the analyser is drawn as pixels. The oscilloscope is still block
         // characters, so `space` has to hand the screen back rather than leave
@@ -519,6 +519,10 @@ impl App {
             // same picture, and a ladder on its own pitch would not be.
             ladder: Some((self.bar_style.skin(), cell.down(Cells(1)))),
             view: self.view,
+            // Measured from the clock rather than counted in frames: a sway
+            // paced by frames would cross faster on a terminal that repaints
+            // quickly, which is the mistake the ballistics already avoid.
+            elapsed: Elapsed::from_secs_f32(self.started.elapsed().as_secs_f32()),
         };
         // `coarse` and `fine` are the same cap on a cell grid - one position per
         // row is all a cell offers - so the difference has to be made here or
@@ -2375,7 +2379,7 @@ mod tests {
             because: "for the test",
         };
         assert_eq!(a.view, View::Flat, "rav does not open at an angle");
-        for expected in ["raked", "turned", "corridor", "flat"] {
+        for expected in ["raked", "turned", "corridor", "swaying", "flat"] {
             a.apply(Action::CycleView);
             assert_eq!(a.view.label(), expected);
             let row = a

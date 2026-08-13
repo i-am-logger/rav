@@ -267,7 +267,7 @@ impl Draw for Scene<'_> {
 
         // Computed once: it costs a rotation and a projection of the field's own
         // corners, and it is the same for every band. Only the depth differs.
-        let placing = self.view.placing(screen);
+        let placing = self.view.placing_at(screen, self.elapsed);
 
         let stand = |canvas: &mut Canvas, index: usize| {
             let depth = self.view.depth(index, drawable, screen);
@@ -599,6 +599,7 @@ mod tests {
         Scene {
             bands,
             view: rav_appearance::View::Flat,
+            elapsed: rav_core::units::Elapsed::seconds(0.0),
             layout: layout(10.0, 0.0),
             screen: screen(10.0, 60.0),
             styles,
@@ -841,6 +842,7 @@ mod tests {
             layout: BarLayout::new(Length(40.0), Length(0.0)),
             screen,
             view: rav_appearance::View::Corridor,
+            elapsed: rav_core::units::Elapsed::seconds(0.0),
             styles: &styles,
         };
         let mut canvas = Canvas::for_screen(&screen).unwrap();
@@ -896,6 +898,7 @@ mod tests {
             layout: BarLayout::new(Length(40.0), Length(0.0)),
             screen,
             view: rav_appearance::View::Corridor,
+            elapsed: rav_core::units::Elapsed::seconds(0.0),
             styles: &styles,
         }
         .draw(&mut canvas);

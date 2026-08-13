@@ -477,6 +477,7 @@ fn paint(frame: &mut [u8], width: u32, tick: u64) {
     Scene {
         bands: &bands,
         view: rav_appearance::View::Flat,
+        elapsed: rav_core::units::Elapsed::seconds(0.0),
         layout,
         screen,
         styles: &styles,

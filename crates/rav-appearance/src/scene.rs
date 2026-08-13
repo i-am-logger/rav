@@ -21,8 +21,19 @@ use crate::ink::Colour;
 use crate::ramp::Ramp;
 use crate::skin::Skin;
 use rav_core::geometry::{BarLayout, Screen};
+use rav_core::math::sin;
 use rav_core::transform::Transform;
-use rav_core::units::{Length, Level};
+use rav_core::units::{Elapsed, Length, Level};
+
+/// How long a [`View::Swaying`] field takes to cross and come back.
+///
+/// Slow enough to read as the panel moving rather than as the picture shaking:
+/// at twelve seconds a bar drifts by a fraction of its own width between one
+/// frame and the next.
+pub const SWAY_SECONDS: f32 = 12.0;
+
+/// A whole turn, which `core` has as `TAU` and a `no_std` build still needs.
+const TAU: f32 = core::f32::consts::TAU;
 
 /// Which of a scene's styles a band wears.
 ///
@@ -101,6 +112,15 @@ pub enum View {
     /// rather than the whole field being at an angle - so it is the only one
     /// that changes what order they have to be drawn in.
     Corridor,
+    /// Turning slowly from one side to the other and back, for as long as it is
+    /// showing.
+    ///
+    /// The only view that is not the same picture twice, and the only one that
+    /// asks what time it is. It sways rather than turning all the way round
+    /// because a field edge-on to the viewer has no area, so a full rotation
+    /// would take the picture away twice a turn - which reads as a fault rather
+    /// than as motion.
+    Swaying,
 }
 
 impl View {
@@ -110,6 +130,7 @@ impl View {
             Self::Raked => "raked",
             Self::Turned => "turned",
             Self::Corridor => "corridor",
+            Self::Swaying => "swaying",
         }
     }
 
@@ -118,7 +139,8 @@ impl View {
             Self::Flat => Self::Raked,
             Self::Raked => Self::Turned,
             Self::Turned => Self::Corridor,
-            Self::Corridor => Self::Flat,
+            Self::Corridor => Self::Swaying,
+            Self::Swaying => Self::Flat,
         }
     }
 
@@ -170,6 +192,18 @@ impl View {
     /// the rotation actually produced, so the angles can be whatever reads best
     /// and none of them can push the picture off the screen.
     pub fn placing(self, screen: &Screen) -> Transform {
+        self.placing_at(screen, Elapsed::seconds(0.0))
+    }
+
+    /// The same, for a view that is somewhere in a movement.
+    ///
+    /// Every angle but [`Swaying`](Self::Swaying) ignores the time and comes
+    /// back with what [`placing`](Self::placing) gives, so a caller with no
+    /// clock loses nothing by not having one. The sway is a full cycle every
+    /// [`SWAY_SECONDS`], between the same extremes [`Turned`](Self::Turned)
+    /// holds still at - slow enough to read as the panel moving rather than as
+    /// the picture shaking.
+    pub fn placing_at(self, screen: &Screen, elapsed: Elapsed) -> Transform {
         let (across, down) = (screen.width().get(), screen.height().get());
         let (middle_x, middle_y) = (across / 2.0, down / 2.0);
         let (turn, eye) = match self {
@@ -181,6 +215,14 @@ impl View {
             // was, so the fit below finds nothing to do and the picture keeps
             // the whole screen.
             Self::Corridor => (Transform::IDENTITY, across * 3.0),
+            // The same extremes `Turned` holds still at, crossed and recrossed.
+            // `sin` rather than a sawtooth: a fold in the motion at each end
+            // reads as a jolt, and this is the one view whose whole point is
+            // that it moves smoothly.
+            Self::Swaying => {
+                let turn = TAU * elapsed.as_seconds() / SWAY_SECONDS;
+                (Transform::turning(0.44 * sin(turn)), across * 3.0)
+            }
         };
         let centred = |about: Transform| {
             Transform::moving(-middle_x, -middle_y, 0.0)
@@ -221,6 +263,14 @@ pub struct Scene<'a> {
     /// The angle the whole field is bolted at. `Flat` is what every surface
     /// has always drawn, and what one that cannot lean draws regardless.
     pub view: View,
+    /// How long the analyser has been running.
+    ///
+    /// Only [`View::Swaying`] reads it - every other angle is the same picture
+    /// whenever it is drawn. It is here rather than in the view because a view
+    /// is a setting a user chose and this is a fact about the frame, and
+    /// because a scene is what to draw *now*: once anything moves, "now" is
+    /// part of what a surface is being asked for.
+    pub elapsed: Elapsed,
     /// The looks a band may wear, indexed by its [`StyleId`].
     ///
     /// Usually one. Two for a stereo pair, one per band for a rainbow. A scene
@@ -297,6 +347,7 @@ mod tests {
             layout: BarLayout::new(Length(8.0), Length(2.0)),
             screen: Screen::new(Length(across), Length(100.0)),
             view: View::Flat,
+            elapsed: Elapsed::seconds(0.0),
             styles,
         }
     }
@@ -323,7 +374,7 @@ mod tests {
         // than handed to a surface as a matrix to centre for itself.
         let screen = Screen::new(Length(240.0), Length(120.0));
         let middle = rav_core::transform::Point::flat(Length(120.0), Length(60.0));
-        for view in [View::Raked, View::Turned, View::Corridor] {
+        for view in [View::Raked, View::Turned, View::Corridor, View::Swaying] {
             let stays = view.placing(&screen).apply(middle).unwrap();
             assert!(
                 (stays.x.get() - 120.0).abs() < 0.01 && (stays.y.get() - 60.0).abs() < 0.01,
@@ -340,7 +391,13 @@ mod tests {
         // of every offered view has somewhere to land.
         let screen = Screen::new(Length(240.0), Length(120.0));
         let field = screen.bounds();
-        for view in [View::Flat, View::Raked, View::Turned, View::Corridor] {
+        for view in [
+            View::Flat,
+            View::Raked,
+            View::Turned,
+            View::Corridor,
+            View::Swaying,
+        ] {
             assert!(
                 view.placing(&screen).quad(field).is_some(),
                 "{} put a corner where it cannot be drawn",
@@ -359,7 +416,13 @@ mod tests {
         // whatever reads best and none of them can spill.
         let screen = Screen::new(Length(480.0), Length(240.0));
         let field = screen.bounds();
-        for view in [View::Flat, View::Raked, View::Turned, View::Corridor] {
+        for view in [
+            View::Flat,
+            View::Raked,
+            View::Turned,
+            View::Corridor,
+            View::Swaying,
+        ] {
             let quad = view.placing(&screen).quad(field).expect("undrawable");
             for corner in quad.corners {
                 let (x, y) = (corner.x.get(), corner.y.get());
@@ -377,7 +440,13 @@ mod tests {
         // Three presses and the picture is where it started, like every other
         // cycling setting in rav.
         let mut view = View::Flat;
-        for expected in [View::Raked, View::Turned, View::Corridor, View::Flat] {
+        for expected in [
+            View::Raked,
+            View::Turned,
+            View::Corridor,
+            View::Swaying,
+            View::Flat,
+        ] {
             view = view.next();
             assert_eq!(view, expected);
         }
