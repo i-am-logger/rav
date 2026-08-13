@@ -57,6 +57,15 @@ everything else draws block characters, as does a terminal that will not report
 its size in pixels. `--surface glyphs` forces the block characters. Press `h` for
 which surface rav is on and why.
 
+`--surface window` draws the same picture in a window of rav's own, in a build
+that has one. It is off by default because a terminal visualiser should not make
+everyone who installs it build a windowing stack.
+
+```
+cargo install rav --features gui && rav --surface window
+cargo run --features gui -- --surface window   # from a clone
+```
+
 Everything else is a keypress, and `h` shows the lot with their current values:
 
 | Key | |
@@ -107,9 +116,8 @@ The ballistics, and the ramp the `rav` and `winamp` themes use, come from
 
 ## What's next
 
-A window of its own. Small displays — a strip of LEDs, or a matrix — which the
-same themes already cover, since what rav measures is kept apart from what it
-looks like.
+Small displays — a strip of LEDs, or a matrix — which the same themes already
+cover, since what rav measures is kept apart from what it looks like.
 
 ## License
 
