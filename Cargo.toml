@@ -11,8 +11,14 @@ members = ["crates/rav-core", "crates/rav-appearance"]
 [workspace.package]
 version = "1.0.0-beta.12"
 edition = "2024"
-# The floor the dependency graph imposes, not rav's own source: instability
-# (reached through ratatui) and the darling family all declare 1.88.
+# The floor the dependency graph imposes, not rav's own source. One crate holds
+# it: `darling_core`, reached as ratatui -> instability -> darling. Nothing else
+# in the graph asks for more than 1.87, so that is the single thing to look at
+# if this ever wants lowering.
+#
+# `instability` was named here too and has since relaxed to 1.64, which is worth
+# knowing: this number moves when somebody else's manifest does, not when rav's
+# source does.
 rust-version = "1.88"
 authors = ["RAV Team <i-am-logger@users.noreply.github.com>"]
 repository = "https://github.com/i-am-logger/rav"
