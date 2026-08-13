@@ -11,10 +11,11 @@
 //!
 //! # Taken by one surface
 //!
-//! The pixel surface, on every frame `--surface kitty` draws. The glyph
-//! renderer takes levels and colours directly and quantises them itself, so
-//! this is the seam for one consumer until a second is built on it - a window
-//! or an LED matrix would be the second, and neither exists yet.
+//! The pixel surface, on every frame it draws - which is every frame on a
+//! terminal that says it can draw images. The glyph renderer takes levels and
+//! colours directly and quantises them itself, so this is the seam for one
+//! consumer until a second is built on it: a window or an LED matrix would be
+//! the second, and neither exists yet.
 
 use crate::ink::Colour;
 use crate::ramp::Ramp;
