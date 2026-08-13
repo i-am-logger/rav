@@ -22,6 +22,10 @@ pub mod frame;
 pub mod kitty;
 pub mod overlay;
 pub mod pixels;
+/// Drawing words without a terminal to draw them. Behind `gui` for now: the
+/// kitty surface writes cells and has no use for it.
+#[cfg(feature = "gui")]
+pub mod text;
 /// Behind `gui`, which is off by default - a terminal visualiser should not
 /// make everyone who installs it build a windowing stack.
 #[cfg(feature = "gui")]
