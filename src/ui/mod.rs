@@ -484,25 +484,21 @@ impl App {
     /// cursor now is, then write the overlay's own cells. An image lands
     /// wherever the cursor happens to be, and the overlay goes on afterwards
     /// because a written cell blanks the picture beneath it.
-    fn painted(
-        &mut self,
-        out: &mut impl Write,
-        size: crossterm::terminal::WindowSize,
-        staging: &std::path::Path,
-        status: Option<&str>,
-        help: Option<&[HelpRow<'_>]>,
-    ) -> Result<bool> {
+    /// The frame as pixels, and nothing about how it reaches a screen.
+    ///
+    /// Everything the two pixel surfaces have in common. A terminal that draws
+    /// images and a window of rav's own want the same picture and differ only
+    /// in the delivery, so the encoding lives with each of them and the drawing
+    /// lives here. `None` where there is nothing to hand over - a screen with
+    /// no area, which is a terminal caught mid-resize.
+    ///
+    /// `size` carries pixels and cells both, because the bar width is in cells
+    /// and cells are what `+` and `-` move. A window has none of its own and
+    /// says what it is counting instead.
+    fn frame_pixels(&mut self, size: &crossterm::terminal::WindowSize) -> Option<Vec<u8>> {
         use crate::surface::frame::{Frame, Look};
-        use crate::surface::overlay;
         use rav_core::geometry::Screen;
         use rav_core::units::{CellSize, Cells, Length};
-
-        // Only the analyser is drawn as pixels. The oscilloscope is still block
-        // characters, so `space` has to hand the screen back rather than leave
-        // the bars sitting there looking like a key that does nothing.
-        if self.visualisation != Visualisation::Analyzer {
-            return self.stop_painting(out).map(|()| false);
-        }
 
         let screen = Screen::new(
             Length(f32::from(size.width)),
@@ -581,7 +577,27 @@ impl App {
             pixels
         });
         self.cap_levels = caps;
-        let Some(pixels) = drawn else {
+        drawn
+    }
+
+    fn painted(
+        &mut self,
+        out: &mut impl Write,
+        size: crossterm::terminal::WindowSize,
+        staging: &std::path::Path,
+        status: Option<&str>,
+        help: Option<&[HelpRow<'_>]>,
+    ) -> Result<bool> {
+        use crate::surface::overlay;
+
+        // Only the analyser is drawn as pixels. The oscilloscope is still block
+        // characters, so `space` has to hand the screen back rather than leave
+        // the bars sitting there looking like a key that does nothing.
+        if self.visualisation != Visualisation::Analyzer {
+            return self.stop_painting(out).map(|()| false);
+        }
+
+        let Some(pixels) = self.frame_pixels(&size) else {
             return Ok(false);
         };
 
