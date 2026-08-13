@@ -176,6 +176,39 @@ jobs:
       - run: nix build .#default --print-build-logs
       - run: ./result/bin/rav --version
 
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # cpal links ALSA on Linux.
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+      # Pinned, and the pin is the whole point: every other job here runs
+      # stable, so `rust-version` in Cargo.toml was a promise to anyone
+      # installing from crates.io that nothing checked. An API stabilised above
+      # this floor compiles everywhere rav is built and fails for the reader.
+      - uses: dtolnay/rust-toolchain@1.88
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: msrv
+      # --all-features, so the `gui` feature is covered too - winit and
+      # softbuffer declare 1.70 and 1.71, well under this, and that is a thing
+      # to keep true rather than assume.
+      #
+      # `check` rather than `build`: this asks whether the source compiles on
+      # the oldest toolchain rav claims, and a linked binary answers nothing
+      # more than that for twice the time.
+      #
+      # `--locked` is what makes the answer mean anything. Without it cargo may
+      # quietly resolve older compatible versions to satisfy this toolchain and
+      # pass - proving that *some* dependency set builds on 1.88, which is not
+      # the question. The one that ships is the one in Cargo.lock.
+      - run: cargo check --locked --workspace --all-features --all-targets
+
   # Separate from the nix build because this binary is attached to the release
   # and has to run on machines without nix: built here it links the runner's
   # glibc, where a nix-built one resolves an interpreter under /nix/store.
@@ -213,16 +246,22 @@ jobs:
 
   release:
     name: Release
-    needs: [checks, package, build]
+    needs: [checks, package, build, msrv]
     # Every gate is named: a job in needs: but absent from if: is not gated.
     # !cancelled() rather than always(), so a cancelled run cannot publish.
+    #
+    # msrv is here because publishing is what makes `rust-version` a promise.
+    # A crate that says 1.88 and needs more is a compile error for a reader and
+    # nothing at all for anyone building on stable, so the one moment it must
+    # hold is the moment it goes to crates.io - where it cannot be taken back.
     if: |
       !cancelled() &&
       github.event_name == 'push' &&
       github.ref == 'refs/heads/master' &&
       needs.checks.result == 'success' &&
       needs.package.result == 'success' &&
-      needs.build.result == 'success'
+      needs.build.result == 'success' &&
+      needs.msrv.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
