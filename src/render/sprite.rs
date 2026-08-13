@@ -50,7 +50,10 @@ impl Sprite {
     /// `None` for artwork that will not parse or a rung with no area - a skin
     /// file someone is editing, or a terminal mid-resize. Both are a reason to
     /// draw the plain ladder, not to stop drawing.
-    pub fn drawn(svg: &str, across: u32, down: u32) -> Option<Self> {
+    /// `'static` because the identity check below is by address: every skin
+    /// here is an `include_str!`, and a borrowed buffer would give the same
+    /// pointer to two different drawings once it was reused.
+    pub fn drawn(svg: &'static str, across: u32, down: u32) -> Option<Self> {
         if across == 0 || down == 0 {
             return None;
         }
@@ -144,7 +147,7 @@ mod tests {
         <rect width="10" height="10" fill="#fff"/></svg>"##;
 
     /// How much of the rung the drawing covers, 0 to 1.
-    fn coverage(svg: &str, across: u32, down: u32) -> f32 {
+    fn coverage(svg: &'static str, across: u32, down: u32) -> f32 {
         let sprite = Sprite::drawn(svg, across, down).expect("it should draw");
         let one = Rectangle::new(
             Length(0.0),

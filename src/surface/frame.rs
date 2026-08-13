@@ -279,6 +279,51 @@ mod tests {
     }
 
     #[test]
+    fn a_drawn_ladder_follows_the_bars_when_there_are_a_different_number_of_them() {
+        // The ladder is stamped once and kept, because the grid a bar climbs
+        // does not change between frames. What does change is how many bars
+        // there are - `w` regroups the bands - and how wide they are, and
+        // neither touches the screen size or the rung height. A cache keyed on
+        // those alone hands back a ladder stamped for a different set of
+        // columns, and the shapes stop lining up with the bars they are meant
+        // to be.
+        const CORNERS: &str = include_str!("../../assets/skins/segment.svg");
+        let theme = Theme::default();
+        let palette = Palette::default();
+        let look = Look {
+            theme: &theme,
+            view: View::Flat,
+            elapsed: Elapsed::seconds(0.0),
+            artwork: Some(CORNERS),
+            palette: &palette,
+            backdrop: false,
+            caps: None,
+            ladder: Some((rav_appearance::skin::ladders::BLOCKS, Length(20.0))),
+        };
+        // One canvas, kept across both - as the render loop keeps it.
+        let mut canvas = Canvas::for_screen(&screen()).expect("a screen with area");
+        let paint = |canvas: &mut Canvas, bands: usize| {
+            let levels = vec![1.0; bands];
+            Frame::new(&levels, &levels, &look, layout(), screen()).painted_onto(canvas);
+            canvas.to_rgba()
+        };
+
+        let few = paint(&mut canvas, 2);
+        let many = paint(&mut canvas, 5);
+        assert_ne!(few, many, "more bands drew the same picture");
+
+        // The fifth column has to have ink in it, which it cannot if the mask
+        // is still the one stamped for two.
+        let fifth: Column = layout().column(4);
+        let x = fifth.left().get() as u32 + 10;
+        assert!(
+            at(&many, x, TALL as u32 - 6).3 > 200,
+            "the fifth bar was left unstamped: {:?}",
+            at(&many, x, TALL as u32 - 6),
+        );
+    }
+
+    #[test]
     fn a_drawn_skin_still_takes_its_colour_from_the_theme() {
         // The invariant that outranks the artwork: colour is a function of
         // height, never of the skin. An SVG whose own fill reached the screen

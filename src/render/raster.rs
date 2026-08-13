@@ -11,6 +11,22 @@ use rav_core::transform::Transform;
 use rav_core::units::Length;
 use tiny_skia::{Paint, PathBuilder, Pixmap, Rect as SkRect, Transform as SkTransform};
 
+/// The geometry a stamped ladder was built for.
+///
+/// Everything the mask depends on and nothing that changes per frame, so it
+/// answers "is the one I have still the right one" exactly rather than nearly.
+#[derive(PartialEq)]
+struct Ladder {
+    across: u32,
+    down: u32,
+    /// The rung height, by its bits: a key is compared, never ordered, and
+    /// float equality on a value that came from the same arithmetic is what is
+    /// wanted here.
+    rung: u32,
+    /// Where each column starts and how wide it is.
+    columns: Vec<(u32, u32)>,
+}
+
 /// An RGBA buffer that geometry is drawn into.
 ///
 /// Owns a `tiny_skia::Pixmap` rather than exposing it, because the pixels leave
@@ -34,7 +50,7 @@ pub struct Canvas {
     /// Rebuilt when the screen or the rung changes and not otherwise: the grid
     /// a bar climbs is fixed for as long as the window is, and only how much of
     /// it is lit changes between frames.
-    ladder: Option<((u32, u32, u32), tiny_skia::Mask)>,
+    ladder: Option<(Ladder, tiny_skia::Mask)>,
 }
 
 impl Canvas {
@@ -228,7 +244,24 @@ impl Canvas {
             return false;
         }
         let (across, down) = (self.pixmap.width(), self.pixmap.height());
-        let wanted = (across, down, rung.get().to_bits());
+        // Keyed on where the columns actually are, not on the screen and the
+        // rung alone. `w` changes how many bands there are and `+` changes how
+        // wide they are, and either can leave the screen and the rung exactly as
+        // they were - so a key without the columns hands back a mask stamped for
+        // a different set of bars, and the ladder stops lining up with them.
+        //
+        // Their heights are deliberately not in it: those change sixty times a
+        // second and the mask does not depend on them, which is the whole reason
+        // it can be cached at all.
+        let wanted = Ladder {
+            across,
+            down,
+            rung: rung.get().to_bits(),
+            columns: bars
+                .iter()
+                .map(|bar| (bar.left().get().to_bits(), bar.width().get().to_bits()))
+                .collect(),
+        };
         if self.ladder.as_ref().is_none_or(|(had, _)| *had != wanted) {
             let Some(artwork) = self.artwork.as_ref() else {
                 return false;
