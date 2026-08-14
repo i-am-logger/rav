@@ -173,6 +173,7 @@ impl Requirements {
 
 /// Why a surface cannot show a visualisation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Shortfall {
     Columns { needs: usize, has: usize },
     Rungs { needs: usize, has: usize },

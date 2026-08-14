@@ -108,6 +108,7 @@ impl Level {
 /// of which is in `core`. An allocator-free target wants `libm`, or `Linear`,
 /// which needs nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[non_exhaustive]
 pub enum Curve {
     /// The display *is* the amplitude. rav's default and its documented choice.
     #[default]
