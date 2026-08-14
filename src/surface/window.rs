@@ -637,14 +637,13 @@ mod tests {
 
         let (_, _, wide, tall) = text::help_area(&text::Font8x8, &rows, "rav", OPENS_AT)
             .expect("no room for a panel at the size a window opens at");
-        let (across, down) = text::Bitmap::cell(&text::Font8x8);
+        let (_, down) = text::Bitmap::cell(&text::Font8x8);
         assert!(
             tall >= (rows.len() as u32 + 4) * down,
             "rows are being cut: {tall}px for {} rows of {down}px",
             rows.len()
         );
         assert!(wide <= OPENS_AT.0 && tall <= OPENS_AT.1);
-        let _ = across;
     }
 
     #[test]
