@@ -696,6 +696,16 @@ fn draw_ladder(
     }
 }
 
+impl Canvas {
+    /// Whether the artwork this canvas is stamping would show at all.
+    ///
+    /// `None` when there is no artwork to ask about - no skin, or a size with
+    /// no area yet. `Some(false)` is the case worth reporting: a file that
+    /// parsed, rasterised, and covers no pixels, which empties the bars.
+    pub fn artwork_shows(&self) -> Option<bool> {
+        self.artwork.as_ref().map(|art| art.draws_anything())
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
