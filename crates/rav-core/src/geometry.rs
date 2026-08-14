@@ -204,6 +204,7 @@ impl BarLayout {
 /// Stacked and interleaved arrangements need nothing here: stacked is two
 /// panels, and interleaved is which column a band is given.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum Anchor {
     /// Grows upward from the bottom. What a spectrum analyser has always done.
     #[default]

@@ -116,6 +116,7 @@ impl Band {
 /// a cell grid has no room for a bar that leans, and half a lean is worse than
 /// none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum View {
     /// Straight on, which is what every surface has always drawn.
     #[default]

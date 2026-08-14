@@ -40,6 +40,7 @@
 
 /// How a skin covers a partial rung.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Shapes {
     /// One shape, clipped to the fill height.
     ///
