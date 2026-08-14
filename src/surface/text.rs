@@ -21,10 +21,15 @@ pub trait Bitmap {
     /// Cell size in pixels, the same for every glyph.
     fn cell(&self) -> (u32, u32);
 
-    /// One row per pixel of height. `None` for a character the font does not
-    /// carry, which is drawn as nothing rather than as a substitute - a box
-    /// glyph in the middle of a help panel reads as data corruption.
-    fn rows(&self, ch: char) -> Option<&[u8]>;
+    /// Write one row per pixel of height into `into`, and say whether the
+    /// font carries that character. A character it does not carry is drawn as
+    /// nothing rather than as a substitute - a box glyph in the middle of a
+    /// help panel reads as data corruption.
+    ///
+    /// A buffer rather than a borrow because the crates differ: `font8x8`
+    /// returns an owned `[u8; 8]` with nothing to borrow from, and a PSF-2
+    /// loader has a blob it would rather copy out of than hand out.
+    fn rows(&self, ch: char, into: &mut [u8]) -> bool;
 
     /// Which end of a row byte holds the leftmost pixel.
     ///
@@ -77,10 +82,16 @@ pub fn draw(
     paint.anti_alias = false;
 
     let leftmost = font.leftmost();
+    // On the stack, and big enough for any bitmap font worth using - 8 and 16
+    // are the usual heights. A taller one is cut to what fits rather than
+    // allocating per glyph on a path that runs every frame.
+    let mut glyph = [0u8; 32];
+    let height = (down as usize).min(glyph.len());
     let mut at = x;
     for ch in text.chars() {
-        if let Some(rows) = font.rows(ch) {
-            for (row, bits) in rows.iter().take(down as usize).enumerate() {
+        glyph[..height].fill(0);
+        if font.rows(ch, &mut glyph[..height]) {
+            for (row, bits) in glyph[..height].iter().enumerate() {
                 // A run at a time rather than a pixel at a time: a filled span
                 // is one rectangle, and a help panel is mostly horizontal
                 // strokes. `bits` is 8 wide, so this is at most four rects a
@@ -128,12 +139,15 @@ mod tests {
         fn cell(&self) -> (u32, u32) {
             (8, 4)
         }
-        fn rows(&self, ch: char) -> Option<&[u8]> {
-            match ch {
-                '#' => Some(&[0xff, 0xff, 0xff, 0xff]),
-                '|' => Some(&[0x80, 0x80, 0x80, 0x80]),
-                _ => None,
-            }
+        fn rows(&self, ch: char, into: &mut [u8]) -> bool {
+            let glyph: &[u8] = match ch {
+                '#' => &[0xff, 0xff, 0xff, 0xff],
+                '|' => &[0x80, 0x80, 0x80, 0x80],
+                _ => return false,
+            };
+            let n = into.len().min(glyph.len());
+            into[..n].copy_from_slice(&glyph[..n]);
+            true
         }
     }
 
@@ -215,8 +229,11 @@ mod tests {
             fn cell(&self) -> (u32, u32) {
                 (8, 1)
             }
-            fn rows(&self, _: char) -> Option<&[u8]> {
-                Some(&[0x01])
+            fn rows(&self, _: char, into: &mut [u8]) -> bool {
+                if let Some(first) = into.first_mut() {
+                    *first = 0x01;
+                }
+                true
             }
             fn leftmost(&self) -> Leftmost {
                 self.0
@@ -247,8 +264,9 @@ mod tests {
             fn cell(&self) -> (u32, u32) {
                 (8, 2)
             }
-            fn rows(&self, _: char) -> Option<&[u8]> {
-                Some(&[0xff, 0xff, 0xff, 0xff])
+            fn rows(&self, _: char, into: &mut [u8]) -> bool {
+                into.fill(0xff);
+                true
             }
         }
         let mut map = Pixmap::new(8, 8).unwrap();
@@ -342,12 +360,15 @@ mod panel_tests {
         fn cell(&self) -> (u32, u32) {
             (8, 4)
         }
-        fn rows(&self, ch: char) -> Option<&[u8]> {
-            match ch {
-                '#' => Some(&[0xff, 0xff, 0xff, 0xff]),
-                '|' => Some(&[0x80, 0x80, 0x80, 0x80]),
-                _ => None,
-            }
+        fn rows(&self, ch: char, into: &mut [u8]) -> bool {
+            let glyph: &[u8] = match ch {
+                '#' => &[0xff, 0xff, 0xff, 0xff],
+                '|' => &[0x80, 0x80, 0x80, 0x80],
+                _ => return false,
+            };
+            let n = into.len().min(glyph.len());
+            into[..n].copy_from_slice(&glyph[..n]);
+            true
         }
     }
 
@@ -445,8 +466,8 @@ mod panel_tests {
             fn cell(&self) -> (u32, u32) {
                 (0, 0)
             }
-            fn rows(&self, _: char) -> Option<&[u8]> {
-                None
+            fn rows(&self, _: char, _: &mut [u8]) -> bool {
+                false
             }
         }
         // A zero cell would divide by zero working out how many fit.
@@ -460,5 +481,85 @@ mod panel_tests {
             (white(), grey()),
         );
         assert!(!painted(&map, 0, 0));
+    }
+}
+
+/// The bitmap font rav ships with, behind the `font8x8` feature.
+///
+/// Public domain, `no_std`, and 8x8 - small for a fourteen-row panel but it
+/// carries no licence obligations into a project that has its own. Swapping it
+/// is one impl: nothing above this line knows which font it is drawing.
+#[cfg(feature = "gui")]
+pub struct Font8x8;
+
+#[cfg(feature = "gui")]
+impl Bitmap for Font8x8 {
+    fn cell(&self) -> (u32, u32) {
+        (8, 8)
+    }
+
+    fn rows(&self, ch: char, into: &mut [u8]) -> bool {
+        use font8x8::UnicodeFonts;
+        // BASIC covers ASCII, which is all the panel writes. The other tables
+        // are Greek, hiragana and box-drawing, and carrying them would be
+        // kilobytes of glyphs nothing asks for.
+        match font8x8::BASIC_FONTS.get(ch) {
+            Some(glyph) => {
+                let n = into.len().min(glyph.len());
+                into[..n].copy_from_slice(&glyph[..n]);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// font8x8 keeps the leftmost pixel in bit 0. Established by printing an
+    /// asymmetric glyph both ways - the crate does not say, and `A` reads
+    /// correctly whichever way it is read.
+    fn leftmost(&self) -> Leftmost {
+        Leftmost::LowBit
+    }
+}
+
+#[cfg(all(test, feature = "gui"))]
+mod shipped_font {
+    use super::*;
+
+    fn lit(map: &Pixmap, x: u32, y: u32) -> bool {
+        map.pixel(x, y).is_some_and(|p| p.alpha() > 0)
+    }
+
+    #[test]
+    fn an_l_has_its_stroke_on_the_left() {
+        // The whole point of asking the font which end its bits are at. `L` is
+        // the cheapest letter that can tell: a stem down the left and a foot
+        // along the bottom. Mirrored, the stem is on the right and every
+        // symmetric letter still looks perfect.
+        let mut map = Pixmap::new(8, 8).unwrap();
+        let white = Colour {
+            red: 0xff,
+            green: 0xff,
+            blue: 0xff,
+            alpha: 0xff,
+        };
+        draw(&mut map, &Font8x8, "L", (0, 0), white);
+
+        let left: u32 = (0..8).filter(|&y| lit(&map, 1, y)).count() as u32;
+        let right: u32 = (0..8).filter(|&y| lit(&map, 6, y)).count() as u32;
+        assert!(
+            left > right,
+            "the stem is on the right, so the font is mirrored: left {left}, right {right}"
+        );
+    }
+
+    #[test]
+    fn every_character_the_panel_writes_is_carried() {
+        // The panel's own vocabulary. A missing glyph draws a gap, which reads
+        // as a rendering fault rather than as a font that stops at ASCII.
+        let mut glyph = [0u8; 8];
+        for ch in " abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-+/:.,()".chars()
+        {
+            assert!(Font8x8.rows(ch, &mut glyph), "no glyph for {ch:?}");
+        }
     }
 }

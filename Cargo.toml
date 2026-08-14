@@ -149,8 +149,7 @@ font8x8 = { version = "0.3.1", default-features = false, features = ["unicode"],
 # dev shell carries them so a window opened from there has something to open
 # on, and that is the only place they belong.
 [features]
-gui = ["dep:winit", "dep:softbuffer"]
-font8x8 = ["dep:font8x8"]
+gui = ["dep:winit", "dep:softbuffer", "dep:font8x8"]
 
 [[bin]]
 name = "rav"
