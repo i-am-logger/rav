@@ -181,29 +181,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_config_directory_it_cannot_write_is_not_a_reason_to_stop() {
-        // First run on a read-only home, a full disk, or a locked-down
-        // container. Every value in the file is already the default, so
-        // refusing to start over it would be rav declining to draw for the
-        // sake of a convenience.
-        let locked = std::env::temp_dir().join(format!("rav-cfg-{}", std::process::id()));
-        std::fs::create_dir_all(&locked).unwrap();
-        let mut perms = std::fs::metadata(&locked).unwrap().permissions();
-        perms.set_readonly(true);
-        std::fs::set_permissions(&locked, perms).unwrap();
+    async fn a_config_it_cannot_write_is_not_a_reason_to_stop() {
+        // First run where the config cannot be created: a read-only home, a
+        // full disk, a locked-down container. Every value in the file is
+        // already the default, so refusing to start over it would be rav
+        // declining to draw for the sake of a convenience.
+        //
+        // A *file* where the directory should be, rather than a read-only
+        // directory: permissions are platform-dependent and root ignores them,
+        // so that version could pass without ever reaching the failure. This
+        // one makes `create_dir_all` fail on every platform and every user.
+        let blocked = std::env::temp_dir().join(format!("rav-cfg-{}", std::process::id()));
+        std::fs::write(&blocked, b"not a directory").unwrap();
 
-        let loaded = Config::from_dir(&locked).await;
+        let loaded = Config::from_dir(&blocked).await;
+        std::fs::remove_file(&blocked).ok();
 
-        let mut perms = std::fs::metadata(&locked).unwrap().permissions();
-        #[allow(clippy::permissions_set_readonly_false)]
-        perms.set_readonly(false);
-        std::fs::set_permissions(&locked, perms).ok();
-        std::fs::remove_dir_all(&locked).ok();
-
-        let config = loaded.expect("a directory it cannot write stopped rav starting");
+        let config = loaded.expect("a config it could not write stopped rav starting");
         assert_eq!(
             config.display.refresh_rate,
-            Config::default().display.refresh_rate
+            Config::default().display.refresh_rate,
         );
     }
 
