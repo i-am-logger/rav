@@ -369,33 +369,39 @@ impl Showing {
         }
         Ok(())
     }
+    /// Draw the help panel over the packed frame.
     ///
-    /// Into a `Pixmap` of its own and then composited, because `frame_pixels`
-    /// hands back bytes and the text drawing works on a surface. Only the
-    /// pixels the panel actually covered are copied, so the frame shows
-    /// everywhere it does not.
+    /// Onto a surface of its own and then composited, because `frame_pixels`
+    /// hands back bytes and the text drawing works on a `Pixmap`.
+    ///
+    /// That surface is the size of the **panel**, not the window. A
+    /// window-sized one would mean clearing and then scanning a few million
+    /// pixels every frame the panel is open, to find the few hundred thousand
+    /// it covers.
     fn draw_help(&mut self, across: u32, down: u32) {
         use crate::surface::text;
+
+        let rows = self.app.help_rows();
+        let Some((x, y, wide, tall)) =
+            text::help_area(&text::Font8x8, &rows, "rav", (across, down))
+        else {
+            return;
+        };
 
         let fits = self
             .overlay
             .as_ref()
-            .is_some_and(|had| had.width() == across && had.height() == down);
+            .is_some_and(|had| had.width() == wide && had.height() == tall);
         if !fits {
-            self.overlay = Pixmap::new(across, down);
+            self.overlay = Pixmap::new(wide, tall);
         }
         let Some(overlay) = &mut self.overlay else {
             return;
         };
-        // Transparent, so the composite below can tell what the panel covered
-        // from what it did not.
-        overlay.fill(tiny_skia::Color::TRANSPARENT);
 
-        let rows = self.app.help_rows();
-        let theme = self.app.overlay_colours();
-        text::help(overlay, &text::Font8x8, &rows, "rav", (across, down), theme);
-
-        over(&mut self.packed, overlay);
+        let colours = self.app.overlay_colours();
+        text::help(overlay, &text::Font8x8, &rows, "rav", colours);
+        over(&mut self.packed, across, overlay, (x, y));
     }
 }
 
@@ -430,22 +436,37 @@ pub fn show(app: App, audio: Receiver<AudioData>) -> Result<()> {
     }
 }
 
-/// Composite an overlay over a packed frame, in place.
+/// Composite an overlay onto a packed frame at `(x, y)`, in place.
 ///
-/// Only where the overlay has any alpha at all: everywhere else the frame
-/// shows, which is what makes this a panel over a picture rather than a new
-/// picture. Anything partly transparent is taken at full strength rather than
-/// blended - the panel is drawn opaque on purpose, and a half-transparent
-/// help row over moving bars is unreadable.
-fn over(packed: &mut [u32], overlay: &Pixmap) {
-    for (under, pixel) in packed.iter_mut().zip(overlay.pixels()) {
-        if pixel.alpha() == 0 {
-            continue;
+/// Touches only the rows and columns the overlay occupies - it is the panel,
+/// not a screenful - and within those, only pixels it actually painted. A
+/// transparent pixel leaves the frame showing, which is what makes this a panel
+/// over a picture rather than a second picture.
+///
+/// Anything partly transparent is taken at full strength rather than blended:
+/// the panel is drawn opaque on purpose, because a half-transparent help row
+/// over moving bars is unreadable.
+fn over(packed: &mut [u32], frame_width: u32, overlay: &Pixmap, (x, y): (u32, u32)) {
+    for row in 0..overlay.height() {
+        let start = ((y + row) * frame_width + x) as usize;
+        let Some(line) = packed.get_mut(start..start + overlay.width() as usize) else {
+            // The frame changed size between being packed and being covered.
+            // The next one is drawn at the new size, so this one is skipped
+            // rather than written past its end.
+            return;
+        };
+        for (column, under) in line.iter_mut().enumerate() {
+            let Some(pixel) = overlay.pixel(column as u32, row) else {
+                continue;
+            };
+            if pixel.alpha() == 0 {
+                continue;
+            }
+            let straight = pixel.demultiply();
+            *under = (u32::from(straight.red()) << 16)
+                | (u32::from(straight.green()) << 8)
+                | u32::from(straight.blue());
         }
-        let straight = pixel.demultiply();
-        *under = (u32::from(straight.red()) << 16)
-            | (u32::from(straight.green()) << 8)
-            | u32::from(straight.blue());
     }
 }
 
@@ -566,8 +587,10 @@ mod tests {
         // The whole of what makes this a panel over a picture: a transparent
         // pixel leaves the frame alone. Getting it backwards paints a black
         // rectangle over the bars and looks like the window stopped drawing.
-        let mut frame = vec![0x00ff_0000u32; 4];
-        let mut overlay = Pixmap::new(2, 2).unwrap();
+        // A 4x2 frame with a 2x1 panel dropped at (1, 1): the offset is half
+        // of what this checks, since a panel almost never sits at the origin.
+        let mut frame = vec![0x00ff_0000u32; 8];
+        let mut overlay = Pixmap::new(2, 1).unwrap();
         overlay.fill(tiny_skia::Color::TRANSPARENT);
         // One opaque white pixel, top left.
         let mut paint = tiny_skia::Paint::default();
@@ -580,10 +603,17 @@ mod tests {
             None,
         );
 
-        over(&mut frame, &overlay);
-        assert_eq!(frame[0], 0x00ff_ffff, "the painted pixel did not take");
-        assert_eq!(frame[1], 0x00ff_0000, "an untouched pixel was overwritten");
-        assert_eq!(frame[3], 0x00ff_0000, "an untouched pixel was overwritten");
+        over(&mut frame, 4, &overlay, (1, 1));
+        assert_eq!(
+            frame[5], 0x00ff_ffff,
+            "the painted pixel did not land at the offset"
+        );
+        assert_eq!(
+            frame[6], 0x00ff_0000,
+            "a transparent pixel overwrote the frame"
+        );
+        assert_eq!(frame[0], 0x00ff_0000, "it painted outside its rectangle");
+        assert_eq!(frame[1], 0x00ff_0000, "it painted above itself");
     }
 
     #[test]

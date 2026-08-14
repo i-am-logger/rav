@@ -22,7 +22,13 @@ pub trait Bitmap {
     fn cell(&self) -> (u32, u32);
 
     /// Write one row per pixel of height into `into`, and say whether the
-    /// font carries that character. A character it does not carry is drawn as
+    /// font carries that character.
+    ///
+    /// **One byte a row, so eight columns.** A cell wider than that is drawn
+    /// to eight and the rest is dropped, which is stated here rather than
+    /// discovered: a 16-wide font would render as its left half with nothing
+    /// to say so. Taller is fine - that is one byte per row, however many
+    /// rows there are. A character it does not carry is drawn as
     /// nothing rather than as a substitute - a box glyph in the middle of a
     /// help panel reads as data corruption.
     ///
@@ -77,6 +83,10 @@ pub fn draw(
     colour: Colour,
 ) -> u32 {
     let (across, down) = font.cell();
+    // Eight columns is what a row byte holds - `Bitmap::rows` says so. The
+    // *advance* is still the full cell, or a wider font would overlap itself
+    // as well as losing its right-hand columns.
+    let columns = across.min(8);
     let mut paint = Paint::default();
     paint.set_color_rgba8(colour.red, colour.green, colour.blue, colour.alpha);
     paint.anti_alias = false;
@@ -97,13 +107,13 @@ pub fn draw(
                 // strokes. `bits` is 8 wide, so this is at most four rects a
                 // row instead of eight.
                 let mut col = 0u32;
-                while col < across.min(8) {
+                while col < columns {
                     if bits & leftmost.mask(col) == 0 {
                         col += 1;
                         continue;
                     }
                     let start = col;
-                    while col < across.min(8) && bits & leftmost.mask(col) != 0 {
+                    while col < columns && bits & leftmost.mask(col) != 0 {
                         col += 1;
                     }
                     if let Some(run) = Rect::from_xywh(
@@ -284,29 +294,53 @@ mod tests {
 /// panel disagrees with a terminal's about which rows fit.
 ///
 /// `screen` is in pixels; the cell comes from the font.
+pub fn help_area(
+    font: &dyn Bitmap,
+    rows: &[crate::ui::help::HelpRow<'_>],
+    title: &str,
+    (screen_across, screen_down): (u32, u32),
+) -> Option<(u32, u32, u32, u32)> {
+    let (across, down) = font.cell();
+    if across == 0 || down == 0 {
+        return None;
+    }
+    // Saturating, not truncating. `as u16` on a window wide enough to hold more
+    // than 65535 cells wraps to a small number and quietly draws a panel a few
+    // characters wide - which needs a very large screen and a very small font,
+    // and is silent when it happens.
+    let cells = |pixels: u32, cell: u32| (pixels / cell).min(u32::from(u16::MAX)) as u16;
+    let at = crate::ui::help::Help { rows, title }.panel(ratatui::layout::Rect {
+        x: 0,
+        y: 0,
+        width: cells(screen_across, across),
+        height: cells(screen_down, down),
+    });
+    if at.width == 0 || at.height == 0 {
+        return None;
+    }
+    Some((
+        u32::from(at.x) * across,
+        u32::from(at.y) * down,
+        u32::from(at.width) * across,
+        u32::from(at.height) * down,
+    ))
+}
+
+/// Draw the panel, filling `onto`.
+///
+/// `onto` is the panel and nothing else - [`help_area`] says how big to make it
+/// and where it goes. A surface the size of the window would mean clearing and
+/// scanning every pixel of it each frame the panel is open, for a panel that
+/// covers a fraction of one.
 pub fn help(
     onto: &mut Pixmap,
     font: &dyn Bitmap,
     rows: &[crate::ui::help::HelpRow<'_>],
     title: &str,
-    (screen_across, screen_down): (u32, u32),
     (ink, background): (Colour, Colour),
 ) {
     let (across, down) = font.cell();
     if across == 0 || down == 0 {
-        return;
-    }
-    let panel = crate::ui::help::Help { rows, title };
-    // The terminal's own sizing, asked in cells: how many of them fit across
-    // and down this window at the font's size.
-    let area = ratatui::layout::Rect {
-        x: 0,
-        y: 0,
-        width: (screen_across / across) as u16,
-        height: (screen_down / down) as u16,
-    };
-    let at = panel.panel(area);
-    if at.width == 0 || at.height == 0 {
         return;
     }
 
@@ -318,29 +352,22 @@ pub fn help(
         background.alpha,
     );
     paint.anti_alias = false;
-    if let Some(behind) = Rect::from_xywh(
-        (u32::from(at.x) * across) as f32,
-        (u32::from(at.y) * down) as f32,
-        (u32::from(at.width) * across) as f32,
-        (u32::from(at.height) * down) as f32,
-    ) {
+    if let Some(behind) = Rect::from_xywh(0.0, 0.0, onto.width() as f32, onto.height() as f32) {
         onto.fill_rect(behind, &paint, Transform::identity(), None);
     }
 
-    let left = u32::from(at.x) * across;
-    let top = u32::from(at.y) * down;
-    draw(onto, font, title, (left + across * 2, top + down), ink);
+    draw(onto, font, title, (across * 2, down), ink);
 
     // Two cells in from the border and one line below the title, which is what
     // the terminal panel does - the two are meant to be the same panel.
-    let key_width = panel.key_width() as u32;
+    let key_width = crate::ui::help::Help { rows, title }.key_width() as u32;
     for (line, row) in rows.iter().enumerate() {
-        let y = top + down * (line as u32 + 3);
-        if y + down > top + u32::from(at.height) * down {
+        let y = down * (line as u32 + 3);
+        if y + down > onto.height() {
             break;
         }
-        draw(onto, font, row.key, (left + across * 2, y), ink);
-        let description = left + across * (2 + key_width + 2);
+        draw(onto, font, row.key, (across * 2, y), ink);
+        let description = across * (2 + key_width + 2);
         let after = draw(onto, font, row.description, (description, y), ink);
         if let Some(value) = &row.value {
             draw(onto, font, value, (after + across, y), ink);
@@ -353,8 +380,6 @@ mod panel_tests {
     use super::*;
     use crate::ui::help::HelpRow;
 
-    /// The same two-glyph font the tests above use, declared again rather than
-    /// reached for across module walls.
     struct Probe;
     impl Bitmap for Probe {
         fn cell(&self) -> (u32, u32) {
@@ -390,10 +415,6 @@ mod panel_tests {
         }
     }
 
-    fn painted(map: &Pixmap, x: u32, y: u32) -> bool {
-        map.pixel(x, y).is_some_and(|p| p.alpha() > 0)
-    }
-
     fn rows() -> Vec<HelpRow<'static>> {
         vec![
             HelpRow {
@@ -410,53 +431,22 @@ mod panel_tests {
     }
 
     #[test]
-    fn the_panel_stays_inside_its_own_box() {
-        let mut map = Pixmap::new(240, 120).unwrap();
-        help(
-            &mut map,
-            &Probe,
-            &rows(),
-            "##",
-            (240, 120),
-            (white(), grey()),
+    fn the_panel_sits_on_whole_cells_and_inside_the_screen() {
+        let (x, y, wide, tall) = help_area(&Probe, &rows(), "##", (240, 120)).unwrap();
+        assert_eq!((x % 8, y % 4), (0, 0), "not on a cell boundary");
+        assert!(
+            x + wide <= 240 && y + tall <= 120,
+            "it hangs off the screen"
         );
-
-        // Something was drawn, and nothing outside the panel the layout chose.
-        let panel = crate::ui::help::Help {
-            rows: &rows(),
-            title: "##",
-        }
-        .panel(ratatui::layout::Rect {
-            x: 0,
-            y: 0,
-            width: 240 / 8,
-            height: 120 / 4,
-        });
-        let (x0, y0) = (u32::from(panel.x) * 8, u32::from(panel.y) * 4);
-        let (x1, y1) = (
-            x0 + u32::from(panel.width) * 8,
-            y0 + u32::from(panel.height) * 4,
-        );
-
-        assert!(painted(&map, x0, y0), "the panel background is not there");
-        if x0 > 0 {
-            assert!(!painted(&map, x0 - 1, y0), "it painted left of itself");
-        }
-        if y0 > 0 {
-            assert!(!painted(&map, x0, y0 - 1), "it painted above itself");
-        }
-        assert!(!painted(&map, x1, y0), "it painted right of itself");
-        assert!(!painted(&map, x0, y1), "it painted below itself");
+        assert!(wide > 0 && tall > 0);
     }
 
     #[test]
-    fn a_window_too_small_draws_nothing_rather_than_a_ruin() {
+    fn a_window_too_small_has_nowhere_to_put_one() {
         // Fewer pixels than one cell. The terminal panel shrinks to fit; here
         // there is nothing to shrink into, and half a border is worse than no
         // panel.
-        let mut map = Pixmap::new(4, 2).unwrap();
-        help(&mut map, &Probe, &rows(), "##", (4, 2), (white(), grey()));
-        assert!(!painted(&map, 0, 0), "it drew into a window with no room");
+        assert_eq!(help_area(&Probe, &rows(), "##", (4, 2)), None);
     }
 
     #[test]
@@ -471,16 +461,23 @@ mod panel_tests {
             }
         }
         // A zero cell would divide by zero working out how many fit.
-        let mut map = Pixmap::new(64, 64).unwrap();
-        help(
-            &mut map,
-            &Nothing,
-            &rows(),
-            "x",
-            (64, 64),
-            (white(), grey()),
-        );
-        assert!(!painted(&map, 0, 0));
+        assert_eq!(help_area(&Nothing, &rows(), "x", (64, 64)), None);
+    }
+
+    #[test]
+    fn the_panel_fills_the_surface_it_is_given() {
+        // Every pixel of it, so the composite below has a solid rectangle to
+        // put down rather than a background showing through the gaps.
+        let (_, _, wide, tall) = help_area(&Probe, &rows(), "##", (240, 120)).unwrap();
+        let mut map = Pixmap::new(wide, tall).unwrap();
+        help(&mut map, &Probe, &rows(), "##", (white(), grey()));
+
+        for (x, y) in [(0, 0), (wide - 1, 0), (0, tall - 1), (wide - 1, tall - 1)] {
+            assert!(
+                map.pixel(x, y).is_some_and(|p| p.alpha() == 0xff),
+                "corner {x},{y} is not opaque"
+            );
+        }
     }
 }
 
@@ -561,5 +558,46 @@ mod shipped_font {
         {
             assert!(Font8x8.rows(ch, &mut glyph), "no glyph for {ch:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod wide_cells {
+    use super::*;
+
+    /// Ten pixels wide, which is wider than a row byte can describe.
+    struct Wide;
+    impl Bitmap for Wide {
+        fn cell(&self) -> (u32, u32) {
+            (10, 1)
+        }
+        fn rows(&self, _: char, into: &mut [u8]) -> bool {
+            into.fill(0xff);
+            true
+        }
+    }
+
+    #[test]
+    fn a_cell_wider_than_a_row_byte_still_advances_by_the_cell() {
+        // The eight columns a byte holds are drawn and the rest are not - which
+        // is stated on `Bitmap::rows`. What must not happen is the *advance*
+        // shrinking with them, which would overlap every glyph with the last.
+        let mut map = Pixmap::new(20, 1).unwrap();
+        let white = Colour {
+            red: 0xff,
+            green: 0xff,
+            blue: 0xff,
+            alpha: 0xff,
+        };
+        let end = draw(&mut map, &Wide, "xx", (0, 0), white);
+
+        assert_eq!(
+            end, 20,
+            "the advance followed the clamp instead of the cell"
+        );
+        let lit = |x: u32| map.pixel(x, 0).is_some_and(|p| p.alpha() > 0);
+        assert!(lit(7), "the eighth column of the first glyph");
+        assert!(!lit(8), "a ninth column a row byte cannot describe");
+        assert!(lit(10), "the second glyph started a whole cell along");
     }
 }
