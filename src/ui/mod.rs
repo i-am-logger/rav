@@ -2356,6 +2356,45 @@ mod tests {
     }
 
     #[test]
+    fn the_glyph_renderer_survives_a_terminal_of_any_size() {
+        // The fallback path is what a terminal that cannot draw images gets,
+        // and the sizes that break a renderer are the ones nobody opens a
+        // terminal at. Indexing a ramp by row, dividing a width by a slot and
+        // subtracting one from a length all bite here rather than at 80x24.
+        for (width, height) in [
+            (1, 1),
+            (1, 24),
+            (80, 1),
+            (2, 2),
+            (3, 40),
+            (200, 3),
+            (17, 17),
+        ] {
+            let mut a = app();
+            a.resize(width, height);
+            let bands: Vec<f32> = (0..a.bands.len().max(1))
+                .map(|i| 0.3 + (i % 5) as f32 / 8.0)
+                .collect();
+            a.ballistics.step(&bands, 1.0 / 60.0);
+
+            let analyzer = Analyzer {
+                bars: a.ballistics.bars(),
+                peaks: a.ballistics.peaks(),
+                row_colors: &a.row_colors,
+                cap_color: a.theme.peak,
+                grid: a.show_grid.then_some(a.grid_colors.as_slice()),
+                bar_style: a.bar_style,
+                layout: a.layout,
+                peaks_style: a.peaks,
+            };
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|f| f.render_widget(analyzer, f.area()))
+                .unwrap_or_else(|why| panic!("{width}x{height} would not draw: {why}"));
+        }
+    }
+
+    #[test]
     fn every_key_that_should_change_the_picture_changes_it() {
         // A key wired to a field nothing reads is a key that does nothing, and
         // the help overlay would still cheerfully report its new value. So each
