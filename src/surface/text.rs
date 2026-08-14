@@ -195,3 +195,208 @@ mod tests {
         assert!(!lit(&map, 0, 2), "past the declared height");
     }
 }
+
+/// Draw the help panel into a frame.
+///
+/// The layout is the terminal's - [`Help::panel`] decides where it sits and how
+/// big it is, in cells, and this multiplies by the font's cell to reach pixels.
+/// Two implementations of "how wide is the key column" would be a window whose
+/// panel disagrees with a terminal's about which rows fit.
+///
+/// `screen` is in pixels; the cell comes from the font.
+pub fn help(
+    onto: &mut Pixmap,
+    font: &dyn Bitmap,
+    rows: &[crate::ui::help::HelpRow<'_>],
+    title: &str,
+    (screen_across, screen_down): (u32, u32),
+    (ink, background): (Colour, Colour),
+) {
+    let (across, down) = font.cell();
+    if across == 0 || down == 0 {
+        return;
+    }
+    let panel = crate::ui::help::Help { rows, title };
+    // The terminal's own sizing, asked in cells: how many of them fit across
+    // and down this window at the font's size.
+    let area = ratatui::layout::Rect {
+        x: 0,
+        y: 0,
+        width: (screen_across / across) as u16,
+        height: (screen_down / down) as u16,
+    };
+    let at = panel.panel(area);
+    if at.width == 0 || at.height == 0 {
+        return;
+    }
+
+    let mut paint = Paint::default();
+    paint.set_color_rgba8(
+        background.red,
+        background.green,
+        background.blue,
+        background.alpha,
+    );
+    paint.anti_alias = false;
+    if let Some(behind) = Rect::from_xywh(
+        (u32::from(at.x) * across) as f32,
+        (u32::from(at.y) * down) as f32,
+        (u32::from(at.width) * across) as f32,
+        (u32::from(at.height) * down) as f32,
+    ) {
+        onto.fill_rect(behind, &paint, Transform::identity(), None);
+    }
+
+    let left = u32::from(at.x) * across;
+    let top = u32::from(at.y) * down;
+    draw(onto, font, title, (left + across * 2, top + down), ink);
+
+    // Two cells in from the border and one line below the title, which is what
+    // the terminal panel does - the two are meant to be the same panel.
+    let key_width = panel.key_width() as u32;
+    for (line, row) in rows.iter().enumerate() {
+        let y = top + down * (line as u32 + 3);
+        if y + down > top + u32::from(at.height) * down {
+            break;
+        }
+        draw(onto, font, row.key, (left + across * 2, y), ink);
+        let description = left + across * (2 + key_width + 2);
+        let after = draw(onto, font, row.description, (description, y), ink);
+        if let Some(value) = &row.value {
+            draw(onto, font, value, (after + across, y), ink);
+        }
+    }
+}
+
+#[cfg(test)]
+mod panel_tests {
+    use super::*;
+    use crate::ui::help::HelpRow;
+
+    /// The same two-glyph font the tests above use, declared again rather than
+    /// reached for across module walls.
+    struct Probe;
+    impl Bitmap for Probe {
+        fn cell(&self) -> (u32, u32) {
+            (8, 4)
+        }
+        fn rows(&self, ch: char) -> Option<&[u8]> {
+            match ch {
+                '#' => Some(&[0xff, 0xff, 0xff, 0xff]),
+                '|' => Some(&[0x80, 0x80, 0x80, 0x80]),
+                _ => None,
+            }
+        }
+    }
+
+    fn white() -> Colour {
+        Colour {
+            red: 0xff,
+            green: 0xff,
+            blue: 0xff,
+            alpha: 0xff,
+        }
+    }
+
+    fn grey() -> Colour {
+        Colour {
+            red: 0x20,
+            green: 0x20,
+            blue: 0x20,
+            alpha: 0xff,
+        }
+    }
+
+    fn painted(map: &Pixmap, x: u32, y: u32) -> bool {
+        map.pixel(x, y).is_some_and(|p| p.alpha() > 0)
+    }
+
+    fn rows() -> Vec<HelpRow<'static>> {
+        vec![
+            HelpRow {
+                key: "#",
+                description: "##",
+                value: Some("#".to_string()),
+            },
+            HelpRow {
+                key: "|",
+                description: "##",
+                value: None,
+            },
+        ]
+    }
+
+    #[test]
+    fn the_panel_stays_inside_its_own_box() {
+        let mut map = Pixmap::new(240, 120).unwrap();
+        help(
+            &mut map,
+            &Probe,
+            &rows(),
+            "##",
+            (240, 120),
+            (white(), grey()),
+        );
+
+        // Something was drawn, and nothing outside the panel the layout chose.
+        let panel = crate::ui::help::Help {
+            rows: &rows(),
+            title: "##",
+        }
+        .panel(ratatui::layout::Rect {
+            x: 0,
+            y: 0,
+            width: 240 / 8,
+            height: 120 / 4,
+        });
+        let (x0, y0) = (u32::from(panel.x) * 8, u32::from(panel.y) * 4);
+        let (x1, y1) = (
+            x0 + u32::from(panel.width) * 8,
+            y0 + u32::from(panel.height) * 4,
+        );
+
+        assert!(painted(&map, x0, y0), "the panel background is not there");
+        if x0 > 0 {
+            assert!(!painted(&map, x0 - 1, y0), "it painted left of itself");
+        }
+        if y0 > 0 {
+            assert!(!painted(&map, x0, y0 - 1), "it painted above itself");
+        }
+        assert!(!painted(&map, x1, y0), "it painted right of itself");
+        assert!(!painted(&map, x0, y1), "it painted below itself");
+    }
+
+    #[test]
+    fn a_window_too_small_draws_nothing_rather_than_a_ruin() {
+        // Fewer pixels than one cell. The terminal panel shrinks to fit; here
+        // there is nothing to shrink into, and half a border is worse than no
+        // panel.
+        let mut map = Pixmap::new(4, 2).unwrap();
+        help(&mut map, &Probe, &rows(), "##", (4, 2), (white(), grey()));
+        assert!(!painted(&map, 0, 0), "it drew into a window with no room");
+    }
+
+    #[test]
+    fn a_font_with_no_size_is_declined() {
+        struct Nothing;
+        impl Bitmap for Nothing {
+            fn cell(&self) -> (u32, u32) {
+                (0, 0)
+            }
+            fn rows(&self, _: char) -> Option<&[u8]> {
+                None
+            }
+        }
+        // A zero cell would divide by zero working out how many fit.
+        let mut map = Pixmap::new(64, 64).unwrap();
+        help(
+            &mut map,
+            &Nothing,
+            &rows(),
+            "x",
+            (64, 64),
+            (white(), grey()),
+        );
+        assert!(!painted(&map, 0, 0));
+    }
+}
