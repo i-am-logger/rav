@@ -61,16 +61,32 @@ impl Config {
         let Some(config_dir) = dirs::config_dir() else {
             return Ok(Self::default());
         };
+        Self::from_dir(&config_dir).await
+    }
 
+    /// The same, against a named config directory.
+    ///
+    /// Split out so the first-run path can be tested: `dirs::config_dir()` is
+    /// whatever the machine says and cannot be pointed somewhere on macOS.
+    async fn from_dir(config_dir: &Path) -> Result<Self> {
         let default_path = config_dir.join("rav").join("config.toml");
         if default_path.exists() {
-            Self::read(&default_path).await
-        } else {
-            // Write the defaults out, so the file exists to be edited.
-            let config = Self::default();
-            config.save_to_default_location().await?;
-            Ok(config)
+            return Self::read(&default_path).await;
         }
+
+        // Write the defaults out, so the file exists to be edited - and carry
+        // on if that fails. A read-only home, a full disk or a locked-down
+        // container is a reason not to have the file, not a reason to refuse
+        // to draw: every value in it is already the default. Refusing here
+        // would be rav declining to start over a convenience.
+        let config = Self::default();
+        if let Err(why) = config.save_to(config_dir).await {
+            tracing::warn!(
+                "cannot write {} ({why:#}); running with the defaults",
+                default_path.display()
+            );
+        }
+        Ok(config)
     }
 
     /// Read one config file, naming it in whatever goes wrong. "No such file or
@@ -84,14 +100,24 @@ impl Config {
     }
 
     pub async fn save_to_default_location(&self) -> Result<()> {
-        if let Some(config_dir) = dirs::config_dir() {
-            let config_path = config_dir.join("rav");
-            tokio::fs::create_dir_all(&config_path).await?;
+        let Some(config_dir) = dirs::config_dir() else {
+            return Ok(());
+        };
+        self.save_to(&config_dir).await
+    }
 
-            let config_file = config_path.join("config.toml");
-            let content = toml::to_string_pretty(self)?;
-            tokio::fs::write(config_file, content).await?;
-        }
+    /// Write the config under a named directory.
+    async fn save_to(&self, config_dir: &Path) -> Result<()> {
+        let config_path = config_dir.join("rav");
+        tokio::fs::create_dir_all(&config_path)
+            .await
+            .with_context(|| format!("creating {}", config_path.display()))?;
+
+        let config_file = config_path.join("config.toml");
+        let content = toml::to_string_pretty(self)?;
+        tokio::fs::write(&config_file, content)
+            .await
+            .with_context(|| format!("writing {}", config_file.display()))?;
         Ok(())
     }
 }
@@ -152,6 +178,33 @@ mod tests {
         // Defaults fill in what is absent, not what is wrong. A number written
         // as a word is a mistake worth being told about.
         assert!(toml::from_str::<Config>("[audio]\nsample_rate = \"loud\"\n").is_err());
+    }
+
+    #[tokio::test]
+    async fn a_config_directory_it_cannot_write_is_not_a_reason_to_stop() {
+        // First run on a read-only home, a full disk, or a locked-down
+        // container. Every value in the file is already the default, so
+        // refusing to start over it would be rav declining to draw for the
+        // sake of a convenience.
+        let locked = std::env::temp_dir().join(format!("rav-cfg-{}", std::process::id()));
+        std::fs::create_dir_all(&locked).unwrap();
+        let mut perms = std::fs::metadata(&locked).unwrap().permissions();
+        perms.set_readonly(true);
+        std::fs::set_permissions(&locked, perms).unwrap();
+
+        let loaded = Config::from_dir(&locked).await;
+
+        let mut perms = std::fs::metadata(&locked).unwrap().permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        perms.set_readonly(false);
+        std::fs::set_permissions(&locked, perms).ok();
+        std::fs::remove_dir_all(&locked).ok();
+
+        let config = loaded.expect("a directory it cannot write stopped rav starting");
+        assert_eq!(
+            config.display.refresh_rate,
+            Config::default().display.refresh_rate
+        );
     }
 
     #[test]
