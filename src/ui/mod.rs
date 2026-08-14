@@ -498,6 +498,38 @@ impl App {
             .or_else(|| self.active_status().map(str::to_string))
     }
 
+    /// Ink and background for an overlay, as the terminal draws one.
+    ///
+    /// The same pair the status line uses there: near-white on the theme's
+    /// darkest grid stop, so a window and a terminal show the same panel in
+    /// the same colours rather than each picking its own.
+    ///
+    /// A named colour the terminal never answered for resolves to the
+    /// theme's own fallback, which is what `Colour::from` does - a window has
+    /// no palette to ask.
+    #[cfg(feature = "gui")]
+    pub(crate) fn overlay_colours(
+        &self,
+    ) -> (rav_appearance::ink::Colour, rav_appearance::ink::Colour) {
+        use rav_appearance::ink::Colour;
+        let ink = Colour {
+            red: 222,
+            green: 222,
+            blue: 222,
+            alpha: 255,
+        };
+        (ink, self.palette.resolve(self.theme.grid[0]))
+    }
+
+    /// Whether the help panel is up.
+    ///
+    /// A surface that draws its own overlay has to ask; `App::run` reads the
+    /// field where it stands.
+    #[cfg(feature = "gui")]
+    pub(crate) fn showing_help(&self) -> bool {
+        self.show_help
+    }
+
     /// Whether a key has asked rav to stop.
     ///
     /// A surface that drives its own loop needs to ask, where `App::run`
@@ -982,7 +1014,7 @@ impl App {
 
     /// The help rows, each carrying its current value so the overlay doubles as
     /// a settings readout.
-    fn help_rows(&self) -> Vec<HelpRow<'static>> {
+    pub(crate) fn help_rows(&self) -> Vec<HelpRow<'static>> {
         let limit = match FREQUENCY_LIMITS[self.limit_index] {
             Some(hz) => format!("up to {} kHz", hz / 1000),
             None => "full range".to_string(),
