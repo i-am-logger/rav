@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-beta.13](https://github.com/i-am-logger/rav/compare/rav-v1.0.0-beta.12...rav-v1.0.0-beta.13) - 2026-08-14
+
+### Added
+
+- h draws the help panel in a window ([#154](https://github.com/i-am-logger/rav/pull/154))
+- a window of rav's own ([#143](https://github.com/i-am-logger/rav/pull/143))
+- a skin you drew yourself ([#134](https://github.com/i-am-logger/rav/pull/134))
+- a skin can be a drawing ([#131](https://github.com/i-am-logger/rav/pull/131))
+- the field can sway, which is the last line of #68 ([#130](https://github.com/i-am-logger/rav/pull/130))
+- a terminal that can draw images gets pixels ([#120](https://github.com/i-am-logger/rav/pull/120))
+
+### Documentation
+
+- which crate actually holds the MSRV ([#152](https://github.com/i-am-logger/rav/pull/152))
+- where a theme actually goes on macOS ([#149](https://github.com/i-am-logger/rav/pull/149))
+- devenv test runs more than the four commands beside it ([#148](https://github.com/i-am-logger/rav/pull/148))
+- the window is in this release, not in what's next ([#147](https://github.com/i-am-logger/rav/pull/147))
+- *(audio)* what the realtime callback promises, and why it holds ([#146](https://github.com/i-am-logger/rav/pull/146))
+- how to draw a skin ([#136](https://github.com/i-am-logger/rav/pull/136))
+- *(audio)* what flume actually does on the callback, having read it ([#132](https://github.com/i-am-logger/rav/pull/132))
+- the demo tour shows what rav does now, and says where to film it ([#129](https://github.com/i-am-logger/rav/pull/129))
+- *(audio)* say what governs this module, at the top of it ([#128](https://github.com/i-am-logger/rav/pull/128))
+- three claims the release stopped being true ([#125](https://github.com/i-am-logger/rav/pull/125))
+
+### Fixed
+
+- a config rav cannot write is not a reason not to start ([#156](https://github.com/i-am-logger/rav/pull/156))
+- the panel says when a drawing covers nothing ([#155](https://github.com/i-am-logger/rav/pull/155))
+- those Linux libraries are for running a window, not building one ([#151](https://github.com/i-am-logger/rav/pull/151))
+- rav does not abort when it cannot write its log ([#145](https://github.com/i-am-logger/rav/pull/145))
+- the log says which run wrote a line ([#144](https://github.com/i-am-logger/rav/pull/144))
+- an FFT size that cannot be a power of two is refused ([#142](https://github.com/i-am-logger/rav/pull/142))
+- the demo tour walks every angle and comes back ([#140](https://github.com/i-am-logger/rav/pull/140))
+- a skin that will not parse stops the run ([#139](https://github.com/i-am-logger/rav/pull/139))
+- the crate ships the skin the binary embeds ([#137](https://github.com/i-am-logger/rav/pull/137))
+- the panel says when a drawn style is not being drawn ([#135](https://github.com/i-am-logger/rav/pull/135))
+- Ctrl-C quits, because nothing else was going to ([#123](https://github.com/i-am-logger/rav/pull/123))
+- *(audio)* nothing allocates or locks on the capture thread ([#122](https://github.com/i-am-logger/rav/pull/122))
+
 ## [1.0.0-beta.12](https://github.com/i-am-logger/rav/compare/rav-v1.0.0-beta.11...rav-v1.0.0-beta.12) - 2026-08-13
 
 ### Added
