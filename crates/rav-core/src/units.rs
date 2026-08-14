@@ -223,6 +223,7 @@ impl Step {
 /// A bar in a terminal is this - three whole rows lit and the fourth five
 /// eighths full - without the core ever knowing what an eighth looks like.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Fill {
     /// Rungs completely filled.
     pub whole: usize,
@@ -231,6 +232,16 @@ pub struct Fill {
 }
 
 impl Fill {
+    /// A fill of that many whole rungs and that much of the one above.
+    ///
+    /// Here because the type is `#[non_exhaustive]`, which stops a struct
+    /// literal outside this crate - and `Fill` derives `Eq`, so a caller
+    /// comparing what it measured against what it expected needs a way to
+    /// write the expectation down.
+    pub fn new(whole: usize, part: Step) -> Self {
+        Self { whole, part }
+    }
+
     /// Whether the rung above the whole ones carries anything at all.
     pub fn has_part(self) -> bool {
         !self.part.is_first()
@@ -542,6 +553,17 @@ impl Frames {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_fill_can_be_written_down_as_well_as_measured() {
+        // `Fill` is `#[non_exhaustive]`, so a struct literal is gone from
+        // outside this crate - and it derives `Eq`, which is only useful to
+        // somebody who can write the value they expected.
+        let two_and_a_bit = Fill::new(2, Step::new(3, 8));
+        assert_eq!(two_and_a_bit.whole, 2);
+        assert!(two_and_a_bit.has_part());
+        assert!(!Fill::new(0, Step::new(0, 8)).has_part());
+    }
 
     #[test]
     fn a_level_is_always_in_range() {

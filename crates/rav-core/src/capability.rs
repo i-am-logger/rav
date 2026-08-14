@@ -84,6 +84,7 @@ impl Capabilities {
 
 /// What a visualisation needs before it can say anything useful.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Requirements {
     pub columns: usize,
     pub rungs: usize,
