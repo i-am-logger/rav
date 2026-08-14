@@ -562,7 +562,7 @@ mod tests {
         let two_and_a_bit = Fill::new(2, Step::new(3, 8));
         assert_eq!(two_and_a_bit.whole, 2);
         assert!(two_and_a_bit.has_part());
-        assert_eq!(Fill::new(0, Step::new(0, 8)).has_part(), false);
+        assert!(!Fill::new(0, Step::new(0, 8)).has_part());
     }
 
     #[test]
