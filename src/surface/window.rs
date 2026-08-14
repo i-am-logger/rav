@@ -617,6 +617,36 @@ mod tests {
     }
 
     #[test]
+    fn the_panel_fits_the_window_rav_opens_at() {
+        // Three things have to agree: the size a window opens at, the font's
+        // cell, and how many rows the panel has. `Help::panel` clamps to the
+        // area and `text::help` stops at the bottom edge, so a row that does
+        // not fit is not reported - it is simply not drawn.
+        //
+        // Twenty rows against the fourteen the panel has today, so this fails
+        // while there is still room to fix it rather than on the row that
+        // first disappears.
+        use crate::surface::text;
+        let rows: Vec<crate::ui::help::HelpRow<'static>> = (0..20)
+            .map(|_| crate::ui::help::HelpRow {
+                key: "up/down",
+                description: "grid behind the bars",
+                value: Some("up to 16 kHz".to_string()),
+            })
+            .collect();
+
+        let (_, _, wide, tall) = text::help_area(&text::Font8x8, &rows, "rav", OPENS_AT)
+            .expect("no room for a panel at the size a window opens at");
+        let (_, down) = text::Bitmap::cell(&text::Font8x8);
+        assert!(
+            tall >= (rows.len() as u32 + 4) * down,
+            "rows are being cut: {tall}px for {} rows of {down}px",
+            rows.len()
+        );
+        assert!(wide <= OPENS_AT.0 && tall <= OPENS_AT.1);
+    }
+
+    #[test]
     fn the_title_carries_what_rav_has_to_say() {
         // With nothing to say it is just the name - not "rav - " with an empty
         // tail, which reads as a window that lost something.
