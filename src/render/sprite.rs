@@ -147,6 +147,22 @@ impl Sprite {
     }
 }
 
+impl Sprite {
+    /// Whether any of this drawing would put ink on the screen.
+    ///
+    /// An SVG can parse perfectly and rasterise to nothing - empty, or drawn
+    /// entirely outside its own `viewBox`. The bars are then filled through a
+    /// mask with no coverage and vanish, which reads as rav having broken
+    /// rather than as the file being wrong.
+    ///
+    /// Asked of the rasterised sprite rather than of the file, because that is
+    /// the only place the answer exists: coverage depends on the rung size, and
+    /// artwork too thin to show at one size shows at another.
+    pub fn draws_anything(&self) -> bool {
+        self.art.pixels().iter().any(|pixel| pixel.alpha() > 0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,5 +240,31 @@ mod tests {
         let sprite = Sprite::drawn(SLAB, 30, 60).unwrap();
         assert!(sprite.fits(30, 60));
         assert!(!sprite.fits(30, 61), "a resize has to redraw it");
+    }
+}
+
+#[cfg(test)]
+mod coverage {
+    use super::*;
+
+    const REAL: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" preserveAspectRatio="none"><rect width="10" height="10" fill="#fff"/></svg>"##;
+    const EMPTY: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"></svg>"##;
+    const OUTSIDE: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect x="500" y="500" width="10" height="10" fill="#fff"/></svg>"##;
+
+    #[test]
+    fn a_drawing_that_covers_nothing_says_so() {
+        // Both of these parse. Neither puts a pixel down, and a bar filled
+        // through them disappears - which is why the panel has to be able to
+        // ask rather than assuming a parsed file draws.
+        for (name, svg) in [("empty", EMPTY), ("outside its viewBox", OUTSIDE)] {
+            let sprite = Sprite::drawn(svg, 30, 60).expect("it parses");
+            assert!(
+                !sprite.draws_anything(),
+                "{name} reported coverage it does not have"
+            );
+        }
+
+        let real = Sprite::drawn(REAL, 30, 60).expect("it parses");
+        assert!(real.draws_anything(), "a solid rung reported no coverage");
     }
 }

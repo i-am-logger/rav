@@ -837,6 +837,20 @@ impl App {
             Some("needs pixels")
         } else if self.view != View::Flat {
             Some("needs a flat view")
+        } else if self
+            .canvas
+            .as_ref()
+            .and_then(crate::render::Canvas::artwork_shows)
+            == Some(false)
+        {
+            // A file that parsed, rasterised, and covers no pixels - empty, or
+            // drawn outside its own viewBox. The bars are filled through a mask
+            // with nothing in it and vanish, which reads as rav having broken.
+            //
+            // Asked of the canvas because coverage depends on the rung size,
+            // which is the terminal's to decide: artwork too thin to show at
+            // one size shows at another, so there is no answer at startup.
+            Some("draws nothing")
         } else {
             None
         }
