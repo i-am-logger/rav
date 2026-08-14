@@ -21,11 +21,39 @@ pub trait Bitmap {
     /// Cell size in pixels, the same for every glyph.
     fn cell(&self) -> (u32, u32);
 
-    /// One row per pixel of height, most significant bit leftmost. `None` for a
-    /// character the font does not carry, which is drawn as nothing rather than
-    /// as a substitute - a box glyph in the middle of a help panel reads as
-    /// data corruption.
+    /// One row per pixel of height. `None` for a character the font does not
+    /// carry, which is drawn as nothing rather than as a substitute - a box
+    /// glyph in the middle of a help panel reads as data corruption.
     fn rows(&self, ch: char) -> Option<&[u8]>;
+
+    /// Which end of a row byte holds the leftmost pixel.
+    ///
+    /// Fonts disagree and neither is wrong: `font8x8` puts it in bit 0.
+    /// Getting it backwards mirrors every glyph, and a symmetric one hides
+    /// that completely - `A` reads correctly either way and `L` does not,
+    /// which is why this is asked rather than assumed.
+    fn leftmost(&self) -> Leftmost {
+        Leftmost::HighBit
+    }
+}
+
+/// Where a row byte keeps its leftmost pixel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Leftmost {
+    /// Bit 7 first, reading the byte as it is written.
+    HighBit,
+    /// Bit 0 first, which is what `font8x8` does.
+    LowBit,
+}
+
+impl Leftmost {
+    /// The mask for a column, counted from the left.
+    fn mask(self, column: u32) -> u8 {
+        match self {
+            Leftmost::HighBit => 0x80 >> column,
+            Leftmost::LowBit => 1 << column,
+        }
+    }
 }
 
 /// Draw one line of text with its top-left corner at `x`, `y`.
@@ -48,6 +76,7 @@ pub fn draw(
     paint.set_color_rgba8(colour.red, colour.green, colour.blue, colour.alpha);
     paint.anti_alias = false;
 
+    let leftmost = font.leftmost();
     let mut at = x;
     for ch in text.chars() {
         if let Some(rows) = font.rows(ch) {
@@ -58,12 +87,12 @@ pub fn draw(
                 // row instead of eight.
                 let mut col = 0u32;
                 while col < across.min(8) {
-                    if bits & (0x80 >> col) == 0 {
+                    if bits & leftmost.mask(col) == 0 {
                         col += 1;
                         continue;
                     }
                     let start = col;
-                    while col < across.min(8) && bits & (0x80 >> col) != 0 {
+                    while col < across.min(8) && bits & leftmost.mask(col) != 0 {
                         col += 1;
                     }
                     if let Some(run) = Rect::from_xywh(
@@ -174,6 +203,39 @@ mod tests {
         let mut map = Pixmap::new(64, 8).unwrap();
         let end = draw(&mut map, &Probe, "###", (0, 0), white());
         assert_eq!(end, width(&Probe, "###"));
+    }
+
+    #[test]
+    fn the_bit_order_is_asked_for_and_not_assumed() {
+        // The trap this exists for: `A` reads correctly whichever end the
+        // leftmost pixel is at, so a mirrored font ships looking fine until
+        // somebody types an `L`. One glyph, one edge lit, read both ways.
+        struct OneEdge(Leftmost);
+        impl Bitmap for OneEdge {
+            fn cell(&self) -> (u32, u32) {
+                (8, 1)
+            }
+            fn rows(&self, _: char) -> Option<&[u8]> {
+                Some(&[0x01])
+            }
+            fn leftmost(&self) -> Leftmost {
+                self.0
+            }
+        }
+
+        let mut high = Pixmap::new(8, 1).unwrap();
+        draw(&mut high, &OneEdge(Leftmost::HighBit), "x", (0, 0), white());
+        assert!(
+            lit(&high, 7, 0) && !lit(&high, 0, 0),
+            "bit 0 is the right edge"
+        );
+
+        let mut low = Pixmap::new(8, 1).unwrap();
+        draw(&mut low, &OneEdge(Leftmost::LowBit), "x", (0, 0), white());
+        assert!(
+            lit(&low, 0, 0) && !lit(&low, 7, 0),
+            "bit 0 is the left edge"
+        );
     }
 
     #[test]

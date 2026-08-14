@@ -139,6 +139,7 @@ usvg = { version = "0.48", default-features = false }
 # bring a GPU abstraction to move bytes that are already where they need to be.
 winit = { version = "0.30", optional = true }
 softbuffer = { version = "0.4", optional = true }
+font8x8 = { version = "0.3.1", default-features = false, features = ["unicode"], optional = true }
 
 # `--all-features` is what devenv runs clippy and the tests under, so this is
 # compiled on both platforms in CI whether or not anybody turns it on.
@@ -149,6 +150,7 @@ softbuffer = { version = "0.4", optional = true }
 # on, and that is the only place they belong.
 [features]
 gui = ["dep:winit", "dep:softbuffer"]
+font8x8 = ["dep:font8x8"]
 
 [[bin]]
 name = "rav"
