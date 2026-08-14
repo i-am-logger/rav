@@ -223,6 +223,7 @@ impl Step {
 /// A bar in a terminal is this - three whole rows lit and the fourth five
 /// eighths full - without the core ever knowing what an eighth looks like.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Fill {
     /// Rungs completely filled.
     pub whole: usize,
