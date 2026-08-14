@@ -28,7 +28,7 @@ pub struct Help<'a> {
 
 impl Help<'_> {
     /// Width of the key column, which every row is indented by.
-    fn key_width(&self) -> usize {
+    pub(crate) fn key_width(&self) -> usize {
         self.rows
             .iter()
             .map(|r| r.key.chars().count())
@@ -42,7 +42,7 @@ impl Help<'_> {
     /// because that is what layout indents by. Measuring per-row leaves any row
     /// with a short key and a long description too narrow, and its value is then
     /// dropped without a trace.
-    fn desired_width(&self) -> u16 {
+    pub(crate) fn desired_width(&self) -> u16 {
         let key = self.key_width();
         let widest = self
             .rows
@@ -57,7 +57,7 @@ impl Help<'_> {
     }
 
     /// Centre the panel, shrinking it if the terminal is too small.
-    fn panel(&self, area: Rect) -> Rect {
+    pub(crate) fn panel(&self, area: Rect) -> Rect {
         let width = self.desired_width().min(area.width);
         let height = (self.rows.len() as u16 + 4).min(area.height);
         Rect {

@@ -34,6 +34,8 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowId};
 
+use tiny_skia::Pixmap;
+
 use crate::audio::AudioData;
 use crate::ui::App;
 
@@ -139,6 +141,13 @@ struct Showing {
     /// Kept between frames for the same reason the canvas is: a screenful of
     /// `u32` per frame is an allocation the frame budget has no room for.
     packed: Vec<u32>,
+    /// Where the help panel is drawn before it is composited over the frame.
+    ///
+    /// Its own surface because `frame_pixels` hands back bytes rather than a
+    /// `Pixmap`, and kept between frames for the reason the canvas is: this
+    /// is a screenful, and a screenful allocated per frame is the trap the
+    /// rest of this loop avoids. Rebuilt only when the window resizes.
+    overlay: Option<Pixmap>,
     /// What the title already says, so a frame that changed nothing does not
     /// ask the window server to set it again.
     titled: String,
@@ -183,18 +192,7 @@ impl ApplicationHandler for Showing {
             WindowEvent::CloseRequested => events.exit(),
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                 if let Some(code) = pressed(&event.logical_key) {
-                    let action = crate::ui::map_key(code);
-                    self.app.apply(action);
-                    // The panel is fourteen rows of text and a window has no
-                    // font for them yet, so `h` toggles something nothing
-                    // draws. Said out loud through the same note a setting
-                    // uses, which reaches the title bar - a key that silently
-                    // does nothing is the defect this whole surface keeps
-                    // being careful about.
-                    if action == crate::ui::Action::ToggleHelp {
-                        self.app
-                            .note("help is a terminal thing for now".to_string());
-                    }
+                    self.app.apply(crate::ui::map_key(code));
                     if self.app.wants_to_quit() {
                         events.exit();
                     }
@@ -305,10 +303,12 @@ impl Showing {
     }
 
     fn draw(&mut self) -> Result<()> {
-        let (Some(window), Some(surface)) = (&self.window, &mut self.surface) else {
+        // The size and the title first, and the window borrow released before
+        // anything else: the frame and the panel below both want `&mut self`,
+        // and the surface is only needed for the blit at the end.
+        let Some(size) = self.window.as_ref().map(|w| w.inner_size()) else {
             return Ok(());
         };
-        let size = window.inner_size();
         let (Some(width), Some(height)) =
             (NonZeroU32::new(size.width), NonZeroU32::new(size.height))
         else {
@@ -326,7 +326,9 @@ impl Showing {
         // server, and this runs on every frame.
         let saying = titled(self.app.status_line().as_deref());
         if saying != self.titled {
-            window.set_title(&saying);
+            if let Some(window) = &self.window {
+                window.set_title(&saying);
+            }
             self.titled = saying;
         }
 
@@ -335,6 +337,16 @@ impl Showing {
         };
         onto_black(&pixels, &mut self.packed);
 
+        // Over the frame rather than into it: the panel is opaque and the bars
+        // behind it are not meant to show through, which is what makes it
+        // readable over a moving picture.
+        if self.app.showing_help() {
+            self.draw_help(size.width, size.height);
+        }
+
+        let Some(surface) = &mut self.surface else {
+            return Ok(());
+        };
         surface
             .resize(width, height)
             .map_err(|why| anyhow::anyhow!("the window would not take that size: {why}"))?;
@@ -357,6 +369,40 @@ impl Showing {
         }
         Ok(())
     }
+    /// Draw the help panel over the packed frame.
+    ///
+    /// Onto a surface of its own and then composited, because `frame_pixels`
+    /// hands back bytes and the text drawing works on a `Pixmap`.
+    ///
+    /// That surface is the size of the **panel**, not the window. A
+    /// window-sized one would mean clearing and then scanning a few million
+    /// pixels every frame the panel is open, to find the few hundred thousand
+    /// it covers.
+    fn draw_help(&mut self, across: u32, down: u32) {
+        use crate::surface::text;
+
+        let rows = self.app.help_rows();
+        let Some((x, y, wide, tall)) =
+            text::help_area(&text::Font8x8, &rows, "rav", (across, down))
+        else {
+            return;
+        };
+
+        let fits = self
+            .overlay
+            .as_ref()
+            .is_some_and(|had| had.width() == wide && had.height() == tall);
+        if !fits {
+            self.overlay = Pixmap::new(wide, tall);
+        }
+        let Some(overlay) = &mut self.overlay else {
+            return;
+        };
+
+        let colours = self.app.overlay_colours();
+        text::help(overlay, &text::Font8x8, &rows, "rav", colours);
+        over(&mut self.packed, across, overlay, (x, y));
+    }
 }
 
 /// Show rav in a window until it is closed.
@@ -373,6 +419,7 @@ pub fn show(app: App, audio: Receiver<AudioData>) -> Result<()> {
         surface: None,
         packed: Vec::new(),
         titled: String::new(),
+        overlay: None,
         min_frame,
         next_frame: Instant::now(),
         drawn: 0,
@@ -386,6 +433,40 @@ pub fn show(app: App, audio: Receiver<AudioData>) -> Result<()> {
     match showing.failed {
         Some(why) => Err(why),
         None => Ok(()),
+    }
+}
+
+/// Composite an overlay onto a packed frame at `(x, y)`, in place.
+///
+/// Touches only the rows and columns the overlay occupies - it is the panel,
+/// not a screenful - and within those, only pixels it actually painted. A
+/// transparent pixel leaves the frame showing, which is what makes this a panel
+/// over a picture rather than a second picture.
+///
+/// Anything partly transparent is taken at full strength rather than blended:
+/// the panel is drawn opaque on purpose, because a half-transparent help row
+/// over moving bars is unreadable.
+fn over(packed: &mut [u32], frame_width: u32, overlay: &Pixmap, (x, y): (u32, u32)) {
+    for row in 0..overlay.height() {
+        let start = ((y + row) * frame_width + x) as usize;
+        let Some(line) = packed.get_mut(start..start + overlay.width() as usize) else {
+            // The frame changed size between being packed and being covered.
+            // The next one is drawn at the new size, so this one is skipped
+            // rather than written past its end.
+            return;
+        };
+        for (column, under) in line.iter_mut().enumerate() {
+            let Some(pixel) = overlay.pixel(column as u32, row) else {
+                continue;
+            };
+            if pixel.alpha() == 0 {
+                continue;
+            }
+            let straight = pixel.demultiply();
+            *under = (u32::from(straight.red()) << 16)
+                | (u32::from(straight.green()) << 8)
+                | u32::from(straight.blue());
+        }
     }
 }
 
@@ -490,17 +571,49 @@ mod tests {
     }
 
     #[test]
-    fn h_is_a_key_that_says_why_nothing_happened() {
-        // The one key a window cannot honour yet. It is `ToggleHelp` that has
-        // to be recognised here, so this asserts through `map_key` rather than
-        // against the character - rebinding help would otherwise leave the
-        // note attached to whatever `h` became.
+    fn h_and_f1_both_reach_the_panel() {
+        // Through `map_key` rather than against the character, so rebinding
+        // help cannot leave the window opening something else.
         assert_eq!(typed("h"), Some(crate::ui::Action::ToggleHelp));
         assert_eq!(
             pressed(&Key::Named(NamedKey::F1)).map(crate::ui::map_key),
             Some(crate::ui::Action::ToggleHelp),
             "F1 is the same key and gets the same answer",
         );
+    }
+
+    #[test]
+    fn an_overlay_covers_only_where_it_painted() {
+        // The whole of what makes this a panel over a picture: a transparent
+        // pixel leaves the frame alone. Getting it backwards paints a black
+        // rectangle over the bars and looks like the window stopped drawing.
+        // A 4x2 frame with a 2x1 panel dropped at (1, 1): the offset is half
+        // of what this checks, since a panel almost never sits at the origin.
+        let mut frame = vec![0x00ff_0000u32; 8];
+        let mut overlay = Pixmap::new(2, 1).unwrap();
+        overlay.fill(tiny_skia::Color::TRANSPARENT);
+        // One opaque white pixel, top left.
+        let mut paint = tiny_skia::Paint::default();
+        paint.set_color_rgba8(0xff, 0xff, 0xff, 0xff);
+        paint.anti_alias = false;
+        overlay.fill_rect(
+            tiny_skia::Rect::from_xywh(0.0, 0.0, 1.0, 1.0).unwrap(),
+            &paint,
+            tiny_skia::Transform::identity(),
+            None,
+        );
+
+        over(&mut frame, 4, &overlay, (1, 1));
+        assert_eq!(
+            frame[5], 0x00ff_ffff,
+            "the painted pixel did not land at the offset"
+        );
+        assert_eq!(
+            frame[6], 0x00ff_0000,
+            "a transparent pixel overwrote the frame"
+        );
+        assert_eq!(frame[0], 0x00ff_0000, "it painted outside its rectangle");
+        assert_eq!(frame[1], 0x00ff_0000, "it painted above itself");
     }
 
     #[test]
