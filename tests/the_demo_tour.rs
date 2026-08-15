@@ -1,16 +1,19 @@
-//! The demo tour walks every theme and every angle, and comes back.
+//! The demo tour walks every theme, every bar style and every angle, and comes
+//! back.
 //!
 //! `record-demo` drives the GIF on the front page by sending keys on a timer,
-//! and the tour is a string in `devenv.nix`. One press per theme and one per
-//! angle, because the last press of each is what returns to the first - so a
-//! setting added to rav without a press added here leaves the recording ending
-//! somewhere other than it started, and the GIF stops looping cleanly.
+//! and the tour is a string in `devenv.nix`. One press per theme, one per style
+//! and one per angle, because the last press of each is what returns to the
+//! first - so a setting added to rav without a press added here leaves the
+//! recording ending somewhere other than it started, and the GIF stops looping
+//! cleanly.
 //!
 //! That is not hypothetical: the fifth viewing angle arrived after the tour was
 //! written and the tour went on pressing `v` four times. The plan predicted
 //! this exact coupling before either existed. Nothing else checks it, because
 //! the failure is only visible to someone watching a finished recording.
 
+use rav::ui::analyzer::BarStyle;
 use rav_appearance::scene::View;
 use rav_appearance::theme::Theme;
 
@@ -80,6 +83,67 @@ fn one_press_per_viewing_angle() {
         ends_on.label(),
         View::default().label(),
     );
+}
+
+#[test]
+fn one_press_per_bar_style() {
+    let Some(tour) = default_tour() else {
+        return;
+    };
+
+    // `segment` is artwork rather than a ladder of fractions, and it is the
+    // release this tour was extended for, so a style dropped from the cycle
+    // takes it out of the GIF as readily as one added without a press here.
+    let pressed = presses_of(&tour, 'b');
+    let ends_on = (0..pressed).fold(BarStyle::default(), |style, _| style.next());
+
+    assert_eq!(
+        pressed,
+        BarStyle::COUNT,
+        "the tour presses `b` {pressed} times for {} styles, so the recording \
+         ends on {} rather than back at {}\ntour: {tour}",
+        BarStyle::COUNT,
+        ends_on.label(),
+        BarStyle::default().label(),
+    );
+}
+
+/// Where in the tour a key is sent, counting steps from the start.
+fn presses_at(tour: &str, key: char) -> Vec<usize> {
+    tour.split_whitespace()
+        .enumerate()
+        .filter(|(_, step)| {
+            step.split(':')
+                .nth(1)
+                .is_some_and(|sent| sent.chars().eq(std::iter::once(key)))
+        })
+        .map(|(at, _)| at)
+        .collect()
+}
+
+#[test]
+fn the_styles_are_done_with_before_the_field_leans() {
+    let Some(tour) = default_tour() else {
+        return;
+    };
+
+    // `segment` is a mask, and a mask cannot follow a leaning bar - `App`'s
+    // `drawing_is_missing` says `needs a flat view` and the plain ladder is
+    // drawn instead. So the styles have to finish while the view is still
+    // flat, or the one style that is artwork is filmed as the one thing it is
+    // not. Reordering the tour is what would break this, and the GIF is the
+    // only place it would show.
+    let last_style = presses_at(&tour, 'b').into_iter().max();
+    let first_angle = presses_at(&tour, 'v').into_iter().min();
+
+    if let (Some(last_style), Some(first_angle)) = (last_style, first_angle) {
+        assert!(
+            last_style < first_angle,
+            "the tour is still pressing `b` at step {last_style} after `v` at \
+             step {first_angle}, so `segment` is filmed at an angle - where it \
+             is drawn as the plain ladder\ntour: {tour}",
+        );
+    }
 }
 
 #[test]

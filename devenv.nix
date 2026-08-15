@@ -179,9 +179,9 @@
   # the same size as the committed one and drops straight into the README.
   #
   # The recording is a guided tour rather than a static shot - it drives rav from
-  # the outside while filming, so the GIF shows the four themes, the four viewing
-  # angles and then the oscilloscope, instead of one view for the whole clip.
-  # RAV_DEMO_TOUR is a list
+  # the outside while filming, so the GIF shows the four themes, the seven bar
+  # styles, the five viewing angles and then the oscilloscope, instead of one
+  # view for the whole clip. RAV_DEMO_TOUR is a list
   # of `seconds:key` steps: hold for that many seconds, then send that key.
   # `-` sends nothing, which is how the last segment gets its screen time.
   scripts.record-demo.exec = ''
@@ -206,22 +206,30 @@
     # re-record at a higher rate is pending.
     FPS="''${RAV_DEMO_FPS:-25}"
     LEAD="''${RAV_DEMO_LEAD:-5}"
-    # Every theme, then every viewing angle, then the oscilloscope and the help
-    # overlay - and back to the defaults, so the GIF loops from the same frame it
-    # started on. There is one `t` per theme and one `v` per angle: the last
-    # press of each is what returns to the first, and leaving it out is how the
-    # tour quietly stops ending where it began.
+    # Every theme, then every bar style, then every viewing angle, then the
+    # oscilloscope and the help overlay - and back to the defaults, so the GIF
+    # loops from the same frame it started on. There is one `t` per theme, one
+    # `b` per style and one `v` per angle: the last press of each is what
+    # returns to the first, and leaving it out is how the tour quietly stops
+    # ending where it began.
     #
-    # Four themes and five angles. `tests/the_demo_tour.rs` counts both against
-    # the enums, because a view added without a press here is invisible until
-    # someone looks closely at a finished GIF - which is how the fifth angle
-    # went missing.
+    # Four themes, seven styles and five angles. `tests/the_demo_tour.rs` counts
+    # all three against the enums, because a view added without a press here is
+    # invisible until someone looks closely at a finished GIF - which is how the
+    # fifth angle went missing.
+    #
+    # The styles run before the angles because the field is flat there, which is
+    # where a rung reads most clearly. rav opens on `blocks`, so `segment` is
+    # the sixth press and the seventh is what comes home.
     #
     # The angles are the reason the terminal matters. `v` does nothing on block
     # characters and the panel says `needs pixels`, so a recording made in a
     # terminal that cannot draw images shows four seconds of a key not working.
+    # `segment` is artwork rather than a ladder of fractions - it is
+    # `assets/skins/segment.svg` - so a cell grid draws the plain bar for it and
+    # that press looks like nothing happening too.
     # Record in WezTerm, Ghostty or kitty.
-    TOUR="''${RAV_DEMO_TOUR:-3:t 3:t 3:t 3:t 2:v 2:v 2:v 2:v 2:v 1:space 4:space 1:h 4:h 2:-}"
+    TOUR="''${RAV_DEMO_TOUR:-3:t 3:t 3:t 3:t 2:b 2:b 2:b 2:b 2:b 2:b 2:b 2:v 2:v 2:v 2:v 2:v 1:space 4:space 1:h 4:h 2:-}"
     # Total duration is the sum of the tour's holds, so the two never drift.
     # SETTLE covers the second avfoundation spends opening the capture device -
     # without it the first key lands before filming starts and that segment is
