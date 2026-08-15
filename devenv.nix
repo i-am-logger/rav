@@ -275,10 +275,22 @@
           -e 'return (ww as text) & "x" & (wh as text) & "+" & (wx as text) & "+" & (wy as text)' \
           -e 'end tell' 2>/dev/null || true)
       fi
+      # WezTerm reports *zero* windows to System Events, so this read returns
+      # nothing for it however the permissions are set - measured on
+      # 2026-08-15, with Accessibility granted and every other System Events
+      # query answering. It is the terminal the comment above tells you to
+      # record in, so RAV_DEMO_GEOMETRY is the ordinary path there rather than
+      # an escape hatch, and sending someone to a permissions pane that is
+      # already correct is the wrong first suggestion.
+      #
+      # `wezterm start --position main:X,Y` is what puts the window somewhere
+      # known, since nothing can ask it afterwards.
       if [ -z "$GEOMETRY" ]; then
         echo "❌ Could not read the front window's geometry."
-        echo "   Grant Accessibility to your terminal in System Settings ->"
-        echo "   Privacy & Security, or set RAV_DEMO_GEOMETRY=941x249+X+Y."
+        echo "   WezTerm exposes no window to System Events, so set the rect"
+        echo "   yourself: RAV_DEMO_GEOMETRY=941x249+X+Y (points, not pixels)."
+        echo "   Otherwise grant Accessibility to your terminal in System"
+        echo "   Settings -> Privacy & Security."
         exit 1
       fi
 
