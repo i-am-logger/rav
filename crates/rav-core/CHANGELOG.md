@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-beta.13](https://github.com/i-am-logger/rav/compare/rav-core-v1.0.0-beta.12...rav-core-v1.0.0-beta.13) - 2026-08-14
+
+### Added
+
+- room to add a field after 1.0 ([#160](https://github.com/i-am-logger/rav/pull/160))
+- room to add a variant after 1.0 ([#159](https://github.com/i-am-logger/rav/pull/159))
+
+### Fixed
+
+- *(core)* a cap stays on the display at sizes that do not divide ([#133](https://github.com/i-am-logger/rav/pull/133))
+
 ## [1.0.0-beta.11](https://github.com/i-am-logger/rav/compare/rav-core-v1.0.0-beta.10...rav-core-v1.0.0-beta.11) - 2026-08-13
 
 ### Added
