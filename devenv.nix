@@ -219,15 +219,19 @@
     # fifth angle went missing.
     #
     # The styles run before the angles because the field is flat there, which is
-    # where a rung reads most clearly. rav opens on `blocks`, so `segment` is
-    # the sixth press and the seventh is what comes home.
+    # where a rung reads most clearly - and because `segment` is a mask, which
+    # cannot follow a leaning bar. rav opens on `blocks`, and the cycle from
+    # there is solid, thick, half, line, segment, shade, blocks: `segment` is
+    # the fifth press and the seventh comes home.
     #
     # The angles are the reason the terminal matters. `v` does nothing on block
     # characters and the panel says `needs pixels`, so a recording made in a
-    # terminal that cannot draw images shows four seconds of a key not working.
-    # `segment` is artwork rather than a ladder of fractions - it is
-    # `assets/skins/segment.svg` - so a cell grid draws the plain bar for it and
-    # that press looks like nothing happening too.
+    # terminal that cannot draw images spends ten seconds on a key that is
+    # refusing. `segment` is artwork rather than a ladder of fractions - it is
+    # `assets/skins/segment.svg` - so a cell grid draws the plain bar for it.
+    # That press is still the loudest in the cycle, because the plain bar is
+    # nothing like the `line` stroke before it; what is lost is the artwork,
+    # not the change.
     # Record in WezTerm, Ghostty or kitty.
     TOUR="''${RAV_DEMO_TOUR:-3:t 3:t 3:t 3:t 2:b 2:b 2:b 2:b 2:b 2:b 2:b 2:v 2:v 2:v 2:v 2:v 1:space 4:space 1:h 4:h 2:-}"
     # Total duration is the sum of the tour's holds, so the two never drift.

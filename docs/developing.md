@@ -74,9 +74,12 @@ is the install path in the README, so that is the one that breaks.
 `record-demo` screen-records the frontmost window and quantises it to a GIF, and
 it drives rav while filming rather than capturing one static view.
 `RAV_DEMO_TOUR` is a list of `seconds:key` steps — hold that long, then send that
-key, with `-` for "send nothing". The default walks the four themes and the
-four viewing angles, then the oscilloscope and the help overlay, and returns to
-the defaults so the loop is seamless.
+key, with `-` for "send nothing". The default walks the four themes, the seven
+bar styles and the five viewing angles, then the oscilloscope and the help
+overlay, and returns to the defaults so the loop is seamless. The styles come
+before the angles because `segment` is a mask and a mask cannot follow a
+leaning bar; `tests/the_demo_tour.rs` holds both the counts and that ordering
+against the enums.
 
 Size the window to 941×249 first; that is the shape the committed GIF was shot
 at, so a re-record drops straight in.
@@ -84,7 +87,7 @@ at, so a re-record drops straight in.
 | Variable | |
 |---|---|
 | `RAV_DEMO_TOUR` | the `seconds:key` script; its holds set the duration |
-| `RAV_DEMO_GEOMETRY` | `WxH+X+Y` in points; defaults to the frontmost window |
+| `RAV_DEMO_GEOMETRY` | `WxH+X+Y` in points; read from the frontmost window where that works — **set it by hand for WezTerm**, which exposes no window to System Events |
 | `RAV_DEMO_SCALE` | `2` on a Retina display — capture is in pixels, geometry in points |
 | `RAV_DEMO_FPS` | 25 by default, and it sets the capture rate too; see below |
 | `RAV_DEMO_OUT`, `RAV_DEMO_LEAD`, `RAV_DEMO_SETTLE` | the rest |
@@ -92,8 +95,9 @@ at, so a re-record drops straight in.
 **Record it in a terminal that can draw images** — WezTerm, Ghostty or kitty.
 rav draws pixels wherever the terminal says it can, so a recording made anywhere
 else shows the fallback rather than the thing: block characters, a peak cap
-erasing the grid it crosses, and four seconds of `v` doing nothing but printing
-`needs pixels`. The committed `assets/demo.gif` predates the pixel surface
+erasing the grid it crosses, ten seconds of `v` doing nothing but printing
+`needs pixels`, and `segment` drawn as the plain bar rather than as the
+artwork it is. The committed `assets/demo.gif` predates the pixel surface
 entirely and was shot in Terminal.app, which cannot even show rav's colours —
 it reports `colors#256` and no `Tc`.
 
