@@ -480,6 +480,69 @@ mod tests {
         out[0]
     }
 
+    fn an_app() -> App {
+        App::new(crate::config::Config::default(), 2, 48_000).expect("app should build")
+    }
+
+    /// A frame at that window size, the way `draw` asks for one.
+    fn drawn_at(app: &mut App, width: u32, height: u32) {
+        app.frame_pixels(&sized(width, height));
+    }
+
+    #[test]
+    fn a_window_gets_a_display_and_not_a_single_bar() {
+        // The defect this exists for: `draw` measured the window, handed the
+        // size to `frame_pixels`, and nothing built `App` for it. A fresh `App`
+        // starts at one position in the map, so it drew exactly one bar at
+        // every window size - and drew it happily, which is why nothing
+        // noticed. Every other test resizes first, as the terminal loop does.
+        //
+        // Asked through `frame_pixels` rather than through the sizing helper,
+        // because that is the call both surfaces make. A surface that reaches
+        // it is right whatever it did beforehand.
+        let mut app = an_app();
+        assert_eq!(
+            app.bars_built_for(),
+            0,
+            "a fresh App is meant to start with no display at all",
+        );
+
+        drawn_at(&mut app, 1600, 800);
+        assert!(
+            app.bars_built_for() > 1,
+            "a 1600x800 window drew {} bar(s). A window never built for its \
+             size keeps the constructor's single position in the map, so it \
+             shows one bar once audio arrives and none before that - never a \
+             display",
+            app.bars_built_for(),
+        );
+    }
+
+    #[test]
+    fn a_wider_window_gets_more_bars_than_a_narrow_one() {
+        // Not just "more than one": the count has to follow the window, or a
+        // resize would leave the display built for the size before it.
+        let mut narrow = an_app();
+        drawn_at(&mut narrow, 400, 800);
+        let mut wide = an_app();
+        drawn_at(&mut wide, 1600, 800);
+
+        assert!(
+            wide.bars_built_for() > narrow.bars_built_for(),
+            "400px wide drew {} bars and 1600px drew {}",
+            narrow.bars_built_for(),
+            wide.bars_built_for(),
+        );
+
+        // And it follows a change on the same app, which is the resize path.
+        drawn_at(&mut narrow, 1600, 800);
+        assert_eq!(
+            narrow.bars_built_for(),
+            wide.bars_built_for(),
+            "the same size reached by resizing built a different display",
+        );
+    }
+
     #[test]
     fn an_opaque_pixel_keeps_its_colour() {
         assert_eq!(one([0xff, 0xff, 0xff, 0xff]), 0x00ff_ffff, "white");

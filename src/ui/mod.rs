@@ -594,6 +594,14 @@ impl App {
         use rav_core::geometry::Screen;
         use rav_core::units::{CellSize, Cells, Length};
 
+        // Build for the size before drawing at it, rather than trusting the
+        // caller to have done it. Both surfaces hand the size in here anyway,
+        // and a surface that measured its window and forgot this step drew a
+        // single bar at every size - quietly, because one bar is a picture.
+        // The terminal loop still fits on its own schedule; `fit_to` compares
+        // against `sized_for`, so arriving already built costs nothing.
+        self.fit_to(size.columns, size.rows);
+
         let screen = Screen::new(
             Length(f32::from(size.width)),
             Length(f32::from(size.height)),
@@ -777,6 +785,34 @@ impl App {
             self.window.copy_within(1..n, 0);
             self.window[n - 1] = mono;
         }
+    }
+
+    /// Build for this size, if not already built for it.
+    ///
+    /// The check and the rebuild together, because every surface needs both and
+    /// one that does the first without the second fails *quietly*. `App` starts
+    /// at `BarMap::new(1, ..)` - one position, one band, one bar - so a surface
+    /// that never asks draws a single bar at any size rather than crashing or
+    /// drawing nothing. That is what `--surface window` did: it had the size at
+    /// hand and passed it only to `frame_pixels`, which draws the bars it is
+    /// given rather than deciding how many there should be.
+    ///
+    /// Every test called `resize` directly, as the terminal loop did, so
+    /// nothing exercised a surface that had not.
+    pub(crate) fn fit_to(&mut self, columns: u16, rows: u16) {
+        if (columns, rows) != self.sized_for {
+            self.resize(columns, rows);
+        }
+    }
+
+    /// How many bars the display is currently built for.
+    ///
+    /// Gated to match its only caller - the window's tests, which exist only
+    /// under `gui`. `#[cfg(test)]` alone is dead code in a default build, which
+    /// `unused = "deny"` makes a build failure rather than a warning.
+    #[cfg(all(test, feature = "gui"))]
+    pub(crate) fn bars_built_for(&self) -> usize {
+        self.ballistics.len()
     }
 
     /// Rebuild everything that depends on terminal size.
@@ -1304,9 +1340,7 @@ impl App {
             }
 
             let area = self.terminal.size()?;
-            if (area.width, area.height) != self.sized_for {
-                self.resize(area.width, area.height);
-            }
+            self.fit_to(area.width, area.height);
 
             // Measure on the audio's schedule, not the display's.
             //
