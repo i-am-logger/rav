@@ -452,10 +452,18 @@ impl Draw for Scene<'_> {
         let angled = !placing.is_identity() || self.view.recedes();
         let backdrop = |canvas: &mut Canvas, index: usize| {
             let band = &self.bands[index];
-            if let Some(grid) = self.style_of(band).and_then(|style| style.grid) {
+            if let Some(style) = self.style_of(band)
+                && let Some(grid) = style.grid
+            {
                 let area = self.layout.column(index).backdrop(screen);
                 canvas.antialias(!angled);
-                canvas.fill_ramped(area, grid, over);
+                match style
+                    .ladder
+                    .and_then(|(skin, rung)| backdrop_ladder(skin).map(|shaped| (shaped, rung)))
+                {
+                    Some((skin, rung)) => draw_ladder(canvas, area, skin, rung, grid, over),
+                    None => canvas.fill_ramped(area, grid, over),
+                }
                 canvas.antialias(true);
             }
         };
@@ -530,7 +538,13 @@ impl Draw for Scene<'_> {
                         .map(|&index| self.layout.column(index).backdrop(screen)),
                 );
                 canvas.antialias(!angled);
-                canvas.fill_many_ramped_at(&areas, grid, over, 1.0);
+                match style
+                    .ladder
+                    .and_then(|(skin, rung)| backdrop_ladder(skin).map(|shaped| (shaped, rung)))
+                {
+                    Some((skin, rung)) => draw_ladders(canvas, &areas, skin, rung, grid, over),
+                    None => canvas.fill_many_ramped_at(&areas, grid, over, 1.0),
+                }
                 canvas.antialias(true);
             }
         }
@@ -645,6 +659,35 @@ fn draw_ladders(
             canvas.fill_many_ramped_at(&row, ramp, over, shape.opacity);
         }
     }
+}
+
+/// The ladder a backdrop is drawn through: the style's own shape, at full
+/// strength.
+///
+/// The glyph renderer draws the unlit grid with the style's glyph, so a
+/// backdrop behind `line` is a column of thin rules and behind `solid` a ladder
+/// with a gap at each seam - not a filled column. `covers = 1.0` collapses this
+/// to the whole column, which is what `blocks` and `shade` want and what the
+/// pixel surface used to do for everything.
+///
+/// Opacity is dropped deliberately: `grid_glyph` uses a plain full block for
+/// the shaded style rather than the shade, because the backdrop is a backdrop
+/// and the texture belongs to the lit bar in front of it.
+fn backdrop_ladder(skin: rav_appearance::Skin) -> Option<rav_appearance::Skin> {
+    let shape = skin.rung;
+    // A rung that fills its cell tiles into the whole column, so drawing it as
+    // a ladder is the same picture made of ten fills instead of one - except
+    // that each rung antialiases against the last and the seams show. That is
+    // `fills_cell` on the glyph side, where the backdrop is a background colour
+    // rather than a glyph, and one rectangle is both faster and what it looks
+    // like.
+    if shape.covers >= 1.0 && shape.floats <= 0.0 {
+        return None;
+    }
+    Some(skin.drawn_as(rav_appearance::skin::Rung {
+        opacity: 1.0,
+        ..shape
+    }))
 }
 
 /// Draw a bar as the ladder its skin describes, rung by rung.
@@ -1321,6 +1364,50 @@ mod tests {
         scene(&loud, &one_style(&ramp, Some(&grid), false)).draw(&mut without);
 
         assert_ne!(with.to_rgba(), without.to_rgba(), "a cap must be visible");
+    }
+
+    #[test]
+    fn the_backdrop_is_the_ladder_the_glyphs_draw_behind_the_bars() {
+        // The glyph renderer draws the unlit grid with the style's own glyph, so
+        // behind `line` it is a column of dim rules with air between them, and
+        // only the full-cell styles get a background colour filling the whole
+        // cell. The pixel surface drew a solid slab whatever the skin, which is
+        // the most visible of the ways the two pictures parted.
+        let ramp = Ramp::new(vec![Colour::RED]);
+        let grid = Ramp::new(vec![Colour::BLUE]);
+        let silent = bands(&[0.0]);
+
+        let laddered = |skin: rav_appearance::Skin| {
+            let mut canvas = Canvas::new(10, 60).unwrap();
+            let styles = [Style {
+                bars: &ramp,
+                grid: Some(&grid),
+                cap: None,
+                ladder: Some((skin, Length(20.0))),
+            }];
+            scene(&silent, &styles).draw(&mut canvas);
+            // How many of the sixty rows the backdrop actually reaches.
+            (0..60).filter(|&y| at(&canvas, 5, y).alpha > 0).count()
+        };
+
+        // `line` is a 1/8 rule floating at 7/16, so it covers an eighth of each
+        // rung and leaves the rest of the column showing through.
+        let rules = laddered(rav_appearance::skin::ladders::LINE);
+        assert!(
+            (1..30).contains(&rules),
+            "a `line` backdrop covered {rules} of 60 rows - it is a slab again, \
+             not the ladder the glyph renderer draws",
+        );
+
+        // `blocks` fills its cell, so its ladder tiles into the whole column and
+        // the backdrop is the solid fill a background colour gives in text.
+        // Drawn as one rectangle rather than as tiled rungs, or every seam
+        // antialiases against the last and the fill grows visible lines.
+        let solid = laddered(rav_appearance::skin::ladders::BLOCKS);
+        assert_eq!(
+            solid, 60,
+            "a full-cell style's backdrop should fill the column",
+        );
     }
 
     #[test]
