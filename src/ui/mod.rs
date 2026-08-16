@@ -2852,6 +2852,11 @@ mod tests {
         let mut a = app();
         a.apply(Action::CycleTheme);
         let cycled = a.theme.clone();
+        // Skips outside a checkout: the themes are a workspace path and the
+        // published `rav` crate does not carry them. See `bundled_source`.
+        if crate::visual::theme::bundled_source(&cycled.name).is_none() {
+            return;
+        }
         let from_disk = crate::visual::theme::load(&format!(
             "crates/rav-appearance/themes/{}.toml",
             cycled.name

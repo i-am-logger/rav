@@ -188,6 +188,36 @@ fn parse_color(text: &str) -> Result<Ink> {
         .ok_or_else(|| anyhow::anyhow!("{text:?} is not a colour: use #rrggbb or an ANSI name"))
 }
 
+/// The source a built-in theme was generated from, or `None` outside a
+/// checkout.
+///
+/// `crates/rav-appearance/themes/` is a *workspace* path. The `rav` package
+/// carries rav's own files and no sibling crate's directory, so a checkout has
+/// these and an unpacked crate does not - and three tests read them by that
+/// path, so `cargo test` on the published 1.0.0-beta.13 failed three times for
+/// anyone who tried it. The crate still built and installed; only its tests
+/// were broken, which is why nothing before this noticed.
+///
+/// `test:package` does not cover this: it checks `include_str!` and
+/// `include_bytes!`, which are compile-time and would have been a build error.
+/// These are runtime reads.
+///
+/// Absent and unreadable are told apart on purpose, as `tests/the_demo_tour.rs`
+/// does for `devenv.nix`. A missing *directory* is "not in a checkout" and
+/// skips; a directory that is there with a theme that will not read is a real
+/// failure, and it is exactly the disagreement these checks exist to catch.
+#[cfg(test)]
+pub(crate) fn bundled_source(name: &str) -> Option<String> {
+    let dir = std::path::Path::new("crates/rav-appearance/themes");
+    if !dir.is_dir() {
+        return None;
+    }
+    Some(
+        std::fs::read_to_string(dir.join(format!("{name}.toml")))
+            .expect("the themes directory is here but this theme is not readable"),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -200,8 +230,9 @@ mod tests {
         // same file loaded by path - and nothing else in the tree would notice.
         for name in Theme::built_in_names() {
             let generated = Theme::built_in(name).expect("bundled");
-            let text = std::fs::read_to_string(format!("crates/rav-appearance/themes/{name}.toml"))
-                .expect("the bundled file is beside the crate");
+            let Some(text) = bundled_source(name) else {
+                return;
+            };
             let parsed = parse(&text).expect("a bundled theme must parse");
             assert_eq!(
                 generated, parsed,
@@ -212,6 +243,9 @@ mod tests {
 
     #[test]
     fn a_theme_can_be_loaded_by_path() {
+        if bundled_source("winamp").is_none() {
+            return;
+        }
         let from_disk = load("crates/rav-appearance/themes/winamp.toml").expect("by path");
         assert_eq!(from_disk, Theme::built_in("winamp").expect("bundled"));
     }
