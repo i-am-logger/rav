@@ -267,10 +267,10 @@ pub struct App {
     bar_style: BarStyle,
     /// The angle the field is bolted at. Pixels only - see `Action::CycleView`.
     view: View,
-    /// A drawing to build the bars from, if one was given on the command line.
+    /// A drawing to build the rungs from, if one was given on the command line.
     ///
-    /// Replaces the artwork the `segment` style carries. `None` is the built-in
-    /// one, which is what every run that did not ask uses.
+    /// Replaces the shape a style's fractions describe, whichever style that is.
+    /// `None` - every run that did not ask - draws the fractions themselves.
     skin: Option<&'static str>,
     show_help: bool,
     /// Briefly shown after a settings key, so a change is visible without a
@@ -652,14 +652,12 @@ impl App {
             // is where the reason is written down. Sending the raw uptime
             // would work all day and then quietly stop moving.
             elapsed: rav_appearance::scene::sway_phase(self.started.elapsed().as_secs_f64()),
-            // Only the style that draws one gets one, and a skin from the
-            // command line stands in for that style's built-in artwork rather
-            // than for every style's. Offered unconditionally otherwise, `b`
-            // would go back to being six labels over one picture.
-            artwork: self
-                .bar_style
-                .artwork()
-                .map(|built_in| self.skin.unwrap_or(built_in)),
+            // A drawing given on the command line, and nothing otherwise. It
+            // replaces the shape of a rung, so it composes with whichever style
+            // `b` is on rather than being a style of its own - and every style
+            // in the cycle keeps the block character the pixel surface has to
+            // reproduce.
+            artwork: self.skin,
         };
         // `coarse` and `fine` are the same cap on a cell grid - one position per
         // row is all a cell offers - so the difference has to be made here or
@@ -861,14 +859,14 @@ impl App {
         self.status = Some((text, Instant::now()));
     }
 
-    /// Draw the bars from this drawing rather than the built-in one.
+    /// Draw the rungs from this drawing rather than from the style's fractions.
     ///
-    /// Opens on the style that uses it, because a skin nobody can see is
-    /// indistinguishable from a skin that failed to load - and `b` walks away
-    /// from it and back like any other.
+    /// The style stays whatever it was. A drawing replaces the *shape* of a
+    /// rung, not the ladder it belongs to, so `--skin` composes with `b` rather
+    /// than being a seventh entry in it - and every style the cycle offers keeps
+    /// a block character behind it that the pixel surface can be held against.
     pub fn wear_skin(&mut self, svg: &'static str) {
         self.skin = Some(svg);
-        self.bar_style = BarStyle::Segment;
     }
 
     /// Why a drawn style is not being drawn, if it is not.
@@ -883,7 +881,7 @@ impl App {
     /// `None` for every style made of fractions, which have nothing to lose
     /// either way, and for a drawn one that is reaching the bars.
     fn drawing_is_missing(&self) -> Option<&'static str> {
-        self.bar_style.artwork()?;
+        self.skin?;
         if !self.can_be_angled() {
             Some("needs pixels")
         } else if self.view != View::Flat {
@@ -2718,53 +2716,58 @@ mod tests {
                 .and_then(|row| row.value)
                 .expect("no bar style row")
         };
-        // A cell grid has no way to put a picture on the screen at all.
+        // A cell grid has no way to put a picture on the screen at all. The row
+        // names whichever style is showing, because a drawing is worn over one
+        // rather than being a style of its own.
         let mut a = app();
         a.wear_skin("<svg/>");
-        assert_eq!(style_row(&a), "segment - needs pixels");
+        assert_eq!(style_row(&a), "blocks - needs pixels");
 
         a.surface = Chosen {
             surface: crate::surface::Surface::Kitty,
             because: "for the test",
         };
-        assert_eq!(style_row(&a), "segment");
+        assert_eq!(style_row(&a), "blocks");
 
         a.apply(Action::CycleView);
         assert_eq!(a.view, View::Raked);
-        assert_eq!(style_row(&a), "segment - needs a flat view");
+        assert_eq!(style_row(&a), "blocks - needs a flat view");
 
-        // A ladder made of fractions has nothing to lose at an angle.
+        // The drawing travels with the cycle rather than being left behind at
+        // one style, so the reason follows it to the next ladder along.
         a.apply(Action::CycleBarStyle);
+        assert_eq!(style_row(&a), "solid - needs a flat view");
+
+        // And with no drawing at all there is nothing to report - a ladder made
+        // of fractions loses nothing at an angle.
+        a.skin = None;
         assert_eq!(style_row(&a), a.bar_style.label());
     }
 
     #[test]
-    fn a_skin_from_a_file_replaces_the_built_in_one_and_shows_itself() {
-        // A skin nobody can see is indistinguishable from one that failed to
-        // load, so wearing it also selects the style that draws it. `b` walks
-        // away from there and back like any other.
+    fn a_skin_from_a_file_draws_whichever_style_is_showing() {
+        // A drawing replaces the shape of a rung, not the ladder it belongs to,
+        // so it composes with `b` rather than being a seventh entry in it. That
+        // is what keeps every style in the cycle a block character the pixel
+        // surface can be held against.
         const MINE: &str = "<svg/>";
         let mut a = app();
-        assert_ne!(a.bar_style, BarStyle::Segment, "not where it opens");
+        let opened_on = a.bar_style;
 
         a.wear_skin(MINE);
-        assert_eq!(a.bar_style, BarStyle::Segment, "it chose another style");
         assert_eq!(a.skin, Some(MINE));
-
-        // And it outranks the built-in artwork rather than sitting beside it:
-        // the drawing a user handed over is the one they expect to see.
-        assert!(
-            std::ptr::eq(
-                a.skin.or_else(|| a.bar_style.artwork()).unwrap().as_ptr(),
-                MINE.as_ptr()
-            ),
-            "the built-in drawing won",
+        assert_eq!(
+            a.bar_style, opened_on,
+            "wearing a skin moved the style out from under the user",
         );
 
-        // Cycling away leaves the skin in hand, so coming back shows it again
-        // rather than reverting to the built-in.
-        a.apply(Action::CycleBarStyle);
-        assert_eq!(a.skin, Some(MINE), "cycling threw the skin away");
+        // And it survives the cycle, so the drawing is worn over each style in
+        // turn rather than being lost at the first press.
+        for _ in 0..BarStyle::COUNT {
+            a.apply(Action::CycleBarStyle);
+            assert_eq!(a.skin, Some(MINE), "cycling threw the skin away");
+        }
+        assert_eq!(a.bar_style, opened_on, "the cycle did not come home");
     }
 
     #[test]

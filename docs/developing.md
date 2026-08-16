@@ -74,11 +74,11 @@ is the install path in the README, so that is the one that breaks.
 `record-demo` screen-records the frontmost window and quantises it to a GIF, and
 it drives rav while filming rather than capturing one static view.
 `RAV_DEMO_TOUR` is a list of `seconds:key` steps — hold that long, then send that
-key, with `-` for "send nothing". The default walks the four themes, the seven
-bar styles and the five viewing angles, then the oscilloscope and the help
-overlay, and returns to the defaults so the loop is seamless. The styles come
-before the angles because `segment` is a mask and a mask cannot follow a
-leaning bar; `tests/the_demo_tour.rs` holds both the counts and that ordering
+key, with `-` for "send nothing". The default walks the four themes, the six bar
+styles and the five viewing angles, then the oscilloscope and the help overlay,
+and returns to the defaults so the loop is seamless. The styles come before the
+angles because the field is flat there, which is where a rung reads most
+clearly; `tests/the_demo_tour.rs` holds both the counts and that ordering
 against the enums.
 
 Size the window to 941×249 first; that is the shape the committed GIF was shot

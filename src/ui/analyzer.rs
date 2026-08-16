@@ -36,17 +36,11 @@ pub enum BarStyle {
     Half,
     /// `━` - a thin rule, the airiest ladder.
     Line,
-    /// A drawn rung with its corners cut - the shape a bar-graph LED has on a
-    /// rack unit, and the first skin that is artwork rather than arithmetic.
-    ///
-    /// There is no character for it, so a cell grid draws the plain bar and
-    /// the help panel says so. See `render::sprite`.
-    Segment,
 }
 
 impl BarStyle {
     /// How many there are, for anything that walks the cycle once.
-    pub const COUNT: usize = 7;
+    pub const COUNT: usize = 6;
 
     pub fn next(self) -> Self {
         match self {
@@ -55,8 +49,7 @@ impl BarStyle {
             BarStyle::Solid => BarStyle::Thick,
             BarStyle::Thick => BarStyle::Half,
             BarStyle::Half => BarStyle::Line,
-            BarStyle::Line => BarStyle::Segment,
-            BarStyle::Segment => BarStyle::Shade,
+            BarStyle::Line => BarStyle::Shade,
         }
     }
 
@@ -68,7 +61,6 @@ impl BarStyle {
             BarStyle::Thick => "thick",
             BarStyle::Half => "half",
             BarStyle::Line => "line",
-            BarStyle::Segment => "segment",
         }
     }
 
@@ -88,9 +80,6 @@ impl BarStyle {
             BarStyle::Thick => ladders::THICK,
             BarStyle::Half => ladders::HALF,
             BarStyle::Line => ladders::LINE,
-            // One shape clipped to the fill, because the drawing is the shape
-            // and there is no partial version of it to pick from.
-            BarStyle::Segment => rav_appearance::skin::PLAIN,
         }
     }
 
@@ -119,30 +108,18 @@ impl BarStyle {
 
     /// Glyph for a fully lit row.
     ///
-    /// `Segment` has none - it is a drawing, and a cell grid has no character
-    /// shaped like one - so it borrows the solid block. That is the honest
-    /// fall back: the same ladder rhythm, without the corners.
+    /// Every style has one, and that is the point: the six here are the block
+    /// characters a terminal draws, so the pixel surface has something to be
+    /// held against. A style with no glyph could only ever be checked against
+    /// itself. A drawing goes on top of one of these, through `--skin`.
     fn glyph(self) -> &'static str {
         match self {
-            BarStyle::Segment => BLOCKS[8],
             BarStyle::Shade => "\u{2593}",
             BarStyle::Blocks => BLOCKS[8],
             BarStyle::Solid => "\u{2587}",
             BarStyle::Thick => "\u{2586}",
             BarStyle::Half => "\u{2584}",
             BarStyle::Line => "\u{2501}",
-        }
-    }
-
-    /// The drawing this style is made of, for a surface that can rasterise one.
-    ///
-    /// Embedded rather than read from disk: a skin nobody can lose is worth
-    /// more than one anybody can replace, and user skins are a directory this
-    /// does not have yet. `None` for every ladder made of fractions.
-    pub fn artwork(self) -> Option<&'static str> {
-        match self {
-            BarStyle::Segment => Some(include_str!("../../assets/skins/segment.svg")),
-            _ => None,
         }
     }
 
@@ -940,15 +917,13 @@ mod tests {
     fn every_bar_style_labels_itself_and_cycles() {
         let mut style = BarStyle::default();
         let mut seen = vec![style.label()];
-        for _ in 0..6 {
+        for _ in 0..5 {
             style = style.next();
             seen.push(style.label());
         }
         assert_eq!(
             seen,
-            vec![
-                "blocks", "solid", "thick", "half", "line", "segment", "shade"
-            ]
+            vec!["blocks", "solid", "thick", "half", "line", "shade"]
         );
         assert_eq!(style.next(), BarStyle::Blocks, "cycles back round");
     }

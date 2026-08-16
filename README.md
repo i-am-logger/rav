@@ -73,7 +73,7 @@ Everything else is a keypress, and `h` shows the lot with their current values:
 | `q` / `Esc` | quit |
 | `Space` / `Tab` / `o` | switch analyser ↔ oscilloscope |
 | `t` | theme — rav, winamp, terminal, mono |
-| `b` | bar style — blocks, solid, thick, half, line, segment, shade |
+| `b` | bar style — blocks, solid, thick, half, line, shade |
 | `v` | viewing angle — flat, raked, turned, corridor, swaying; pixels only |
 | `p` | peak caps — fine, coarse, off |
 | `g` | grid behind the bars, on/off |

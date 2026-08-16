@@ -7,8 +7,14 @@ rav stacks it up each bar and clips the stack to the level.
 rav --skin ./segment.svg
 ```
 
-That selects the `segment` bar style, which is the one a drawing replaces. `b`
-cycles away to the ladders made of block characters and back.
+The drawing replaces the *shape of a rung*, whichever bar style is showing. `b`
+goes on cycling the six ladders underneath it, so a skin composes with a style
+rather than replacing it — wear one and press `b` to see the same drawing at each
+ladder's pitch.
+
+It is not a seventh style, deliberately. Every entry `b` offers is a block
+character a terminal draws, which is what lets the pixel surface be held against
+the text; a style with no glyph could only ever be checked against itself.
 
 ## Only the shape is used
 
@@ -56,11 +62,14 @@ than like a mistake — check it renders somewhere else first.
 The panel says so rather than leaving it a mystery. Press `h` and read the bar
 style row:
 
+The row names the style you are on — `blocks`, `line`, and so on — and adds the
+reason when the drawing is not reaching the bars:
+
 | | |
 |---|---|
-| `segment` | the drawing is on screen |
-| `segment - needs pixels` | the terminal draws block characters, which have no way to carry a picture |
-| `segment - needs a flat view` | `v` has the field at an angle; a mask cannot follow a leaning bar, so the plain ladder is drawn instead |
+| `blocks` | the drawing is on screen, worn over that ladder |
+| `blocks - needs pixels` | the terminal draws block characters, which have no way to carry a picture |
+| `blocks - needs a flat view` | `v` has the field at an angle; a mask cannot follow a leaning bar, so the plain ladder is drawn instead |
 
 ## Cost
 

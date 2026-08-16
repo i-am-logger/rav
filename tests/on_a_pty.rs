@@ -554,7 +554,7 @@ fn a_drawn_skin_reaches_the_pixel_surface_and_the_panel_says_it_is_drawn() {
     // Present at all: a panel that never opened would fail here rather than
     // pass the two below by having nothing in it to find.
     assert!(
-        panel.contains("segment"),
+        panel.contains("blocks"),
         "the panel never named the bar style, so `h` did not open it",
     );
     assert!(
@@ -578,7 +578,7 @@ fn the_panel_says_a_drawn_skin_is_not_drawn_at_an_angle() {
     let panel = what_a_reader_sees(&seen);
 
     assert!(
-        panel.contains("segment"),
+        panel.contains("blocks"),
         "the panel never named the bar style, so `h` did not open it",
     );
     assert!(

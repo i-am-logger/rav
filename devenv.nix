@@ -213,27 +213,27 @@
     # returns to the first, and leaving it out is how the tour quietly stops
     # ending where it began.
     #
-    # Four themes, seven styles and five angles. `tests/the_demo_tour.rs` counts
+    # Four themes, six styles and five angles. `tests/the_demo_tour.rs` counts
     # all three against the enums, because a view added without a press here is
     # invisible until someone looks closely at a finished GIF - which is how the
     # fifth angle went missing.
     #
+    # Six, because every style in the cycle is a block character the terminal
+    # draws and the pixel surface reproduces. A drawing is `--skin ./file.svg`,
+    # which wears itself over whichever style is showing rather than being a
+    # style of its own.
+    #
     # The styles run before the angles because the field is flat there, which is
-    # where a rung reads most clearly - and because `segment` is a mask, which
-    # cannot follow a leaning bar. rav opens on `blocks`, and the cycle from
-    # there is solid, thick, half, line, segment, shade, blocks: `segment` is
-    # the fifth press and the seventh comes home.
+    # where a rung reads most clearly. rav opens on `blocks`, and the cycle from
+    # there is solid, thick, half, line, shade, blocks - so the sixth press is
+    # what comes home.
     #
     # The angles are the reason the terminal matters. `v` does nothing on block
     # characters and the panel says `needs pixels`, so a recording made in a
     # terminal that cannot draw images spends ten seconds on a key that is
-    # refusing. `segment` is artwork rather than a ladder of fractions - it is
-    # `assets/skins/segment.svg` - so a cell grid draws the plain bar for it.
-    # That press is still the loudest in the cycle, because the plain bar is
-    # nothing like the `line` stroke before it; what is lost is the artwork,
-    # not the change.
+    # refusing.
     # Record in WezTerm, Ghostty or kitty.
-    TOUR="''${RAV_DEMO_TOUR:-3:t 3:t 3:t 3:t 2:b 2:b 2:b 2:b 2:b 2:b 2:b 2:v 2:v 2:v 2:v 2:v 1:space 4:space 1:h 4:h 2:-}"
+    TOUR="''${RAV_DEMO_TOUR:-3:t 3:t 3:t 3:t 2:b 2:b 2:b 2:b 2:b 2:b 2:v 2:v 2:v 2:v 2:v 1:space 4:space 1:h 4:h 2:-}"
     # Total duration is the sum of the tour's holds, so the two never drift.
     # SETTLE covers the second avfoundation spends opening the capture device -
     # without it the first key lands before filming starts and that segment is
