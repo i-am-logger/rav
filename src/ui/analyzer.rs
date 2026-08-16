@@ -455,8 +455,25 @@ impl Widget for Analyzer<'_> {
                     // Symbol and foreground only, so whatever background the grid
                     // pass established for this column stays and a cap or a
                     // partial block never differs from the cells around it.
+                    //
+                    // Except where the cap lands on a row the bar itself
+                    // reaches. A cell holds one glyph, so the cap's would
+                    // replace the bar's and that row lost its colour - "the top
+                    // bar always have only the peak and no color with it". It
+                    // only happens at full scale: below that the cap is lifted
+                    // to the first *unlit* row above, where there is no bar to
+                    // hide. So the row's own colour becomes the background and
+                    // the cap sits on top of it, which is what a cell can do
+                    // that a single glyph cannot.
+                    //
+                    // Keyed off `lit` rather than the row index, so a cap
+                    // floating above a falling bar never paints colour under
+                    // itself and makes the bar read taller than it is.
                     if let Some((_, glyph)) = cap.filter(|(a, _)| *a == r) {
-                        buf[at].set_symbol(glyph).set_fg(to_color(self.cap_color));
+                        let cell = buf[at].set_symbol(glyph).set_fg(to_color(self.cap_color));
+                        if lit {
+                            cell.set_bg(row_color(r));
+                        }
                     } else if lit {
                         let glyph = if r < full {
                             self.bar_style.glyph()
@@ -584,6 +601,46 @@ mod tests {
         }
         .render(area, &mut buf);
         buf
+    }
+
+    #[test]
+    fn a_cap_on_the_bars_own_row_keeps_that_rows_colour_behind_it() {
+        // Reported as "the top bar always have only the peak and no color with
+        // it, so the color there needs to be the bg with the peak on top". A
+        // cell holds one glyph, so at full scale the cap's glyph replaced the
+        // bar's and the row went colourless.
+        let buf = render(&[1.0], &[1.0], 1, 8, false);
+        let top = &buf[(0, 0)];
+        let colours = row_colors(8, &Theme::default());
+        let want = to_color(colours[7]);
+
+        assert_eq!(
+            top.bg, want,
+            "the top row lost its colour under the cap: bg {:?}, wanted {want:?}",
+            top.bg,
+        );
+        assert_eq!(
+            top.fg,
+            to_color(Theme::default().peak),
+            "the cap is still drawn on top",
+        );
+    }
+
+    #[test]
+    fn a_cap_floating_above_a_falling_bar_paints_no_colour_under_itself() {
+        // The other half, and the reason this is keyed off whether the row is
+        // lit rather than off the row index. A cap hangs above the bar while
+        // the bar falls away; colour behind it there would read as bar and
+        // make the column look taller than the signal is.
+        let buf = render(&[0.25], &[1.0], 1, 8, false);
+        let top = &buf[(0, 0)];
+
+        assert_eq!(
+            top.bg,
+            Color::Reset,
+            "a cap above the bar painted colour under itself",
+        );
+        assert_ne!(top.symbol(), " ", "the cap is still drawn");
     }
 
     #[test]
