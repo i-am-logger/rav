@@ -984,11 +984,17 @@ mod looking {
                 caps: Some(Length(4.0)),
                 ladder: Some((rav_appearance::skin::ladders::BLOCKS, Length(24.0))),
             };
-            let rgba = Frame::new(&levels, &peaks, &look, layout, screen)
-                .pixels()
-                .unwrap();
+            // Through the canvas rather than through `pixels()`, because
+            // `pixels()` hands back *straight* alpha - that is what a terminal
+            // wants, and it is what `Canvas::to_rgba` demultiplies to - while
+            // `Pixmap::from_vec` expects premultiplied. Feeding one to the
+            // other writes every translucent pixel too bright: the backdrop is
+            // translucent, and so is every antialiased edge, so an A/B judged
+            // from these was judged from a picture rav never drew.
+            let mut canvas = Canvas::for_screen(&screen).unwrap();
+            Frame::new(&levels, &peaks, &look, layout, screen).painted_onto(&mut canvas);
             let size = tiny_skia::IntSize::from_wh(wide as u32, tall as u32).unwrap();
-            tiny_skia::Pixmap::from_vec(rgba, size)
+            tiny_skia::Pixmap::from_vec(canvas.premultiplied().to_vec(), size)
                 .unwrap()
                 .save_png(format!("{into}/skin-{name}.png"))
                 .unwrap();
