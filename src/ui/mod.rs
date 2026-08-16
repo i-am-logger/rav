@@ -135,6 +135,23 @@ pub enum Action {
 /// display that cannot be stopped with the reflex everyone has is one people
 /// end up killing from another window - and on the pixel surface that leaves
 /// the images up over their shell, because none of the teardown runs.
+/// How thick a peak cap is drawn on a pixel surface.
+///
+/// One eighth of a cell, because that is what the glyph renderer draws:
+/// `CAP_LOW` is `▁`, the lower one-eighth block. The two surfaces are meant to
+/// be the same picture at the same size - the ladder already is, sized at a
+/// rung per cell - and the cap was the one part that was not.
+///
+/// **A function of the cell, never of the screen.** It used to be
+/// `screen.height() / 16.0`: one row of the sixteen the original panel had,
+/// which is right for a sixteen-row display and wrong for a terminal. On 80x24
+/// with 30x60 cells that is 90 device pixels - one and a half cells - against
+/// the 7.5 a `▁` occupies. Twelve times too thick, and it grew with the window
+/// rather than with the text, so the taller the terminal the worse it read.
+fn cap_thickness(cell: rav_core::units::CellSize) -> rav_core::units::Length {
+    cell.down(rav_core::units::Cells(1)) / 8.0
+}
+
 pub fn map_press(key: KeyEvent) -> Action {
     if key.modifiers.contains(KeyModifiers::CONTROL)
         && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('C'))
@@ -621,9 +638,7 @@ impl App {
             theme: &self.theme,
             palette: &self.palette,
             backdrop: self.show_grid,
-            // One row of the sixteen the original panel had, which is the
-            // proportion its caps were drawn at.
-            caps: (self.peaks != Peaks::Off).then(|| screen.height() / 16.0),
+            caps: (self.peaks != Peaks::Off).then(|| cap_thickness(cell)),
             // A rung is a cell tall, so the ladder lines up with what the glyph
             // renderer draws at the same size - the two are meant to be the
             // same picture, and a ladder on its own pitch would not be.
@@ -1589,6 +1604,39 @@ mod tests {
 
     fn app() -> App {
         App::new(Config::default(), 2, 48_000).expect("app should build")
+    }
+
+    #[test]
+    fn a_pixel_cap_is_as_thick_as_the_one_the_text_draws() {
+        use rav_core::units::CellSize;
+
+        // The glyph renderer draws a cap as `▁`, the lower one-eighth block, so
+        // on a 60-pixel cell it is 7.5 pixels. The two surfaces are meant to be
+        // the same picture at the same size.
+        let cell = CellSize {
+            width: 30,
+            height: 60,
+        };
+        assert_eq!(cap_thickness(cell).get(), 7.5);
+
+        // And the bug this replaced: `screen.height() / 16.0` grew the cap with
+        // the window instead of with the text. At 80x24 that was 1440/16 = 90
+        // pixels - one and a half cells, twelve times too thick - and taller
+        // terminals made it worse. A cap is a function of the cell, so the same
+        // cell must give the same cap whatever the screen around it is.
+        let tall = CellSize {
+            width: 30,
+            height: 60,
+        };
+        assert_eq!(
+            cap_thickness(tall).get(),
+            cap_thickness(cell).get(),
+            "the cap moved with something other than the cell",
+        );
+        assert!(
+            cap_thickness(cell).get() < 60.0 / 4.0,
+            "a cap that is a quarter of a cell or more reads as a slab, not a mark",
+        );
     }
 
     /// One channel, so a generated signal reaches the window unaltered.
