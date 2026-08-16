@@ -150,20 +150,33 @@ font8x8 = { version = "0.3.1", default-features = false, features = ["unicode"],
 # on, and that is the only place they belong.
 [features]
 gui = ["dep:winit", "dep:softbuffer", "dep:font8x8"]
+# The two development binaries below, kept off `cargo install`. A feature with
+# no dependencies, because what it gates is targets rather than code.
+dev-tools = []
 
 [[bin]]
 name = "rav"
 path = "src/main.rs"
 
+# Both of these are development tools, and `required-features` is what keeps
+# them out of a user's PATH. `cargo install rav` builds the default feature set
+# and skips a target whose features are not on, so the only thing installed is
+# rav. Without it all three went out, and `kitty_spike` in particular is a
+# measurement that predates the renderer rather than anything to run.
+#
+# Run them with `--features dev-tools`, which is what the devenv script and the
+# flake app both do.
 [[bin]]
 name = "test_audio_pipeline"
 path = "src/bin/test_audio_pipeline.rs"
+required-features = ["dev-tools"]
 
 # Measures whether a terminal can carry rav's frames as pixels, ahead of the
 # renderer that would depend on it. See issue #65.
 [[bin]]
 name = "kitty_spike"
 path = "src/bin/kitty_spike.rs"
+required-features = ["dev-tools"]
 
 [profile.release]
 lto = true

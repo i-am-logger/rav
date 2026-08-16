@@ -171,7 +171,7 @@
     echo "🧪 Testing audio pipeline functionality..."
     echo "This will validate that audio capture and processing work correctly"
     echo ""
-    cargo run --bin test_audio_pipeline
+    cargo run --features dev-tools --bin test_audio_pipeline
   '';
 
   # Reproduces README.md's assets/demo.gif: screen-record a running rav window
