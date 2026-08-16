@@ -86,3 +86,31 @@ so `Space` takes the picture down and the panel goes back to saying *would*.
 Switching back brings it up again - and `v`, the viewing angle, reads
 `needs pixels` for as long as either of those is true, rather than moving a
 setting nothing is drawing.
+
+## `cargo run` fails to link after building with a different feature set
+
+```
+Undefined symbols for architecture arm64:
+  "__RINvNtCs..4core3ptr9drop_glue..PanicHookInfo..",
+    referenced from: ..rav2uiNtB5_13TerminalGuard17take_the_terminal..
+ld: symbol(s) not found
+```
+
+Nothing is wrong with the source. This is incremental compilation reusing a
+`librav` built under different features, and the drop glue for the panic hook's
+`Box<dyn Fn>` goes missing from the reused unit.
+
+Either of these clears it:
+
+```sh
+cargo clean -p rav        # then build as usual
+CARGO_INCREMENTAL=0 cargo run
+```
+
+**What triggers it is switching feature sets**, not any particular one.
+Measured on `rav-v1.0.0-beta.13`: `cargo build` succeeds, `cargo build
+--features gui` immediately after fails, and running that same command a second
+time succeeds. `CARGO_INCREMENTAL=0` builds it first time. So it turns up when
+you have been alternating between a plain build and `--features gui` or
+`--features dev-tools` - which is exactly what working on the window or the
+development binaries looks like.
