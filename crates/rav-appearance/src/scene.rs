@@ -334,6 +334,28 @@ pub struct CapStyle {
 }
 
 impl Scene<'_> {
+    /// The height the colour ramp is spread over.
+    ///
+    /// The screen's, less one rung wherever a cap is drawn. With caps on the
+    /// top rung belongs to the cap - a bar at full scale is covered there - so
+    /// spreading the ramp over the whole screen puts its last stop on ground no
+    /// bar is ever seen on, and the display tops out one colour short.
+    ///
+    /// This is the glyph renderer's own rule in the units a pixel surface
+    /// measures in: `App::resize` has reserved that row since caps existed.
+    ///
+    /// A style with no ladder has no rung to reserve, so it keeps the whole
+    /// height - a strip of lights has no cap row to give up.
+    pub fn ramp_over(&self) -> Length {
+        let reserved = self
+            .styles
+            .iter()
+            .filter(|style| style.cap.is_some())
+            .filter_map(|style| style.ladder.map(|(_, rung)| rung.get()))
+            .fold(0.0f32, f32::max);
+        Length((self.screen.height().get() - reserved).max(0.0))
+    }
+
     /// How many bands are actually drawn.
     ///
     /// The glyph renderer's rule, taken verbatim: the lesser of what fits and

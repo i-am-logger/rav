@@ -248,7 +248,7 @@ impl Canvas {
         bars: &[Rectangle],
         rung: Length,
         ramp: &Ramp,
-        screen: &Screen,
+        over: Length,
     ) -> bool {
         // No drawing, no drawn ladder - even if one is still stamped from the
         // style before this one.
@@ -290,7 +290,7 @@ impl Canvas {
             return false;
         };
 
-        for stripe in ramp.stripes(screen.height()) {
+        for stripe in ramp.stripes(over) {
             let mut paint = Paint::default();
             let colour = stripe.colour;
             paint.set_color_rgba8(colour.red, colour.green, colour.blue, colour.alpha);
@@ -317,8 +317,8 @@ impl Canvas {
     ///
     /// Stripe by stripe rather than row by row, so the cost is the number of
     /// stops and not the height of the rectangle.
-    pub fn fill_ramped(&mut self, area: Rectangle, ramp: &Ramp, screen: &Screen) {
-        self.fill_ramped_at(area, ramp, screen, 1.0);
+    pub fn fill_ramped(&mut self, area: Rectangle, ramp: &Ramp, over: Length) {
+        self.fill_ramped_at(area, ramp, over, 1.0);
     }
 
     /// The same, at a flat opacity over whatever the ramp gives.
@@ -327,8 +327,8 @@ impl Canvas {
     /// scaling the ramp's own alpha is how that reaches a surface with no
     /// glyph to carry it - the colour still comes from the height, so the bar
     /// still reddens as it rises, just fainter all the way up.
-    pub fn fill_ramped_at(&mut self, area: Rectangle, ramp: &Ramp, screen: &Screen, opacity: f32) {
-        self.fill_many_ramped_at(&[area], ramp, screen, opacity);
+    pub fn fill_ramped_at(&mut self, area: Rectangle, ramp: &Ramp, over: Length, opacity: f32) {
+        self.fill_many_ramped_at(&[area], ramp, over, opacity);
     }
 
     /// Several rectangles through the same ramp, one fill per colour instead of
@@ -343,14 +343,14 @@ impl Canvas {
         &mut self,
         areas: &[Rectangle],
         ramp: &Ramp,
-        screen: &Screen,
+        over: Length,
         opacity: f32,
     ) {
         let opacity = opacity.clamp(0.0, 1.0);
         // Reused down the stripes rather than allocated per stripe: this runs
         // once per band per frame at sixty frames a second.
         let mut pieces: Vec<Rectangle> = Vec::with_capacity(areas.len());
-        for stripe in ramp.stripes(screen.height()) {
+        for stripe in ramp.stripes(over) {
             pieces.clear();
             pieces.extend(areas.iter().filter_map(|area| stripe.clip(*area)));
             if pieces.is_empty() {
@@ -410,6 +410,20 @@ impl Draw for Scene<'_> {
         canvas.clear();
         let drawable = self.visible_bands();
         let screen = &self.screen;
+        // The height the colour ramp is spread over, which is not the screen's
+        // whenever a cap is drawn.
+        //
+        // With caps on the top rung belongs to the cap: a bar at full scale is
+        // covered there, so the ramp's last stop would land where nothing is
+        // ever seen and the display would top out one colour short - orange
+        // instead of red. The glyph renderer has reserved that row since it had
+        // caps (`App::resize`); this is the same reservation, in the same units
+        // the ramp is measured in.
+        //
+        // Without it the two surfaces disagree about colour on ten of
+        // twenty-four rows, all in the upper half, with the pixel ramp lagging a
+        // stop from the middle up.
+        let over = self.ramp_over();
 
         // Computed once: it costs a rotation and a projection of the field's own
         // corners, and it is the same for every band. Only the depth differs.
@@ -441,7 +455,7 @@ impl Draw for Scene<'_> {
             if let Some(grid) = self.style_of(band).and_then(|style| style.grid) {
                 let area = self.layout.column(index).backdrop(screen);
                 canvas.antialias(!angled);
-                canvas.fill_ramped(area, grid, screen);
+                canvas.fill_ramped(area, grid, over);
                 canvas.antialias(true);
             }
         };
@@ -450,8 +464,8 @@ impl Draw for Scene<'_> {
             if let Some(style) = self.style_of(band) {
                 let area = self.layout.column(index).bar(band.level, screen);
                 match style.ladder {
-                    Some((skin, rung)) => draw_ladder(canvas, area, skin, rung, style.bars, screen),
-                    None => canvas.fill_ramped(area, style.bars, screen),
+                    Some((skin, rung)) => draw_ladder(canvas, area, skin, rung, style.bars, over),
+                    None => canvas.fill_ramped(area, style.bars, over),
                 }
             }
         };
@@ -516,7 +530,7 @@ impl Draw for Scene<'_> {
                         .map(|&index| self.layout.column(index).backdrop(screen)),
                 );
                 canvas.antialias(!angled);
-                canvas.fill_many_ramped_at(&areas, grid, screen, 1.0);
+                canvas.fill_many_ramped_at(&areas, grid, over, 1.0);
                 canvas.antialias(true);
             }
         }
@@ -538,7 +552,7 @@ impl Draw for Scene<'_> {
                             .column(index)
                             .bar(self.bands[index].level, screen)
                     }));
-                    draw_ladders(canvas, &areas, skin, rung, style.bars, screen);
+                    draw_ladders(canvas, &areas, skin, rung, style.bars, over);
                 }
                 None => {
                     areas.clear();
@@ -547,7 +561,7 @@ impl Draw for Scene<'_> {
                             .column(index)
                             .bar(self.bands[index].level, screen)
                     }));
-                    canvas.fill_many_ramped_at(&areas, style.bars, screen, 1.0);
+                    canvas.fill_many_ramped_at(&areas, style.bars, over, 1.0);
                 }
             }
         }
@@ -584,16 +598,16 @@ fn draw_ladders(
     skin: rav_appearance::Skin,
     rung: Length,
     ramp: &Ramp,
-    screen: &Screen,
+    over: Length,
 ) {
     if rung.get() <= 0.0 {
-        canvas.fill_many_ramped_at(bars, ramp, screen, 1.0);
+        canvas.fill_many_ramped_at(bars, ramp, over, 1.0);
         return;
     }
     // A drawn skin, if the surface has the picture and can use it. It declines
     // for a size it was not drawn at and under any transform, and then the
     // fractions below draw the ladder they always drew.
-    if canvas.fill_through_ladder(bars, rung, ramp, screen) {
+    if canvas.fill_through_ladder(bars, rung, ramp, over) {
         return;
     }
     let shape = skin.rung;
@@ -626,9 +640,9 @@ fn draw_ladders(
             continue;
         }
         if shape.opacity >= 1.0 {
-            canvas.fill_many_ramped_at(&row, ramp, screen, 1.0);
+            canvas.fill_many_ramped_at(&row, ramp, over, 1.0);
         } else {
-            canvas.fill_many_ramped_at(&row, ramp, screen, shape.opacity);
+            canvas.fill_many_ramped_at(&row, ramp, over, shape.opacity);
         }
     }
 }
@@ -649,13 +663,13 @@ fn draw_ladder(
     skin: rav_appearance::Skin,
     rung: Length,
     ramp: &Ramp,
-    screen: &Screen,
+    over: Length,
 ) {
     // A rung with no height is a division by zero waiting to happen, and a
     // screen mid-resize produces one. One shape is the honest fallback: it is
     // what the ladder collapses to when there is no room for rungs.
     if rung.get() <= 0.0 || bar.height().get() <= 0.0 {
-        canvas.fill_ramped(bar, ramp, screen);
+        canvas.fill_ramped(bar, ramp, over);
         return;
     }
 
@@ -679,9 +693,9 @@ fn draw_ladder(
         if bottom > top {
             let piece = Rectangle::new(bar.left(), top, bar.width(), bottom - top);
             if shape.opacity >= 1.0 {
-                canvas.fill_ramped(piece, ramp, screen);
+                canvas.fill_ramped(piece, ramp, over);
             } else {
-                canvas.fill_ramped_at(piece, ramp, screen, shape.opacity);
+                canvas.fill_ramped_at(piece, ramp, over, shape.opacity);
             }
         }
 
@@ -954,6 +968,66 @@ mod tests {
                     "rows {rows} row {row}: terminal {terminal}, pixel {pixel}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn with_caps_on_the_two_surfaces_still_agree_about_colour() {
+        // The test above passes the same `rows` to both, which is the one thing
+        // that cannot be assumed: with caps on the glyph renderer spreads its
+        // ramp over `height - 1`, because the top row belongs to the cap and a
+        // bar at full scale is covered there. `App::resize` has done that since
+        // caps existed.
+        //
+        // The pixel surface spread its ramp over the whole screen, so it lagged
+        // a stop from the middle of the display up - the glyph's red covering
+        // the top two rows of twenty-four where the pixel's covered less than
+        // one. `Scene::ramp_over` is the same reservation in the units a pixel
+        // surface measures in, and this is what says so.
+        //
+        // Fails on ten of twenty-four rows without it, which is the number worth
+        // knowing: it is not a rounding residue, it is half the upper display.
+        use crate::ui::scale::ramp_index;
+        let stops: Vec<Colour> = (0..16).map(|i| Colour::rgb(i as u8, 0, 0)).collect();
+        let ramp = Ramp::new(stops);
+
+        // Asserted as the symptom rather than as a tolerance. A one-stop bound
+        // cannot catch this: the disagreement *is* one stop, on ten rows of
+        // twenty-four, so a test that permits one stop permits the whole defect.
+        // The thing that actually goes wrong is that the display stops short of
+        // red, which is what was reported - "green yellow and 2 oranges rather
+        // then orange and red".
+        //
+        // From 17, so the glyph's own ramp is still 16 rows or more. Below that
+        // it applies `SUBSAMPLE_SKEW` to climb out of the green block early and
+        // the pixel surface has no counterpart - a separate difference, and
+        // folding it in here would read as this one failing.
+        for rows in 17u16..=200 {
+            // What each spreads its ramp over when a cap is drawn: the glyph
+            // gives up its top row, the pixel surface its top rung, and a rung
+            // is a row.
+            let glyph_rows = rows - 1;
+            let cell = 1.0 / rows as f32;
+            let reserved = Length(1.0 - cell);
+
+            // The topmost row a bar can actually be seen on - the one under the
+            // cap - has to be the last stop on both.
+            let top = glyph_rows - 1;
+            let terminal = ramp_index(top, glyph_rows, 16) as i32;
+            let centre = Length((top as f32 + 0.5) * cell);
+            let pixel = ramp.at(centre, reserved).red as i32;
+
+            assert_eq!(
+                terminal, 15,
+                "rows {rows}: the glyph ramp no longer reaches its last stop",
+            );
+            assert_eq!(
+                pixel, terminal,
+                "rows {rows}: the top row a bar can reach is stop {pixel} on \
+                 pixels and {terminal} in text - the pixel ramp is spread over \
+                 the whole screen instead of reserving the cap's row, so the \
+                 display tops out a colour short",
+            );
         }
     }
 
