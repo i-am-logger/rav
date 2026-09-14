@@ -15,7 +15,7 @@ categories = ["multimedia::audio", "no-std", "visualization"]
 # or an ESP32 with a screen would work and not look like rav.
 [build-dependencies]
 # Build time only: the generated consts carry no parser onto the target.
-toml = "0.8"
+toml = "1.1"
 
 [dependencies]
 rav-core = { workspace = true }
